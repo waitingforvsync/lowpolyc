@@ -1,5 +1,11 @@
 {
-    // One build directory per variant (build/Debug, build/Wasm, ...), so
+    // One build directory per variant (build/debug, build/wasm, ...), so
     // switching to Wasm never reuses a native build tree
-    "cmake.buildDirectory": "${workspaceFolder}/build/${variant:buildType}"
+    "cmake.buildDirectory": "${workspaceFolder}/build/${variant:buildType}",
+
+    // clang treats __FLT_EVAL_METHOD__ as a builtin, so it never appears in
+    // `clang -dM -E` and IntelliSense never learns it. Defined here for
+    // IntelliSense only; merged with the flags CMake Tools supplies.
+    "C_Cpp.default.defines": ["__FLT_EVAL_METHOD__=0"],
+    "C_Cpp.default.mergeConfigurations": true
 }
