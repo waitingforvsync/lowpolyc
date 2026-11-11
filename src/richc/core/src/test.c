@@ -111,7 +111,7 @@ void rc_test_check_int(int64_t actual, const char *op, int64_t expected, const c
 }
 
 
-void rc_test_check_float(double actual, const char *op, double expected, const char *expr, const char *file, int line)
+void rc_test_check_f64(double actual, const char *op, double expected, const char *expr, const char *file, int line)
 {
     bool pass = false;
 
@@ -145,6 +145,13 @@ void rc_test_check_float(double actual, const char *op, double expected, const c
     }
     printf("[FAIL]\n%s:%d: %s: actual %f\n", file, line, expr, actual);
     rc_test_fail();
+}
+
+
+// Widened explicitly, so a float check does not trip -Wdouble-promotion.
+void rc_test_check_f32(float actual, const char *op, float expected, const char *expr, const char *file, int line)
+{
+    rc_test_check_f64((double)actual, op, (double)expected, expr, file, line);
 }
 
 

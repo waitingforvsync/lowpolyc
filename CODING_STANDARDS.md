@@ -234,6 +234,10 @@ core. Nothing outside the platform backends knows which target it is running on.
   implemented by `src/platform/posix/heap.c` and its siblings). The build
   compiles one target's directory. No vtables and no runtime dispatch, the
   same rule the gfx backends follow.
+- The app layer follows the same pattern, but names its targets by windowing
+  system, since macOS is POSIX but not X11: `src/platform/x11/app.c` and
+  `src/platform/wasm/app.c` both implement `rc_app_run` from `app.h`. The X11
+  backend links libX11 (on Ubuntu, the headers are in `libx11-dev`).
 - Target `#if`s appear only in the platform backends, `richc/macros.h` and
   the (native-only) test framework.
 - The native backends call the OS API (Win32, or POSIX on Linux and macOS). No
