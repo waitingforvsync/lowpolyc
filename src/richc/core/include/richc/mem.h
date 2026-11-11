@@ -1,7 +1,7 @@
 // mem.h
 //
-// Raw memory copy, move, fill and compare. On wasm32 the first three become
-// single memory.copy / memory.fill instructions.
+// Raw memory copy, move, fill and compare. On wasm32 the first three become single memory.copy /
+// memory.fill instructions.
 
 #ifndef RC_MEM_H_
 #define RC_MEM_H_

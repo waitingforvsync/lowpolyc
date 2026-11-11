@@ -1,6 +1,11 @@
-# wasm32.cmake - toolchain file for freestanding wasm32 with clang: no WASI, no
-# emscripten, no libc. Use with:
+# wasm32.cmake
+# 
+# Toolchain file for freestanding wasm32 with clang: no WASI, no
+# emscripten, no libc.
+#
+# Use with:
 #   cmake -B build-wasm -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake
+#
 # Linking needs LLVM's wasm-ld beside clang (on Ubuntu: the lld-21 package).
 
 set(CMAKE_SYSTEM_NAME Generic)

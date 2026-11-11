@@ -1,7 +1,7 @@
 // editor.h
 //
-// The mesh editor's top level. A stub for now: it links with richc and does
-// nothing else. Each target's main.c calls editor_run.
+// The mesh editor's top level. A stub for now: it links with richc and does nothing else. Each
+// target's main.c calls editor_run.
 
 #ifndef LOWPOLY_EDITOR_H_
 #define LOWPOLY_EDITOR_H_

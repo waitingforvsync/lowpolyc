@@ -1,7 +1,7 @@
 // main.c
 //
-// The native entry point. When built with LOWPOLY_TESTS, `lowpoly --test
-// [filter]` runs the tests compiled into the executable instead of the editor.
+// The native entry point. When built with LOWPOLY_TESTS, `lowpoly --test [filter]` runs the tests
+// compiled into the executable instead of the editor.
 
 #include "editor.h"
 

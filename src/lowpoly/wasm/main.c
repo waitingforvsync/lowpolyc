@@ -1,7 +1,7 @@
 // main.c
 //
-// The wasm entry point. There is no main on wasm32: the page's script
-// (web/lowpoly.js) calls start once the module has loaded.
+// The wasm entry point. There is no main on wasm32: the page's script (web/lowpoly.js) calls start
+// once the module has loaded.
 
 #include "editor.h"
 

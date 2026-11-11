@@ -2,9 +2,9 @@
 //
 // Tests for the chunked arena.
 //
-// The runner gives each test a fresh page heap, so with the pool empty every
-// chunk an arena makes is new at the end of the heap. A "blocker" arena made
-// after another stops that one's chunk from growing in place.
+// The runner gives each test a fresh page heap, so with the pool empty every chunk an arena makes
+// is new at the end of the heap. A "blocker" arena made after another stops that one's chunk from
+// growing in place.
 
 #include "richc/arena.h"
 
@@ -280,34 +280,6 @@ RC_TEST_STEP(arena, alloc_zero, fix)
     RC_CHECK_TRUE(q == p);   // same memory, reused
     for (uint32_t i = 0; i < 64; i++) {
         RC_CHECK(q[i], ==, (uint8_t)0);
-    }
-}
-
-
-RC_TEST_STEP(arena, alloc_type, fix)
-{
-    int32_t *p = rc_arena_alloc_type(&fix->a, int32_t, 10);
-
-    for (int32_t i = 0; i < 10; i++) {
-        p[i] = i * 3;
-    }
-    for (int32_t i = 0; i < 10; i++) {
-        RC_CHECK(p[i], ==, i * 3);
-    }
-}
-
-
-RC_TEST_STEP(arena, alloc_zero_type, fix)
-{
-    uint8_t *dirty = rc_arena_alloc(&fix->a, sizeof(int32_t) * 8);
-
-    fill(dirty, sizeof(int32_t) * 8, 0xFF);
-    rc_arena_free(&fix->a, dirty, sizeof(int32_t) * 8);
-
-    int32_t *p = rc_arena_alloc_zero_type(&fix->a, int32_t, 8);
-    RC_CHECK_TRUE((uint8_t *)p == dirty);
-    for (int32_t i = 0; i < 8; i++) {
-        RC_CHECK(p[i], ==, 0);
     }
 }
 
@@ -648,8 +620,8 @@ RC_TEST_STEP(arena, scratch_reuses_caller_memory, fix)
 
 RC_TEST_STEP(arena, scratch_spill_is_reused_by_caller, fix)
 {
-    // Whether the scratch grew our chunk or linked a new one after it, the
-    // caller's next allocation of the same size lands where the scratch's did
+    // Whether the scratch grew our chunk or linked a new one after it, the caller's next allocation
+    // of the same size lands where the scratch's did
     uint8_t *s = scratch_alloc(fix->a, 2 * PAGE);
     uint8_t *p = rc_arena_alloc(&fix->a, 2 * PAGE);
 

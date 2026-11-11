@@ -3,6 +3,8 @@
 add_executable(richc_core_test
     main.c
     test_arena.c
+    test_mstr.c
+    test_str.c
 )
 
 target_link_libraries(richc_core_test PRIVATE richc_test)

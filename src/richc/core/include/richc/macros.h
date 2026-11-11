@@ -1,7 +1,6 @@
 // macros.h
 //
-// The base of everything: compiler shims, target assumptions, token helpers and
-// the assertion macros.
+// The base of everything: compiler shims, target assumptions, token helpers and assertions.
 
 #ifndef RC_MACROS_H_
 #define RC_MACROS_H_
@@ -14,8 +13,8 @@
 
 // ---- compile-time checks ----
 
-// A compile-time RC_ASSERT. C17 needs a message, so the condition is its own.
-// (static_assert itself lives in <assert.h>, which wasm32 does not have.)
+// A compile-time RC_ASSERT. C17 needs a message, so the condition is its own. (static_assert itself
+// lives in <assert.h>, which wasm32 does not have.)
 #define RC_STATIC_ASSERT(cond) _Static_assert(cond, #cond)
 
 // ---- target assumptions ----
@@ -24,9 +23,8 @@
 // FLT_EVAL_METHOD comes from <float.h>.
 RC_STATIC_ASSERT(FLT_EVAL_METHOD == 0);
 
-// Little-endian everywhere; we say so here rather than assume it silently.
-// __BYTE_ORDER__ is predefined by clang and gcc; MSVC has no equivalent, but
-// every MSVC target is little-endian.
+// Little-endian everywhere; we say so here rather than assume it silently. __BYTE_ORDER__ is
+// predefined by clang and gcc; MSVC has no equivalent, but every MSVC target is little-endian.
 #if defined(__BYTE_ORDER__)
 RC_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 #endif
@@ -68,8 +66,8 @@ RC_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 
 // ---- assertions ----
 
-// Internal precondition: traps in debug, evaluated and discarded in release.
-// An expression, so it can sit on the left of a comma: *(RC_ASSERT(i < n), p + i)
+// Internal precondition: traps in debug, evaluated and discarded in release. An expression, so it
+// can sit on the left of a comma: *(RC_ASSERT(i < n), p + i)
 #ifndef NDEBUG
 #  define RC_ASSERT(cond) ((cond) ? (void)0 : (RC_DEBUG_BREAK_(), (void)0))
 #else

@@ -2,8 +2,8 @@
 //
 // richc's unit-test framework. Native only: it is never built for wasm.
 //
-// Tests register themselves by dropping a descriptor pointer into a dedicated
-// linker section, which rc_test_run walks, so there is no list to maintain.
+// Tests register themselves by dropping a descriptor pointer into a dedicated linker section, which
+// rc_test_run walks, so there is no list to maintain.
 //
 //   RC_TEST(group, name) { ... }                a plain test
 //   RC_TEST_SKIP(group, name) { ... }           registered but reported as skipped
@@ -14,19 +14,19 @@
 //   RC_TEST_STEP_SKIP(group, name, fix) { ... } a fixtured test, not run
 //
 //   RC_CHECK(a, op, b)   a op b, with op one of == != < > <= >= (and ~= for
-//                        floats, a fixed-epsilon compare); a's type picks the check
+//                        floats, a fixed-epsilon compare; only == != for
+//                        rc_str); a's type picks the check
 //   RC_CHECK_TRUE(a), RC_CHECK_FALSE(a)
 //
 // A failing check prints file:line and the actual value, then abandons the test.
 //
-// Each test runs between rc_arena_init and rc_arena_deinit, so it starts with an
-// empty page heap and an empty chunk pool, whatever ran before it.
+// Each test runs between rc_arena_init and rc_arena_deinit, so it starts with an empty page heap
+// and an empty chunk pool, whatever ran before it.
 
 #ifndef RC_TEST_H_
 #define RC_TEST_H_
 
-#include <stdbool.h>
-#include <stdint.h>
+#include "richc/str.h"
 
 // ---- linker-section placement ----
 
@@ -156,8 +156,8 @@ typedef struct rc_test {
 #define RC_CHECK_TRUE(a)    RC_CHECK_IMPL_(!!(a), ==, true, __FILE__, __LINE__)
 #define RC_CHECK_FALSE(a)   RC_CHECK_IMPL_(!(a), ==, true, __FILE__, __LINE__)
 
-// The fixed-width entries also cover plain int / unsigned literals. No long or
-// char entries: on LP64 int64_t is long, which would make _Generic ambiguous.
+// The fixed-width entries also cover plain int / unsigned literals. No long or char entries: on
+// LP64 int64_t is long, which would make _Generic ambiguous.
 #define RC_CHECK_IMPL_(a, op, b, file, line) \
     _Generic((a), \
         bool: rc_test_check_bool, \
@@ -170,13 +170,15 @@ typedef struct rc_test {
         int64_t: rc_test_check_int, \
         uint64_t: rc_test_check_int, \
         float: rc_test_check_float, \
-        double: rc_test_check_float \
+        double: rc_test_check_float, \
+        rc_str: rc_test_check_str \
     )(a, #op, b, #a " " #op " " #b, file, line)
 
 // Check functions behind RC_CHECK, one per operand type.
 void rc_test_check_bool(bool actual, const char *op, bool expected, const char *expr, const char *file, int line);
 void rc_test_check_int(int64_t actual, const char *op, int64_t expected, const char *expr, const char *file, int line);
 void rc_test_check_float(double actual, const char *op, double expected, const char *expr, const char *file, int line);
+void rc_test_check_str(rc_str actual, const char *op, rc_str expected, const char *expr, const char *file, int line);
 
 // ---- running ----
 

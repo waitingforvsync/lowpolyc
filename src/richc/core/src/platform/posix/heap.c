@@ -1,7 +1,7 @@
 // heap.c
 //
-// Linux and macOS. The page heap is one large reservation of address space,
-// committed a run of pages at a time as it grows.
+// Linux and macOS. The page heap is one large reservation of address space, committed a run of
+// pages at a time as it grows.
 
 // MAP_ANONYMOUS is a glibc extension under a strict -std
 #define _DEFAULT_SOURCE
@@ -24,8 +24,8 @@
 
 rc_heap rc_heap_reserve(void)
 {
-    // mmap only promises the OS page size, so over-reserve by one of our pages
-    // and align the base up within it
+    // mmap only promises the OS page size, so over-reserve by one of our pages and align the base
+    // up within it
     size_t size = (size_t)RC_PAGE_HEAP_RESERVE;
     size_t page = RC_HEAP_PAGE_SIZE;
     void *mem = mmap(NULL, size + page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -33,8 +33,8 @@ rc_heap rc_heap_reserve(void)
         return (rc_heap) {0};
     }
 
-    // Trim the slack either side, so the mapping is exactly the heap and
-    // release can unmap it by base and size alone
+    // Trim the slack either side, so the mapping is exactly the heap and release can unmap it by
+    // base and size alone
     uintptr_t start = (uintptr_t)mem;
     uintptr_t base = (start + page - 1) & ~(uintptr_t)(page - 1);
     size_t head = (size_t)(base - start);

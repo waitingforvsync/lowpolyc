@@ -1,7 +1,6 @@
 // arena.c
 //
-// Chunked arenas over the global page heap, plus the pool of chunks that
-// release hands back.
+// Chunked arenas over the global page heap, plus the pool of chunks that release hands back.
 
 #include "richc/arena.h"
 
@@ -22,8 +21,8 @@ enum {
 // XORed with the chunk's own page index, so a stray or misplaced header fails too.
 #define RC_CHUNK_SENTINEL 0x52434348u
 
-// Lives at the start of every chunk. Chunks sit end to end in the heap, so an
-// overrun off the end of one lands on the next one's sentinel.
+// Lives at the start of every chunk. Chunks sit end to end in the heap, so an overrun off the end
+// of one lands on the next one's sentinel.
 typedef struct rc_chunk_header {
     uint32_t sentinel;
     uint32_t next;       // next chunk in an arena's chain, or in the pool
@@ -37,8 +36,8 @@ RC_STATIC_ASSERT(RC_ARENA_MAX_ALIGN == RC_PAGE);
 RC_STATIC_ASSERT(alignof(max_align_t) <= RC_MAX_ALIGN);
 #endif
 
-// The global page heap. Pages from the first one up to used_pages are committed,
-// and each belongs to a chunk, in an arena or in the pool.
+// The global page heap. Pages from the first one up to used_pages are committed, and each belongs
+// to a chunk, in an arena or in the pool.
 typedef struct rc_page_state {
     uintptr_t base;            // address of page 0
     uint32_t used_pages;       // one past the newest page handed out
@@ -97,8 +96,7 @@ RC_NORETURN static void rc_arena_out_of_memory(uint32_t size)
 }
 
 
-// Commit count more pages at the end of the heap. Returns the first, or 0 when
-// out of memory.
+// Commit count more pages at the end of the heap. Returns the first, or 0 when out of memory.
 static uint32_t rc_pages_grow(uint32_t count)
 {
     if (count > rc_mem.reserved_pages - rc_mem.used_pages) {
@@ -132,8 +130,8 @@ static void rc_pool_push(uint32_t page)
 }
 
 
-// A chunk of at least pages pages: the best fit from the pool, else fresh from
-// the heap. 0 when out of memory.
+// A chunk of at least pages pages: the best fit from the pool, else fresh from the heap. 0 when out
+// of memory.
 static uint32_t rc_chunk_acquire(uint32_t pages)
 {
     uint32_t *best = NULL;
@@ -179,8 +177,8 @@ static void rc_arena_enter_chunk(rc_arena *a, uint32_t page)
 }
 
 
-// Grow the current chunk in place so need more bytes fit after top. Only the
-// newest chunk in the heap can grow, since the pages after it are free.
+// Grow the current chunk in place so need more bytes fit after top. Only the newest chunk in the
+// heap can grow, since the pages after it are free.
 static bool rc_arena_extend(rc_arena *a, uint32_t need)
 {
     rc_chunk_header *h = rc_chunk(a->chunk);
@@ -246,8 +244,7 @@ static void rc_arena_make_room(rc_arena *a, uint32_t need)
 }
 
 
-// Offset of ptr within the current chunk, or RC_INDEX_NONE if it is not in the
-// allocated part of it.
+// Offset of ptr within the current chunk, or RC_INDEX_NONE if it is outside the allocated part.
 static uint32_t rc_arena_offset_of(const rc_arena *a, const void *ptr)
 {
     uintptr_t base = (uintptr_t)rc_page_ptr(a->chunk);

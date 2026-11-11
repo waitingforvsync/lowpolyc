@@ -1,11 +1,11 @@
 // heap.c
 //
-// wasm32. The page heap is linear memory itself: wasm pages are our pages, and
-// memory.grow appends them at the end.
+// wasm32. The page heap is linear memory itself: wasm pages are our pages, and memory.grow appends
+// them at the end.
 //
-// Linear memory never shrinks, so release keeps everything committed, and the
-// next reserve hands the same pages out again. richc must be the only thing
-// that grows memory, or the heap would not be contiguous.
+// Linear memory never shrinks, so release keeps everything committed, and the next reserve hands
+// the same pages out again. richc must be the only thing that grows memory, or the heap would not
+// be contiguous.
 
 #include "heap.h"
 
@@ -26,8 +26,8 @@ rc_heap rc_heap_reserve(void)
     if (!rc_wasm_heap_first) {
         uint32_t size = (uint32_t)__builtin_wasm_memory_size(0);
 
-        // Static data and the stack fill the front of memory, so this is never
-        // 0 in practice; if it were, page 0 would still not be handed out
+        // Static data and the stack fill the front of memory, so this is never 0 in practice; if it
+        // were, page 0 would still not be handed out
         rc_wasm_heap_first = size ? size : 1;
         rc_wasm_committed = size;
     }

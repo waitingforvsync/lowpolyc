@@ -1,7 +1,7 @@
 // test.c
 //
-// The runner and check functions behind richc/test.h. Native only, so unlike
-// the rest of core we lean on libc here.
+// The runner and check functions behind richc/test.h. Native only, so unlike the rest of core we
+// lean on libc here.
 
 #include "richc/test.h"
 
@@ -12,14 +12,12 @@
 #include <string.h>
 
 #include "richc/arena.h"
-#include "richc/macros.h"
 
-// Section boundaries. On Windows the sentinels sit either side of the items in
-// name order ($a < $b < $c). On ELF the linker provides __start_ / __stop_,
-// declared weak so a binary with no tests still links (the range is then
-// empty). On Mach-O, ld64 provides section$start$ / section$end$, bound with
-// asm labels because the names contain '$'. The linker symbols are arrays of
-// unknown size, so walking from one to the other is not an out-of-bounds read.
+// Section boundaries. On Windows the sentinels sit either side of the items in name order
+// ($a < $b < $c). On ELF the linker provides __start_ / __stop_, declared weak so a binary with no
+// tests still links (the range is then empty). On Mach-O, ld64 provides section$start$ /
+// section$end$, bound with asm labels because the names contain '$'. The linker symbols are arrays
+// of unknown size, so walking from one to the other is not an out-of-bounds read.
 #if defined(_WIN32)
 RC_TEST_SECTION_("rc_test$a") static const rc_test *rc_test_section_start;
 RC_TEST_SECTION_("rc_test$c") static const rc_test *rc_test_section_stop;
@@ -150,18 +148,55 @@ void rc_test_check_float(double actual, const char *op, double expected, const c
 }
 
 
+// Two views match when both are invalid, or both are valid with the same bytes.
+static bool rc_test_str_matches(rc_str a, rc_str b)
+{
+    if (!rc_str_is_valid(a) || !rc_str_is_valid(b)) {
+        return rc_str_is_valid(a) == rc_str_is_valid(b);
+    }
+    return rc_str_is_equal(a, b);
+}
+
+
+void rc_test_check_str(rc_str actual, const char *op, rc_str expected, const char *expr, const char *file, int line)
+{
+    bool pass = false;
+
+    if (rc_test_op_is(op, "==")) {
+        pass = rc_test_str_matches(actual, expected);
+    }
+    else if (rc_test_op_is(op, "!=")) {
+        pass = !rc_test_str_matches(actual, expected);
+    }
+    else {
+        rc_test_unsupported(op, file, line);
+    }
+
+    if (pass) {
+        return;
+    }
+    if (rc_str_is_valid(actual)) {
+        printf("[FAIL]\n%s:%d: %s: actual \"%.*s\"\n", file, line, expr, (int)actual.len, actual.data);
+    }
+    else {
+        printf("[FAIL]\n%s:%d: %s: actual invalid\n", file, line, expr);
+    }
+    rc_test_fail();
+}
+
+
 static bool rc_test_matches(const rc_test *t, const char *filter)
 {
     return t && strncmp(t->group_name, filter, strlen(filter)) == 0;
 }
 
 
-// Run one test, returning whether it passed. The setjmp lives here, away from
-// the run loop, so none of the loop's locals are live across a longjmp.
+// Run one test, returning whether it passed. The setjmp lives here, away from the run loop, so none
+// of the loop's locals are live across a longjmp.
 static bool rc_test_run_one(const rc_test *t)
 {
-    // Set once init has succeeded, so a failing test still tears its fixture
-    // down; volatile because it must survive the longjmp
+    // Set once init has succeeded, so a failing test still tears its fixture down; volatile because
+    // it must survive the longjmp
     volatile bool owes_deinit = false;
 
     // Every test gets a page heap of its own
@@ -172,8 +207,7 @@ static bool rc_test_run_one(const rc_test *t)
 
     if (setjmp(rc_test_jmp)) {
 
-        // Cleared before the call: a failing deinit longjmps back here and
-        // must not run a second time
+        // Cleared before the call: a failing deinit longjmps back here and must not run twice
         if (owes_deinit) {
             owes_deinit = false;
             t->deinit_fn(t->context);

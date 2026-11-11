@@ -2,19 +2,17 @@
 //
 // The bump allocator that owns every allocation in richc.
 //
-// An arena is a chain of chunks, each a run of 64 KiB pages taken from one
-// global page heap (linear memory on wasm, a reserved address range natively).
-// Pointers never move. The last allocation can grow in place, and when the
-// current chunk is the newest in the heap, the chunk itself grows with it.
-// Releasing an arena hands its chunks to a global pool for the next arena to
-// reuse.
+// An arena is a chain of chunks, each a run of 64 KiB pages taken from one global page heap (linear
+// memory on wasm, a reserved address range natively). Pointers never move. The last allocation can
+// grow in place, and when the current chunk is the newest in the heap, the chunk itself grows with
+// it. Releasing an arena hands its chunks to a global pool for the next arena to reuse.
 //
-// Passing an arena by value gives the callee a private scratch cursor: its
-// allocations vanish when it returns, and any chunk it had to add stays in the
-// chain for the caller to reuse later. Only the owner may release an arena.
+// Passing an arena by value gives the callee a private scratch cursor: its allocations vanish when
+// it returns, and any chunk it had to add stays in the chain for the caller to reuse later. Only
+// the owner may release an arena.
 //
-// The page heap and pool are global and not thread-safe. rc_arena_init sets
-// them up (rc_arena_make calls it, so that is optional), and rc_arena_deinit
+// The page heap and pool are global and not thread-safe.
+// rc_arena_init sets them up (rc_arena_make calls it, so that is optional), and rc_arena_deinit
 // tears them down, invalidating every arena at once.
 
 #ifndef RC_ARENA_H_
@@ -47,18 +45,16 @@ typedef struct rc_arena_mark {
 // Called with the failed request size when memory runs out. If it returns, we panic.
 typedef void rc_arena_oom_fn(uint32_t size);
 
-// Set up the page heap. Does nothing if it is already set up. False if its
-// address space cannot be reserved.
+// Set up the page heap. Does nothing if it is already set up.
+// False if its address space cannot be reserved.
 bool rc_arena_init(void);
 
-// Tear the page heap down, invalidating every arena and pooled chunk. Natively
-// the memory goes back to the OS; on wasm, where linear memory cannot shrink,
-// the next rc_arena_init reuses it.
+// Tear the page heap down, invalidating every arena and pooled chunk. Natively the memory goes back
+// to the OS; on wasm, where linear memory cannot shrink, the next rc_arena_init reuses it.
 void rc_arena_deinit(void);
 
-// Make an arena whose chunks are at least chunk_size bytes (0: the default).
-// Sets up the page heap if need be. Out of memory goes to the OOM handler, so
-// this never fails.
+// Make an arena whose chunks are at least chunk_size bytes (0: the default). Sets up the page heap
+// if need be. Out of memory goes to the OOM handler, so this never fails.
 rc_arena rc_arena_make(uint32_t chunk_size);
 
 // Hand all of the arena's chunks back to the pool and zero it.
@@ -70,15 +66,15 @@ void *rc_arena_alloc(rc_arena *a, uint32_t size);
 // Like rc_arena_alloc, but zeroed.
 void *rc_arena_alloc_zero(rc_arena *a, uint32_t size);
 
-// Allocate with a power-of-two alignment up to RC_ARENA_MAX_ALIGN. A later
-// realloc keeps the alignment only if it stays in place.
+// Allocate with a power-of-two alignment up to RC_ARENA_MAX_ALIGN. A later realloc keeps the
+// alignment only if it stays in place.
 void *rc_arena_alloc_aligned(rc_arena *a, uint32_t size, uint32_t align);
 
 // Reclaim ptr if it is the last allocation; otherwise do nothing and return false.
 bool rc_arena_free(rc_arena *a, void *ptr, uint32_t size);
 
-// Resize an allocation, in place when it is the last one (ptr NULL allocates).
-// Growing bytes are not zeroed; never NULL.
+// Resize an allocation, in place when it is the last one (ptr NULL allocates). Growing bytes are
+// not zeroed; never NULL.
 void *rc_arena_realloc(rc_arena *a, void *ptr, uint32_t old_size, uint32_t new_size);
 
 // Like rc_arena_realloc, but zeroes any bytes added when growing.
@@ -102,19 +98,11 @@ static inline rc_arena rc_arena_make_default(void)
     return rc_arena_make(RC_ARENA_DEFAULT_CHUNK);
 }
 
-// True if a and b share their chunks, e.g. an arena and a by-value copy of it.
-// A function taking both an arena and a scratch should assert this is false.
+// True if a and b share their chunks, e.g. an arena and a by-value copy of it. A function taking
+// both an arena and a scratch should assert this is false.
 static inline bool rc_arena_is_same(const rc_arena *a, const rc_arena *b)
 {
     return a->first != 0 && a->first == b->first;
 }
-
-// Allocate n elements of type T (not zeroed).
-#define rc_arena_alloc_type(arena, T, n) \
-    ((T *)rc_arena_alloc((arena), (uint32_t)sizeof(T) * (uint32_t)(n)))
-
-// Allocate n elements of type T, zeroed.
-#define rc_arena_alloc_zero_type(arena, T, n) \
-    ((T *)rc_arena_alloc_zero((arena), (uint32_t)sizeof(T) * (uint32_t)(n)))
 
 #endif // RC_ARENA_H_

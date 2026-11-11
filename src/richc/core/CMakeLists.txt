@@ -2,9 +2,13 @@
 
 add_library(richc STATIC
     src/arena.c
+    src/mstr.c
+    src/str.c
     include/richc/arena.h
     include/richc/macros.h
     include/richc/mem.h
+    include/richc/mstr.h
+    include/richc/str.h
     src/heap.h
 )
 

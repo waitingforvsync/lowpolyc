@@ -424,8 +424,12 @@ core. Nothing outside the platform backends knows which target it is running on.
 - 4-space indentation, no tabs. Opening brace of a function on its own line;
   other braces on the same line. No cuddled `else` (i.e. Stroustrup style).
 - **Don't omit braces** around `if`/`else` blocks.
+- **Comments wrap at 100 columns**, not 80. Lines of code aim for the same
+  margin, but it is not enforced strictly: a line that reads better slightly
+  long stays long.
 - **Compound literals:** a space between the closing `)` of the type and the
-  `{`; no space inside the braces.
+  `{`; no space after the `{` or before the `}` (`(rc_str) {.data = p, .len = n}`,
+  `{0}`, never `{ 0 }`).
 
   ```c
   return (rc_str) {
@@ -483,6 +487,8 @@ core. Nothing outside the platform backends knows which target it is running on.
   meaning/purpose is not obvious, but avoid them.
 - Comment the why and the how, not the what. A comment that restates its line
   is deleted, not shortened.
+- No single word orphaned on the last line of a comment. Move the whole final
+  sentence down to the next line instead.
 - Keep them short: one line per declaration by default. More only for genuinely
   non-obvious invariants (gating conditions, ownership).
 - British English, a touch light-hearted rather than dry, first person plural
