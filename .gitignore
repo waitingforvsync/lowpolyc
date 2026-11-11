@@ -1,0 +1,6 @@
+# Build trees
+build/
+build-*/
+
+# Local-only notes for Claude Code, never committed
+CLAUDE.md

@@ -1,0 +1,5 @@
+{
+    // One build directory per variant (build/Debug, build/Wasm, ...), so
+    // switching to Wasm never reuses a native build tree
+    "cmake.buildDirectory": "${workspaceFolder}/build/${variant:buildType}"
+}

@@ -1,0 +1,61 @@
+# Build, test and deploy the wasm build to GitHub Pages on every push to main.
+# Requires Settings -> Pages -> Source: "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  LLVM_VERSION: 21
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # clang and wasm-ld from apt.llvm.org; the runner's own clang is older
+      - name: Install LLVM, lld and Ninja
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh "$LLVM_VERSION"
+          sudo apt-get install -y "lld-$LLVM_VERSION" ninja-build
+          echo "/usr/lib/llvm-$LLVM_VERSION/bin" >> "$GITHUB_PATH"
+
+      # The tests run as part of the native build, so a failure stops the deploy
+      - name: Build and test (native)
+        run: |
+          cmake -S . -B build-native -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-native
+
+      - name: Build (wasm32)
+        run: |
+          cmake -S . -B build-wasm -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-wasm
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: build-wasm/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
