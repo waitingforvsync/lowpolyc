@@ -92,6 +92,6 @@ void rc_mstr_replace(rc_mstr *s, rc_str find, rc_str replacement, rc_arena *aren
 // ---- teardown ----
 
 // Free the buffer (if it is the arena's last allocation) and zero the string.
-void rc_mstr_deinit(rc_mstr *s, rc_arena *arena);
+void rc_mstr_release(rc_mstr *s, rc_arena *arena);
 
 #endif // RC_MSTR_H_

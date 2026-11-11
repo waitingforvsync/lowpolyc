@@ -19,11 +19,12 @@ features were left out until richc has its own implementation.
   `str.c` has a private lower-case function, which is all the case-insensitive
   compares need.
 
-## Waiting on other modules
+## Still to port
 
-- **`richc/array/str.h` and `richc/array/mstr.h`**, the array instantiations for
-  `rc_str` and `rc_mstr`. They come over with the array template
-  (`array.template.h`).
+- **The per-type array headers**: `richc/array/u8.h` to `u64.h`, `i8.h` to
+  `i64.h`, `f32.h`, `f64.h`, `bool.h`, `str.h` and `mstr.h`, each instantiating
+  `array.template.h` once. The old ones are in `~/dev/richc/src/core/include/richc/array/`,
+  with tests in `test_arrays.c`.
 
 ## Decisions to make
 

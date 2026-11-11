@@ -69,7 +69,7 @@ void rc_mstr_reset(rc_mstr *s)
 }
 
 
-void rc_mstr_deinit(rc_mstr *s, rc_arena *arena)
+void rc_mstr_release(rc_mstr *s, rc_arena *arena)
 {
     RC_ASSERT(s);
     if (s->data) {
@@ -148,7 +148,7 @@ void rc_mstr_append_u64(rc_mstr *s, uint64_t value, rc_arena *arena)
         buf[--i] = (char)('0' + value % 10);
         value /= 10;
     } while (value != 0);
-    rc_mstr_append(s, rc_str_make(buf + i, sizeof buf - i), arena);
+    rc_mstr_append(s, rc_str_from_ptr(buf + i, sizeof buf - i), arena);
 }
 
 
@@ -184,7 +184,7 @@ static void rc_mstr_append_hex(rc_mstr *s, uint64_t value, uint32_t digits, rc_a
     for (uint32_t i = 0; i < digits; i++) {
         buf[digits - 1 - i] = hex_digit[(value >> (4 * i)) & 0xF];
     }
-    rc_mstr_append(s, rc_str_make(buf, digits), arena);
+    rc_mstr_append(s, rc_str_from_ptr(buf, digits), arena);
 }
 
 
@@ -217,7 +217,7 @@ void rc_mstr_append_hex64(rc_mstr *s, uint64_t value, rc_arena *arena)
 static char *rc_mstr_replace_into(char *dst, const char *src, const char *end, rc_str find, rc_str replacement, uint32_t count)
 {
     for (uint32_t i = 0; i < count; i++) {
-        uint32_t pos = rc_str_find_first(rc_str_make(src, (uint32_t)(end - src)), find);
+        uint32_t pos = rc_str_find_first(rc_str_from_ptr(src, (uint32_t)(end - src)), find);
 
         rc_memmove(dst, src, pos);
         dst += pos;
@@ -246,7 +246,7 @@ void rc_mstr_replace(rc_mstr *s, rc_str find, rc_str replacement, rc_arena *aren
     rc_str rest = s->view;
     for (uint32_t pos = rc_str_find_first(rest, find); pos != RC_INDEX_NONE; pos = rc_str_find_first(rest, find)) {
         count++;
-        rest = rc_str_skip(rest, pos + find.len);
+        rest = rc_str_drop_first(rest, pos + find.len);
     }
     if (count == 0) {
         return;

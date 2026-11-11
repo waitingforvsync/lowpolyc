@@ -368,12 +368,13 @@ core. Nothing outside the platform backends knows which target it is running on.
   - read-only access: **view**.
   A struct field says what its consumers do: a view for results they only read,
   a span where they keep mutating.
-- **A span's backing comes from an array.** Build an `rc_array_<T>`, size it with
-  `_resize` (which returns the span), then initialise each slot in place through
-  the span accessors.
+- **A fixed-size span is made directly:** `rc_span_<T>_make(n, arena)` (or
+  `_make_zero`), then each slot is initialised in place through the span
+  accessors. Use an array only when it needs to grow.
 - **Element access always goes through the typed accessors**
-  (`rc_{view,span,array}_<name>_{get,set,at}`), never `.data[i]`. They
-  bounds-check in debug builds.
+  (`rc_{view,span,array}_<name>_{get,set,at}`), never `.data[i]` or `RC_AT`.
+  They bounds-check in debug builds. `RC_AT` is not type-checked and exists only
+  as a convenience for code outside richc and lowpoly.
 - **Prefer indices to pointers**, including as return values: a lookup returns a
   `uint32_t` index, or `RC_INDEX_NONE` for "not found". Indices survive growth
   and relocation, are half the size of a 64-bit pointer, and serialise trivially.
@@ -403,13 +404,22 @@ core. Nothing outside the platform backends knows which target it is running on.
   `rc_pool_face`. Functions follow the same order: `rc_array_u32_push()`.
 - **Functions are named by role:**
   - `rc_<type>_make(...)`, `rc_<type>_make_<thing>(...)`: constructor returning
-    `rc_<type>` by value.
+    `rc_<type>` by value, allocating from the arena if it takes one
+    (`rc_array_u32_make(capacity, arena)`, `rc_span_u32_make(n, arena)`).
   - `rc_<type>_from_<other>(...)`: construct from a value of a different type.
+    Wrapping memory the value does not own is `from_ptr(data, num)`
+    (`rc_view_u32_from_ptr`, `rc_str_from_ptr`).
   - `rc_<type>_as_<other>(...)`: reinterpret without allocating; the source
     stays usable.
   - `rc_<type>_to_<other>(...)`: convert by moving; the source is reset so only
     the result owns the resource.
   - `rc_<type>_is_<predicate>(...)`: returns `bool`.
+  - `rc_<type>_first(x, n)`, `_last`, `_drop_first`, `_drop_last`, and
+    `_substr` / `_subview` / `_subspan(x, start, end)`: a narrower value of the
+    same type over the same memory. They never allocate or copy, and clamp
+    out-of-range counts and indices. Plain nouns, not `make_`, since they read
+    as parts of `x` rather than new objects.
+  - `rc_<type>_release(x, ...)`: free what `x` owns and zero it.
 - **Scalar type suffixes:** `u8`..`u64`, `i8`..`i64`, `f32`, `f64`. Inline
   math helpers always carry one (`rc_min_i32`, `rc_sqrt_f32`), which also
   avoids the Windows `min`/`max`/`near`/`far` macros. The unsuffixed name

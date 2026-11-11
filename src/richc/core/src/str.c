@@ -16,7 +16,7 @@ static char rc_str_ascii_lower(char c)
 rc_str rc_str_from_cstr(const char *s)
 {
     if (!s) {
-        return rc_str_make(NULL, 0);
+        return rc_str_from_ptr(NULL, 0);
     }
 
     // A string too long for 32 bits is clamped rather than wrapped
@@ -24,7 +24,7 @@ rc_str rc_str_from_cstr(const char *s)
     while (s[len] != '\0' && len < UINT32_MAX) {
         len++;
     }
-    return rc_str_make(s, len);
+    return rc_str_from_ptr(s, len);
 }
 
 
@@ -133,13 +133,13 @@ bool rc_str_contains(rc_str haystack, rc_str needle)
 
 rc_str rc_str_remove_prefix(rc_str s, rc_str prefix)
 {
-    return rc_str_starts_with(s, prefix) ? rc_str_skip(s, prefix.len) : s;
+    return rc_str_starts_with(s, prefix) ? rc_str_drop_first(s, prefix.len) : s;
 }
 
 
 rc_str rc_str_remove_suffix(rc_str s, rc_str suffix)
 {
-    return rc_str_ends_with(s, suffix) ? rc_str_left(s, s.len - suffix.len) : s;
+    return rc_str_ends_with(s, suffix) ? rc_str_drop_last(s, suffix.len) : s;
 }
 
 
@@ -150,8 +150,8 @@ static rc_str_pair rc_str_split_at(rc_str s, uint32_t pos, rc_str split_by)
         return (rc_str_pair) {.first = s, .second = {0}};
     }
     return (rc_str_pair) {
-        .first = rc_str_left(s, pos),
-        .second = rc_str_skip(s, pos + split_by.len)
+        .first = rc_str_first(s, pos),
+        .second = rc_str_drop_first(s, pos + split_by.len)
     };
 }
 

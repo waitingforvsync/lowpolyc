@@ -36,8 +36,8 @@ typedef struct rc_str_pair {
 // because it is not a constant expression.
 #define RC_STR_INIT(s) {.data = (s), .len = (uint32_t)(sizeof(s) - 1)}
 
-// A view of len bytes at data.
-static inline rc_str rc_str_make(const char *data, uint32_t len)
+// A view of len bytes at data, which it does not own.
+static inline rc_str rc_str_from_ptr(const char *data, uint32_t len)
 {
     return (rc_str) {.data = data, .len = len};
 }
@@ -73,43 +73,41 @@ int32_t rc_str_compare_insensitive(rc_str a, rc_str b);
 
 // ---- slicing ----
 
-// The first count characters.
-static inline rc_str rc_str_left(rc_str s, uint32_t count)
+// The first n characters.
+static inline rc_str rc_str_first(rc_str s, uint32_t n)
 {
-    if (count > s.len) {
-        count = s.len;
-    }
-    return rc_str_make(s.data, count);
+    n = n > s.len ? s.len : n;
+    return rc_str_from_ptr(s.data, n);
 }
 
-// The last count characters.
-static inline rc_str rc_str_right(rc_str s, uint32_t count)
+// The last n characters.
+static inline rc_str rc_str_last(rc_str s, uint32_t n)
 {
-    if (count > s.len) {
-        count = s.len;
-    }
-    return rc_str_make(s.data + (s.len - count), count);
+    n = n > s.len ? s.len : n;
+    return rc_str_from_ptr(s.data + (s.len - n), n);
 }
 
-// count characters from start.
-static inline rc_str rc_str_substr(rc_str s, uint32_t start, uint32_t count)
+// All but the first n characters.
+static inline rc_str rc_str_drop_first(rc_str s, uint32_t n)
 {
-    if (start > s.len) {
-        start = s.len;
-    }
-    if (count > s.len - start) {
-        count = s.len - start;
-    }
-    return rc_str_make(s.data + start, count);
+    n = n > s.len ? s.len : n;
+    return rc_str_from_ptr(s.data + n, s.len - n);
 }
 
-// Everything from start onwards.
-static inline rc_str rc_str_skip(rc_str s, uint32_t start)
+// All but the last n characters.
+static inline rc_str rc_str_drop_last(rc_str s, uint32_t n)
 {
-    if (start > s.len) {
-        start = s.len;
-    }
-    return rc_str_make(s.data + start, s.len - start);
+    n = n > s.len ? s.len : n;
+    return rc_str_from_ptr(s.data, s.len - n);
+}
+
+// The characters from start up to end, clamped to the string (an end before start gives nothing).
+static inline rc_str rc_str_substr(rc_str s, uint32_t start, uint32_t end)
+{
+    start = start > s.len ? s.len : start;
+    end = end > s.len ? s.len : end;
+    end = end < start ? start : end;
+    return rc_str_from_ptr(s.data + start, end - start);
 }
 
 // ---- searching ----

@@ -30,10 +30,10 @@ RC_TEST(str, literal_static_init)
 }
 
 
-RC_TEST(str, make)
+RC_TEST(str, from_ptr)
 {
     const char text[] = {'a', 'b', 'c'};
-    rc_str s = rc_str_make(text, 2);
+    rc_str s = rc_str_from_ptr(text, 2);
 
     RC_CHECK_TRUE(s.data == text);
     RC_CHECK(s, ==, RC_STR("ab"));
@@ -99,8 +99,8 @@ RC_TEST(str, is_equal)
 RC_TEST(str, is_equal_empty)
 {
     // Empty views are equal wherever they point
-    rc_str e1 = rc_str_left(RC_STR("abc"), 0);
-    rc_str e2 = rc_str_left(RC_STR("xyz"), 0);
+    rc_str e1 = rc_str_first(RC_STR("abc"), 0);
+    rc_str e2 = rc_str_first(RC_STR("xyz"), 0);
 
     RC_CHECK_TRUE(rc_str_is_equal(e1, e2));
     RC_CHECK_TRUE(rc_str_is_equal(RC_STR(""), e1));
@@ -164,39 +164,74 @@ RC_TEST(str, compare_insensitive)
 
 // ---- slicing ----
 
-RC_TEST(str, left)
+RC_TEST(str, first)
 {
-    RC_CHECK(rc_str_left(RC_STR("hello"), 3), ==, RC_STR("hel"));
-    RC_CHECK(rc_str_left(RC_STR("hello"), 0), ==, RC_STR(""));
-    RC_CHECK(rc_str_left(RC_STR("hello"), 5), ==, RC_STR("hello"));
-    RC_CHECK(rc_str_left(RC_STR("hello"), 99), ==, RC_STR("hello"));
+    RC_CHECK(rc_str_first(RC_STR("hello"), 3), ==, RC_STR("hel"));
+    RC_CHECK(rc_str_first(RC_STR("hello"), 0), ==, RC_STR(""));
+    RC_CHECK(rc_str_first(RC_STR("hello"), 5), ==, RC_STR("hello"));
+    RC_CHECK(rc_str_first(RC_STR("hello"), 99), ==, RC_STR("hello"));
 }
 
 
-RC_TEST(str, right)
+RC_TEST(str, last)
 {
-    RC_CHECK(rc_str_right(RC_STR("hello"), 2), ==, RC_STR("lo"));
-    RC_CHECK(rc_str_right(RC_STR("hello"), 0), ==, RC_STR(""));
-    RC_CHECK(rc_str_right(RC_STR("hello"), 99), ==, RC_STR("hello"));
+    RC_CHECK(rc_str_last(RC_STR("hello"), 2), ==, RC_STR("lo"));
+    RC_CHECK(rc_str_last(RC_STR("hello"), 0), ==, RC_STR(""));
+    RC_CHECK(rc_str_last(RC_STR("hello"), 5), ==, RC_STR("hello"));
+    RC_CHECK(rc_str_last(RC_STR("hello"), 99), ==, RC_STR("hello"));
+}
+
+
+RC_TEST(str, drop_first)
+{
+    RC_CHECK(rc_str_drop_first(RC_STR("hello"), 2), ==, RC_STR("llo"));
+    RC_CHECK(rc_str_drop_first(RC_STR("hello"), 0), ==, RC_STR("hello"));
+    RC_CHECK(rc_str_drop_first(RC_STR("hello"), 5), ==, RC_STR(""));
+    RC_CHECK(rc_str_drop_first(RC_STR("hello"), 99), ==, RC_STR(""));
+}
+
+
+RC_TEST(str, drop_last)
+{
+    RC_CHECK(rc_str_drop_last(RC_STR("hello"), 2), ==, RC_STR("hel"));
+    RC_CHECK(rc_str_drop_last(RC_STR("hello"), 0), ==, RC_STR("hello"));
+    RC_CHECK(rc_str_drop_last(RC_STR("hello"), 5), ==, RC_STR(""));
+    RC_CHECK(rc_str_drop_last(RC_STR("hello"), 99), ==, RC_STR(""));
+}
+
+
+RC_TEST(str, first_and_drop_first_partition)
+{
+    // Splitting at n with first and drop_first loses nothing, and the same for last
+    rc_str s = RC_STR("abcdef");
+
+    for (uint32_t n = 0; n <= 7; n++) {
+        RC_CHECK(rc_str_first(s, n).len + rc_str_drop_first(s, n).len, ==, s.len);
+        RC_CHECK(rc_str_last(s, n).len + rc_str_drop_last(s, n).len, ==, s.len);
+    }
 }
 
 
 RC_TEST(str, substr)
 {
-    RC_CHECK(rc_str_substr(RC_STR("hello world"), 6, 5), ==, RC_STR("world"));
+    RC_CHECK(rc_str_substr(RC_STR("hello world"), 6, 11), ==, RC_STR("world"));
+    RC_CHECK(rc_str_substr(RC_STR("hello world"), 2, 4), ==, RC_STR("ll"));
     RC_CHECK(rc_str_substr(RC_STR("hello"), 0, 5), ==, RC_STR("hello"));
-    RC_CHECK(rc_str_substr(RC_STR("hello"), 5, 1), ==, RC_STR(""));
-    RC_CHECK(rc_str_substr(RC_STR("hello"), 10, 3), ==, RC_STR(""));
-    RC_CHECK(rc_str_substr(RC_STR("hello"), 3, 99), ==, RC_STR("lo"));
+    RC_CHECK(rc_str_substr(RC_STR("hello"), 2, 2), ==, RC_STR(""));
 }
 
 
-RC_TEST(str, skip)
+RC_TEST(str, substr_clamps)
 {
-    RC_CHECK(rc_str_skip(RC_STR("hello"), 2), ==, RC_STR("llo"));
-    RC_CHECK(rc_str_skip(RC_STR("hello"), 0), ==, RC_STR("hello"));
-    RC_CHECK(rc_str_skip(RC_STR("hello"), 5), ==, RC_STR(""));
-    RC_CHECK(rc_str_skip(RC_STR("hello"), 99), ==, RC_STR(""));
+    // An end past the string stops at it, and an end before start gives nothing at start
+    rc_str s = RC_STR("hello");
+
+    RC_CHECK(rc_str_substr(s, 3, 99), ==, RC_STR("lo"));
+    RC_CHECK(rc_str_substr(s, 5, 6), ==, RC_STR(""));
+    RC_CHECK(rc_str_substr(s, 10, 3), ==, RC_STR(""));
+    RC_CHECK(rc_str_substr(s, 4, 1), ==, RC_STR(""));
+    RC_CHECK_TRUE(rc_str_substr(s, 4, 1).data == s.data + 4);
+    RC_CHECK(rc_str_substr(s, 0, RC_INDEX_NONE), ==, s);
 }
 
 
@@ -204,10 +239,11 @@ RC_TEST(str, slices_share_data)
 {
     rc_str s = RC_STR("hello");
 
-    RC_CHECK_TRUE(rc_str_left(s, 2).data == s.data);
-    RC_CHECK_TRUE(rc_str_right(s, 2).data == s.data + 3);
-    RC_CHECK_TRUE(rc_str_substr(s, 1, 2).data == s.data + 1);
-    RC_CHECK_TRUE(rc_str_skip(s, 4).data == s.data + 4);
+    RC_CHECK_TRUE(rc_str_first(s, 2).data == s.data);
+    RC_CHECK_TRUE(rc_str_last(s, 2).data == s.data + 3);
+    RC_CHECK_TRUE(rc_str_drop_first(s, 4).data == s.data + 4);
+    RC_CHECK_TRUE(rc_str_drop_last(s, 4).data == s.data);
+    RC_CHECK_TRUE(rc_str_substr(s, 1, 3).data == s.data + 1);
 }
 
 
@@ -400,7 +436,7 @@ RC_TEST(str, as_cstr_fast)
 
 RC_TEST(str, as_cstr_fast_without_buffer)
 {
-    rc_str s = rc_str_skip(RC_STR("hello"), 2);
+    rc_str s = rc_str_drop_first(RC_STR("hello"), 2);
 
     RC_CHECK_TRUE(rc_str_as_cstr(s, NULL, 0) == s.data);
 }
@@ -409,7 +445,7 @@ RC_TEST(str, as_cstr_fast_without_buffer)
 RC_TEST(str, as_cstr_copy)
 {
     // A view not followed by a null is copied into the buffer
-    rc_str s = rc_str_left(RC_STR("hello world"), 5);
+    rc_str s = rc_str_first(RC_STR("hello world"), 5);
     char buf[16];
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
@@ -420,7 +456,7 @@ RC_TEST(str, as_cstr_copy)
 
 RC_TEST(str, as_cstr_copy_exact_fit)
 {
-    rc_str s = rc_str_left(RC_STR("hello world"), 5);
+    rc_str s = rc_str_first(RC_STR("hello world"), 5);
     char buf[6];
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
@@ -431,7 +467,7 @@ RC_TEST(str, as_cstr_copy_exact_fit)
 RC_TEST(str, as_cstr_truncate)
 {
     // The copy is cut to fit, and always terminated
-    rc_str s = rc_str_left(RC_STR("hello world"), 5);
+    rc_str s = rc_str_first(RC_STR("hello world"), 5);
     char buf[3];
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
@@ -441,7 +477,7 @@ RC_TEST(str, as_cstr_truncate)
 
 RC_TEST(str, as_cstr_one_byte_buffer)
 {
-    rc_str s = rc_str_left(RC_STR("hello world"), 5);
+    rc_str s = rc_str_first(RC_STR("hello world"), 5);
     char buf[1];
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
@@ -452,7 +488,7 @@ RC_TEST(str, as_cstr_one_byte_buffer)
 RC_TEST(str, as_cstr_no_buffer)
 {
     // No fast path and nowhere to copy to
-    rc_str s = rc_str_left(RC_STR("hello world"), 5);
+    rc_str s = rc_str_first(RC_STR("hello world"), 5);
     char buf[4];
 
     RC_CHECK_TRUE(rc_str_as_cstr(s, NULL, 0) == NULL);

@@ -3,6 +3,7 @@
 add_executable(richc_core_test
     main.c
     test_arena.c
+    test_array.c
     test_mstr.c
     test_str.c
 )

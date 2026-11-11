@@ -5,6 +5,7 @@ add_library(richc STATIC
     src/mstr.c
     src/str.c
     include/richc/arena.h
+    include/richc/array.template.h
     include/richc/macros.h
     include/richc/mem.h
     include/richc/mstr.h

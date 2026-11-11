@@ -139,7 +139,7 @@ RC_TEST_STEP(mstr, from_str, fix)
 RC_TEST_STEP(mstr, from_str_unterminated, fix)
 {
     // A view into the middle of a string is copied and terminated
-    rc_mstr s = rc_mstr_from_str(rc_str_substr(RC_STR("hello world"), 3, 5), 0, &fix->a);
+    rc_mstr s = rc_mstr_from_str(rc_str_substr(RC_STR("hello world"), 3, 8), 0, &fix->a);
 
     RC_CHECK(s.view, ==, RC_STR("lo wo"));
     RC_CHECK_TRUE(is_terminated(&s));
@@ -321,7 +321,7 @@ RC_TEST_STEP(mstr, append_growth, fix)
     RC_CHECK(s.len, ==, 200u);
     RC_CHECK_TRUE(is_terminated(&s));
     for (uint32_t i = 0; i < 100; i++) {
-        RC_CHECK(rc_str_substr(s.view, 2 * i, 2), ==, RC_STR("ab"));
+        RC_CHECK(rc_str_substr(s.view, 2 * i, 2 * i + 2), ==, RC_STR("ab"));
     }
 }
 
@@ -641,29 +641,29 @@ RC_TEST_STEP(mstr, replace_in_empty, fix)
 
 // ---- teardown ----
 
-RC_TEST_STEP(mstr, deinit, fix)
+RC_TEST_STEP(mstr, release, fix)
 {
     rc_mstr s = rc_mstr_from_cstr("hello world", 0, &fix->a);
 
     rc_mstr_append(&s, RC_STR("!"), &fix->a);
-    rc_mstr_deinit(&s, &fix->a);
+    rc_mstr_release(&s, &fix->a);
     RC_CHECK_FALSE(rc_mstr_is_valid(&s));
     RC_CHECK(s.len, ==, 0u);
     RC_CHECK(s.cap, ==, 0u);
     RC_CHECK_TRUE(s.data == NULL);
 
-    // A second deinit of the zeroed string does nothing
-    rc_mstr_deinit(&s, &fix->a);
+    // A second release of the zeroed string does nothing
+    rc_mstr_release(&s, &fix->a);
     RC_CHECK_FALSE(rc_mstr_is_valid(&s));
 }
 
 
-RC_TEST_STEP(mstr, deinit_reclaims_last, fix)
+RC_TEST_STEP(mstr, release_reclaims_last, fix)
 {
     // As the arena's last allocation, the buffer goes straight back
     rc_arena_mark before = rc_arena_save(&fix->a);
     rc_mstr s = rc_mstr_from_cstr("hello", 0, &fix->a);
 
-    rc_mstr_deinit(&s, &fix->a);
+    rc_mstr_release(&s, &fix->a);
     RC_CHECK(rc_arena_save(&fix->a).top, ==, before.top);
 }
