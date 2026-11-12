@@ -4,7 +4,11 @@ add_executable(richc_core_test
     main.c
     test_arena.c
     test_array.c
+    test_bitset.c
+    test_genpool.c
     test_mstr.c
+    test_ops.c
+    test_pool.c
     test_str.c
 )
 

@@ -131,6 +131,43 @@ RC_TEST(array, from_empty_view)
 }
 
 
+RC_TEST_STEP(array, make_copy, fix)
+{
+    int32_t src[] = {1, 2, 3, 4};
+    rc_view_i32 v = RC_VIEW(src);
+    rc_array_i32 a = rc_array_i32_from_view(v, 10, &fix->a);
+    rc_array_i32 b = rc_array_i32_make_copy(&a, 6, &fix->a);
+
+    // The copy has memory of its own, sized by the minimum rather than src's capacity
+    RC_CHECK_TRUE(view_is(b.view, src, 4));
+    RC_CHECK(b.cap, ==, 6u);
+    RC_CHECK_TRUE(b.data != a.data);
+}
+
+
+RC_TEST_STEP(array, make_copy_capacity_fits_src, fix)
+{
+    // A minimum below src's size gives exactly src's size
+    int32_t src[] = {1, 2, 3, 4};
+    rc_view_i32 v = RC_VIEW(src);
+    rc_array_i32 a = rc_array_i32_from_view(v, 10, &fix->a);
+    rc_array_i32 b = rc_array_i32_make_copy(&a, 0, &fix->a);
+
+    RC_CHECK(b.cap, ==, 4u);
+    RC_CHECK_TRUE(view_is(b.view, src, 4));
+}
+
+
+RC_TEST(array, make_copy_empty)
+{
+    rc_array_i32 empty = {0};
+    rc_array_i32 copy = rc_array_i32_make_copy(&empty, 0, NULL);
+
+    RC_CHECK(copy.num, ==, 0u);
+    RC_CHECK_TRUE(copy.data == NULL);
+}
+
+
 // ---- element access ----
 
 RC_TEST_STEP(array, get_set_at, fix)

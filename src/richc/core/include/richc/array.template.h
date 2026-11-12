@@ -27,9 +27,9 @@
 //   #include "richc/array.template.h"
 //
 // Everything that may reallocate takes the arena last. It may be NULL when no growth is needed.
-// reserve, make, from_view and resize allocate exactly what they are asked for; the incremental
-// operations (push, append, insert) grow to the larger of double the capacity, the need, or 8,
-// so they stay amortised O(1).
+// reserve, make, make_copy, from_view and resize allocate exactly what they are asked for; the
+// incremental operations (push, append, insert) grow to the larger of double the capacity, the
+// need, or 8, so they stay amortised O(1).
 
 // ---- shared by every instantiation ----
 
@@ -69,6 +69,7 @@
 #ifndef RC_ARRAY_DECLARE_ONLY
 
 #define RC_ARRAY_MAKE_ RC_CONCAT(RC_ARRAY_, _make)
+#define RC_ARRAY_MAKE_COPY_ RC_CONCAT(RC_ARRAY_, _make_copy)
 #define RC_ARRAY_FROM_VIEW_ RC_CONCAT(RC_ARRAY_, _from_view)
 #define RC_ARRAY_GET_ RC_CONCAT(RC_ARRAY_, _get)
 #define RC_ARRAY_SET_ RC_CONCAT(RC_ARRAY_, _set)
@@ -266,6 +267,13 @@ static inline RC_ARRAY_ RC_ARRAY_FROM_VIEW_(RC_VIEW_ view, uint32_t minimum_capa
     }
     array.num = view.num;
     return array;
+}
+
+// A copy of src, with room for at least minimum_capacity elements: from_view on src's own view.
+static inline RC_ARRAY_ RC_ARRAY_MAKE_COPY_(const RC_ARRAY_ *src, uint32_t minimum_capacity, rc_arena *arena)
+{
+    RC_ASSERT(src);
+    return RC_ARRAY_FROM_VIEW_(src->view, minimum_capacity, arena);
 }
 
 // Element index by value.
@@ -705,6 +713,7 @@ static inline const RC_ARRAY_TYPE *RC_VIEW_LAST_AT_(RC_VIEW_ view)
 // ---- cleanup ----
 
 #undef RC_ARRAY_MAKE_
+#undef RC_ARRAY_MAKE_COPY_
 #undef RC_ARRAY_FROM_VIEW_
 #undef RC_ARRAY_GET_
 #undef RC_ARRAY_SET_

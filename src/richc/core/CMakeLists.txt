@@ -2,13 +2,19 @@
 
 add_library(richc STATIC
     src/arena.c
+    src/bitset.c
     src/mstr.c
     src/str.c
     include/richc/arena.h
     include/richc/array.template.h
+    include/richc/bitset.h
+    include/richc/genpool.template.h
+    include/richc/handle.template.h
     include/richc/macros.h
     include/richc/mem.h
     include/richc/mstr.h
+    include/richc/ops.h
+    include/richc/pool.template.h
     include/richc/str.h
     src/heap.h
 )
