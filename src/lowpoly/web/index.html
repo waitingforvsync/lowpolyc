@@ -24,32 +24,36 @@
       }
       body {
         margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
+        overflow: hidden;
         background: var(--bg);
         color: var(--fg);
         font: 16px/1.5 system-ui, sans-serif;
       }
-      main {
+      /* The canvas fills the window; app.js matches its pixels to that size */
+      #canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      /* Loading and errors, over the canvas */
+      #status {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        margin: 0;
         padding: 0 16px;
+        color: var(--muted);
         text-align: center;
       }
-      h1 {
-        margin: 0 0 8px;
-        font-size: 24px;
-      }
-      #status {
-        margin: 0;
-        color: var(--muted);
+      #status[hidden] {
+        display: none;
       }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Lowpoly</h1>
-      <p id="status">Loading...</p>
-    </main>
+    <canvas id="canvas"></canvas>
+    <p id="status">Loading...</p>
     <script type="module" src="lowpoly.js"></script>
   </body>
 </html>

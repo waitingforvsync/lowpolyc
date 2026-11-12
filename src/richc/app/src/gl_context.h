@@ -16,14 +16,14 @@
 typedef void (*rc_gl_proc)(void);
 
 typedef struct rc_gl_context {
-    void *display_;  // EGLDisplay
-    void *config_;   // EGLConfig
-    void *context_;  // EGLContext
+    void *display_;  // EGLDisplay; unused on wasm
+    void *config_;   // EGLConfig; unused on wasm
+    void *context_;  // EGLContext, or on wasm the id of gl.js's WebGL2 context
 } rc_gl_context;
 
 // The app window, as something the context can draw to and present.
 typedef struct rc_gl_window {
-    void *surface_;  // EGLSurface
+    void *surface_;  // EGLSurface, or on wasm the id of the canvas
 } rc_gl_window;
 
 // A context on the app window's display, current with nothing to draw to yet. None if it cannot

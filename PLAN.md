@@ -71,6 +71,7 @@ All paths are under `src/richc/app/`.
 | `src/platform/x11/x11.h` | Private: the open X11 window, for the GL context |
 | `src/platform/x11/gl_context.c` | EGL on the X11 window |
 | `src/platform/wasm/gl_context.c`, `gl.js` | WebGL2 context and GL call forwarding |
+| `tools/serve_site.sh` (repo root) | Serves `build/wasm/site` locally; VS Code's "Lowpoly (wasm) in Chrome" uses it |
 | `src/gfx/gl/` | The GL backend: `gfx.c`, plus `gl.h` declaring the GL subset it uses and `gl.c` loading it natively |
 
 Windowing gets its own platform names (`x11`, later `wayland`, `win32`,
@@ -99,8 +100,8 @@ the window exits; in the browser, closing the tab is the end of it.
 1. **lowpoly's side first** (done). Write the frame and event code in `editor.c`
    against the API we want, plus draft `app.h` and `gfx.h` holding exactly
    what it uses. Review them before building anything behind them. Until the
-   backends exist, `placeholder.c` stands in behind both headers so everything
-   links.
+   backends existed, `placeholder.c` stood in behind both headers so everything
+   linked.
 2. **X11 window and events** (done). Open the window, handle the close button
    through `WM_DELETE_WINDOW`, map key codes, and run the native frame loop.
 3. **The GL backend, natively** (done). An EGL context on the X11 window, then
@@ -110,9 +111,14 @@ the window exits; in the browser, closing the tab is the end of it.
      is unmapped, the loop draws nothing and sleeps until an event comes.
    - Where presenting does not wait (Xvfb, or a driver ignoring the swap
      interval), the loop spins. A fallback needs monotonic time.
-4. **The same backend on wasm.** Canvas setup, the frame loop and key events in
-   `app.js`, and `gl.js` forwarding to WebGL2. This puts milestone 1 on GitHub
-   Pages.
+4. **The same backend on wasm** (done). Canvas setup, the frame loop and key
+   events in `app.js`, and `gl.js` forwarding to WebGL2. This puts milestone 1 on
+   GitHub Pages.
+   - `gfx.c` is shared unchanged: `gl.h` declares the GL functions as imports
+     on wasm, and as pointers loaded through EGL natively.
+   - `app.js` maps `KeyboardEvent.code` to `rc_key`, a second table to keep in
+     step with the X11 one. The canvas is sized in device pixels for now (see
+     high-DPI below).
 5. **Tidy up.**
    - CI installs the X11 and EGL headers (`libx11-dev`, `libegl-dev`, both
      added) and builds the native app.

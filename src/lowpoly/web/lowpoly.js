@@ -1,8 +1,12 @@
 // lowpoly.js
 //
-// Loads lowpoly.wasm and starts it. The module imports nothing yet; as the
-// richc and lowpoly wasm backends grow, their host functions are supplied here.
+// Loads lowpoly.wasm and runs it on the page's canvas. richc's app.js and gl.js supply the
+// module's imports and drive it; lowpoly itself adds nothing to them yet.
 
+import { createApp } from './richc/app.js';
+import { createGl } from './richc/gl.js';
+
+const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
 
 // Streaming compile needs the server to send application/wasm; fall back to
@@ -18,11 +22,26 @@ async function load(url, imports) {
 }
 
 try {
-    const { instance } = await load('lowpoly.wasm', {});
+    // The GL context comes first: the module expects it ready when it starts
+    const gl = createGl(canvas);
+    const app = createApp(canvas);
+    const { instance } = await load('lowpoly.wasm', { richc: { ...app.imports, ...gl.imports } });
+
+    app.bind(instance);
+    gl.bind(instance);
+
     const result = instance.exports.start();
-    status.textContent = result === 0
-        ? 'The wasm module loaded and ran. Nothing else here yet.'
-        : `start returned ${result}.`;
+    if (result !== 0) {
+        throw new Error(`start returned ${result}`);
+    }
+    app.run(instance);
+
+    if (gl.available) {
+        status.hidden = true;
+    }
+    else {
+        status.textContent = 'Lowpoly needs WebGL2, which this browser does not have.';
+    }
 }
 catch (error) {
     status.textContent = `Could not start lowpoly: ${error}`;

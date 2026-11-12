@@ -7,6 +7,7 @@
 // Every function is called through rc_<name> (rc_glClear for glClear). The prefix keeps our names
 // apart from any glClear the GL driver exports. Natively each is a pointer that rc_gl_load fills
 // from the context.
+// On wasm each is an import from the module richc, which gl.js supplies under its GL name.
 
 #ifndef RC_APP_GL_H_
 #define RC_APP_GL_H_
@@ -43,6 +44,22 @@ typedef float GLfloat;
     X(GLenum, glGetError, (void)) \
     X(void, glInvalidateFramebuffer, (GLenum target, GLsizei num_attachments, const GLenum *attachments))
 
+#if defined(__wasm__)
+
+#define RC_GL_DECLARE_(ret, name, params) \
+    __attribute__((import_module("richc"), import_name(#name))) ret rc_##name params;
+RC_GL_FUNCTIONS(RC_GL_DECLARE_)
+#undef RC_GL_DECLARE_
+
+// The imports are bound when the module is instantiated, so there is nothing to look up.
+static inline const char *rc_gl_load(const rc_gl_context *context)
+{
+    (void)context;
+    return NULL;
+}
+
+#else
+
 #define RC_GL_DECLARE_(ret, name, params) extern ret (*rc_##name) params;
 RC_GL_FUNCTIONS(RC_GL_DECLARE_)
 #undef RC_GL_DECLARE_
@@ -50,5 +67,7 @@ RC_GL_FUNCTIONS(RC_GL_DECLARE_)
 // Look up every function in context. Returns the name of the first one it lacks, or NULL once
 // they are all found.
 const char *rc_gl_load(const rc_gl_context *context);
+
+#endif
 
 #endif // RC_APP_GL_H_

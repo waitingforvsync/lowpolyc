@@ -15,10 +15,17 @@ target_link_libraries(richc_app PUBLIC richc)
 
 # One platform per target, chosen here rather than by #if
 if(RICHC_WASM)
-    # The GL backend comes to wasm with gl.js; until then the placeholder stands in
     target_sources(richc_app PRIVATE
-        src/placeholder.c
-        src/platform/wasm/app.c)
+        src/gfx/gl/gfx.c
+        src/gfx/gl/gl.h
+        src/platform/wasm/app.c
+        src/platform/wasm/gl_context.c)
+
+    # The page scripts that supply the module's imports. The app's own page copies them into
+    # its site, under richc/.
+    set_property(TARGET richc_app PROPERTY RICHC_WEB_FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/app.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/gl.js)
 elseif(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
 

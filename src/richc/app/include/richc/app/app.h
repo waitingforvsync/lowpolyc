@@ -14,8 +14,8 @@
 
 // ---- input ----
 
-// A key, by its position on a US layout, whatever the user's layout. Codes are added as we need
-// them.
+// A key, by its position on a US layout, whatever the user's layout.
+// Codes are added as we need them.
 typedef enum rc_key {
     RC_KEY_UNKNOWN,
     RC_KEY_SPACE
@@ -56,7 +56,7 @@ typedef struct rc_app_desc {
 } rc_app_desc;
 
 // Open the window and run the app. Natively, returns 0 once the window closes, or non-zero if it
-// could not be opened. On wasm, returns 0 at once.
+// could not be opened. On wasm, returns 0 at once. desc is copied, so it need not outlive the call.
 int32_t rc_app_run(const rc_app_desc *desc);
 
 #endif // RC_APP_APP_H_

@@ -49,8 +49,9 @@ endif()
 
 # ---- web page (wasm only) ----
 
-# The site GitHub Pages serves: lowpoly.wasm plus the files in web/, gathered in
-# <build>/site. Serve that directory over http to try it locally.
+# The site GitHub Pages serves: lowpoly.wasm, the files in web/ and richc_app's
+# scripts (in richc/), gathered in <build>/site. tools/serve_site.sh serves
+# build/wasm/site over http to try it locally.
 if(RICHC_WASM)
     set(LOWPOLY_SITE_DIR ${CMAKE_BINARY_DIR}/site)
     set_target_properties(lowpoly PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${LOWPOLY_SITE_DIR})
@@ -65,6 +66,19 @@ if(RICHC_WASM)
             VERBATIM
         )
         list(APPEND LOWPOLY_SITE_FILES ${LOWPOLY_SITE_DIR}/${file})
+    endforeach()
+
+    # richc_app's scripts, which lowpoly.js imports from richc/
+    get_target_property(RICHC_WEB_FILES richc_app RICHC_WEB_FILES)
+    foreach(source ${RICHC_WEB_FILES})
+        get_filename_component(file ${source} NAME)
+        add_custom_command(
+            OUTPUT ${LOWPOLY_SITE_DIR}/richc/${file}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${source} ${LOWPOLY_SITE_DIR}/richc/${file}
+            DEPENDS ${source}
+            VERBATIM
+        )
+        list(APPEND LOWPOLY_SITE_FILES ${LOWPOLY_SITE_DIR}/richc/${file})
     endforeach()
 
     add_custom_target(lowpoly_site ALL DEPENDS ${LOWPOLY_SITE_FILES})
