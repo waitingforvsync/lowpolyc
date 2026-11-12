@@ -21,7 +21,11 @@ if(RICHC_WASM)
         src/platform/wasm/app.c)
 elseif(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
-    find_package(OpenGL REQUIRED COMPONENTS EGL)
+
+    # Just EGL: FindOpenGL wants libOpenGL as well, which we never use
+    find_path(RICHC_EGL_INCLUDE_DIR EGL/egl.h REQUIRED)
+    find_library(RICHC_EGL_LIBRARY EGL REQUIRED)
+    target_include_directories(richc_app PRIVATE ${RICHC_EGL_INCLUDE_DIR})
     target_sources(richc_app PRIVATE
         src/gfx/gl/gfx.c
         src/gfx/gl/gl.c
@@ -29,7 +33,7 @@ elseif(UNIX AND NOT APPLE)
         src/platform/x11/app.c
         src/platform/x11/gl_context.c
         src/platform/x11/x11.h)
-    target_link_libraries(richc_app PRIVATE X11::X11 OpenGL::EGL)
+    target_link_libraries(richc_app PRIVATE X11::X11 ${RICHC_EGL_LIBRARY})
 else()
     message(FATAL_ERROR "richc_app has no windowing backend for this platform yet: configure with RICHC_BUILD_APP=OFF")
 endif()
