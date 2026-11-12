@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 project(lowpolyc C)
 
+# A toolchain file only applies to a fresh build directory. Naming one for a directory configured
+# without it would silently give a native build, so we stop instead.
+if(CMAKE_TOOLCHAIN_FILE MATCHES "wasm32" AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
+    message(FATAL_ERROR
+        "${CMAKE_BINARY_DIR} names the wasm32 toolchain but is a native build. Delete it and "
+        "configure again (in VS Code: CMake: Delete Cache and Reconfigure).")
+endif()
+
 # The wasm32 toolchain file (cmake/wasm32.cmake) sets the processor.
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
     set(RICHC_WASM ON)

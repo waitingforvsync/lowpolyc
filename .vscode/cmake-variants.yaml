@@ -1,6 +1,6 @@
 # Build variants for the CMake Tools extension. The first four are CMake's
 # usual build types; Wasm cross-compiles to wasm32 with cmake/wasm32.cmake and
-# gathers the web page in build/Wasm/site. Every variant has its own build
+# gathers the web page in build/wasm/site. Every variant has its own build
 # directory (see settings.json), because a toolchain only applies to a fresh one.
 buildType:
   default: debug

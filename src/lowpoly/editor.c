@@ -32,7 +32,11 @@ static void editor_init(void *user)
 {
     editor *ed = user;
 
+    // Without a GPU the window stays blank; the reason has already been reported
     ed->device = rc_gfx_device_make();
+    if (rc_gfx_device_is_none(ed->device)) {
+        return;
+    }
     ed->queue = rc_gfx_device_queue(ed->device);
     ed->surface = rc_gfx_surface_make(ed->device);
 }
@@ -51,6 +55,11 @@ static void editor_event(void *user, const rc_app_event *event)
 static void editor_frame(void *user)
 {
     editor *ed = user;
+
+    if (rc_gfx_surface_is_none(ed->surface)) {
+        return;
+    }
+
     rc_gfx_command_encoder encoder = rc_gfx_command_encoder_make(ed->device);
     rc_gfx_render_pass pass = rc_gfx_command_encoder_begin_render_pass(encoder, &(rc_gfx_render_pass_desc) {
         .color = {{
@@ -71,8 +80,12 @@ static void editor_deinit(void *user)
 {
     editor *ed = user;
 
-    rc_gfx_surface_release(ed->surface);
-    rc_gfx_device_release(ed->device);
+    if (!rc_gfx_surface_is_none(ed->surface)) {
+        rc_gfx_surface_release(ed->surface);
+    }
+    if (!rc_gfx_device_is_none(ed->device)) {
+        rc_gfx_device_release(ed->device);
+    }
 }
 
 

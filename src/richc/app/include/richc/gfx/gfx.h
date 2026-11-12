@@ -14,38 +14,35 @@
 
 // ---- handles ----
 
-// The id fields stand in until handles are settled with the genpool API.
-typedef struct rc_gfx_device {
-    uint32_t id_;
-} rc_gfx_device;
+// Generational handles from richc/handle.template.h, so each has _is_none and _is_equal. A handle
+// to a released object is caught when it is used.
 
-typedef struct rc_gfx_queue {
-    uint32_t id_;
-} rc_gfx_queue;
+#define RC_HANDLE_TYPE rc_gfx_device
+#include "richc/handle.template.h"
 
-typedef struct rc_gfx_surface {
-    uint32_t id_;
-} rc_gfx_surface;
+#define RC_HANDLE_TYPE rc_gfx_queue
+#include "richc/handle.template.h"
 
-typedef struct rc_gfx_texture_view {
-    uint32_t id_;
-} rc_gfx_texture_view;
+#define RC_HANDLE_TYPE rc_gfx_surface
+#include "richc/handle.template.h"
 
-typedef struct rc_gfx_command_encoder {
-    uint32_t id_;
-} rc_gfx_command_encoder;
+#define RC_HANDLE_TYPE rc_gfx_texture_view
+#include "richc/handle.template.h"
 
-typedef struct rc_gfx_render_pass {
-    uint32_t id_;
-} rc_gfx_render_pass;
+#define RC_HANDLE_TYPE rc_gfx_command_encoder
+#include "richc/handle.template.h"
 
-typedef struct rc_gfx_command_buffer {
-    uint32_t id_;
-} rc_gfx_command_buffer;
+#define RC_HANDLE_TYPE rc_gfx_render_pass
+#include "richc/handle.template.h"
+
+#define RC_HANDLE_TYPE rc_gfx_command_buffer
+#include "richc/handle.template.h"
 
 // ---- device ----
 
-// The GPU, ready to use. On wasm the page has already set up the context.
+// The GPU, ready to use, or none if there is no usable GPU; why is reported on stderr (the
+// console, on wasm). On wasm the page has already set up the context. The GL backend has one
+// device at a time.
 rc_gfx_device rc_gfx_device_make(void);
 
 // Destroy the device. Everything made from it must already be released.
@@ -56,7 +53,8 @@ rc_gfx_queue rc_gfx_device_queue(rc_gfx_device device);
 
 // ---- surface ----
 
-// The app window's surface (the canvas, on wasm).
+// The app window's surface (the canvas, on wasm), or none if it cannot be made; why is reported.
+// Presenting waits for the display, so it paces the frames.
 rc_gfx_surface rc_gfx_surface_make(rc_gfx_device device);
 
 // Destroy the surface.
@@ -70,7 +68,8 @@ void rc_gfx_surface_present(rc_gfx_surface surface);
 
 // ---- commands ----
 
-// A colour in linear space, each channel 0 to 1.
+// A colour, each channel 0 to 1. It is written to an attachment as it is, and only converted if
+// the attachment's format is sRGB.
 typedef struct rc_gfx_color {
     float r;
     float g;

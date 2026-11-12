@@ -11,12 +11,20 @@
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR wasm32)
 
-# Use the real clang binary so its LLVM tools can be found next to it
-find_program(RICHC_WASM_CLANG NAMES clang REQUIRED)
-file(REAL_PATH "${RICHC_WASM_CLANG}" RICHC_WASM_CLANG_REAL)
+# Keep a compiler given on the command line (CMake Tools passes its kit's) exactly as given:
+# changing it on a later configure makes CMake throw the cache away, toolchain and all. Its LLVM
+# tools sit beside the real binary, which /usr/bin/clang is usually a link to.
+if(NOT CMAKE_C_COMPILER)
+    find_program(RICHC_WASM_CLANG NAMES clang REQUIRED)
+    set(CMAKE_C_COMPILER "${RICHC_WASM_CLANG}")
+endif()
+get_filename_component(RICHC_WASM_CLANG_NAME "${CMAKE_C_COMPILER}" NAME)
+if(NOT RICHC_WASM_CLANG_NAME MATCHES "^clang")
+    message(FATAL_ERROR "wasm32 builds need clang, not ${CMAKE_C_COMPILER} (in VS Code, pick a Clang kit)")
+endif()
+file(REAL_PATH "${CMAKE_C_COMPILER}" RICHC_WASM_CLANG_REAL)
 get_filename_component(RICHC_LLVM_BIN "${RICHC_WASM_CLANG_REAL}" DIRECTORY)
 
-set(CMAKE_C_COMPILER "${RICHC_WASM_CLANG_REAL}")
 set(CMAKE_C_COMPILER_TARGET wasm32)
 
 # GNU ar cannot index wasm objects, and wasm-ld needs the index

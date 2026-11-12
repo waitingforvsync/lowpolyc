@@ -7,31 +7,20 @@
 #include <X11/XKBlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
-#include <poll.h>
 #include <stdio.h>
 
+#include "log.h"
+#include "platform/x11/x11.h"
 #include "richc/mem.h"
 
 enum {
     RC_X11_DEFAULT_WIDTH = 1280,
-    RC_X11_DEFAULT_HEIGHT = 720,
-
-    // X keycodes run from 8 to 255
-    RC_X11_KEYCODES = 256,
-
-    // How long the loop waits for an event before the next frame
-    RC_X11_FRAME_WAIT_MS = 16
+    RC_X11_DEFAULT_HEIGHT = 720
 };
 
-typedef struct rc_x11_window {
-    Display *display;
-    Window window;
-    Atom wm_delete_window;
-    bool close_requested;
+// The open window, while rc_app_run is running.
+static const rc_x11_window *rc_x11_open_window;
 
-    // Which keys are down, by keycode, so a held key's repeats are not taken for new presses
-    bool key_down[RC_X11_KEYCODES];
-} rc_x11_window;
 
 // The key at an X keycode. Every current X server (Xorg with evdev or libinput, and XWayland) uses
 // the Linux evdev code plus 8, which names a physical position whatever the layout.
@@ -72,7 +61,7 @@ static bool rc_x11_open(rc_x11_window *w, const rc_app_desc *desc)
     uint32_t height = desc->height ? desc->height : RC_X11_DEFAULT_HEIGHT;
     XSetWindowAttributes attributes = {
         .background_pixel = BlackPixel(w->display, screen),
-        .event_mask = KeyPressMask | KeyReleaseMask | FocusChangeMask
+        .event_mask = KeyPressMask | KeyReleaseMask | FocusChangeMask | StructureNotifyMask
     };
 
     w->window = XCreateWindow(w->display, RootWindow(w->display, screen), 0, 0, width, height, 0, CopyFromParent,
@@ -136,6 +125,14 @@ static void rc_x11_handle_events(rc_x11_window *w, const rc_app_desc *desc)
                 rc_x11_handle_key(w, &xevent.xkey, desc);
                 break;
 
+            case MapNotify:
+                w->mapped = true;
+                break;
+
+            case UnmapNotify:
+                w->mapped = false;
+                break;
+
             case FocusOut:
                 // Keys released while we cannot see them would otherwise stay down
                 rc_memset(w->key_down, 0, sizeof w->key_down);
@@ -154,14 +151,16 @@ static void rc_x11_handle_events(rc_x11_window *w, const rc_app_desc *desc)
 }
 
 
-// Wait until an event arrives, or for at most timeout_ms.
-static void rc_x11_wait(rc_x11_window *w, int timeout_ms)
+const rc_x11_window *rc_x11_app_window(void)
 {
-    struct pollfd connection = {.fd = ConnectionNumber(w->display), .events = POLLIN};
+    return rc_x11_open_window;
+}
 
-    if (!XPending(w->display)) {
-        poll(&connection, 1, timeout_ms);
-    }
+
+void rc_app_log(rc_str message)
+{
+    fwrite(message.data, 1, message.len, stderr);
+    fputc('\n', stderr);
 }
 
 
@@ -171,10 +170,11 @@ int32_t rc_app_run(const rc_app_desc *desc)
 
     RC_ASSERT(desc);
     if (!rc_x11_open(&w, desc)) {
-        fprintf(stderr, "rc_app_run: cannot open the X display\n");
+        rc_app_log(RC_STR("rc_app_run: cannot open the X display"));
         return 1;
     }
 
+    rc_x11_open_window = &w;
     if (desc->init) {
         desc->init(desc->user);
     }
@@ -183,17 +183,25 @@ int32_t rc_app_run(const rc_app_desc *desc)
         if (w.close_requested) {
             break;
         }
+
+        // Unmapped, nothing is drawn, so we sleep until an event comes
+        if (!w.mapped) {
+            XEvent next;
+
+            XPeekEvent(w.display, &next);
+            continue;
+        }
+
+        // Presenting waits for the display, which paces the loop
         if (desc->frame) {
             desc->frame(desc->user);
         }
-
-        // Nothing paces the frames yet, so we wait for input rather than spin
-        rc_x11_wait(&w, RC_X11_FRAME_WAIT_MS);
     }
     if (desc->deinit) {
         desc->deinit(desc->user);
     }
 
+    rc_x11_open_window = NULL;
     rc_x11_close(&w);
     return 0;
 }

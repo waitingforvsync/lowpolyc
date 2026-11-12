@@ -1,6 +1,7 @@
 // placeholder.c
 //
-// Stands in behind gfx.h until the GL backend exists, so everything links. The calls do nothing.
+// Stands in behind gfx.h on wasm until the GL backend comes there, so everything links.
+// The calls do nothing.
 
 #include "richc/gfx/gfx.h"
 

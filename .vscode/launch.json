@@ -1,0 +1,17 @@
+{
+    // Native runs and debugging go through CMake Tools (its launch and debug buttons). This adds the
+    // browser build: it builds build/wasm, serves the site and opens it in Chrome, then stops the
+    // server when the browser closes.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Lowpoly (wasm) in Chrome",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://127.0.0.1:8090/",
+            "webRoot": "${workspaceFolder}/build/wasm/site",
+            "preLaunchTask": "Serve lowpoly (wasm)",
+            "postDebugTask": "Stop lowpoly server"
+        }
+    ]
+}

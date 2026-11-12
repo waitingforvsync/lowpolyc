@@ -1,0 +1,49 @@
+{
+    // The wasm page, built and served for the "Lowpoly (wasm) in Chrome" launch configuration.
+    // The site is static files, so Python's own server is all it needs.
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build lowpoly (wasm)",
+            "type": "shell",
+            // Configures build/wasm first if need be, as the Wasm variant does
+            "command": "cmake -S . -B build/wasm -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm",
+            "options": {"cwd": "${workspaceFolder}"},
+            "problemMatcher": "$gcc",
+            "group": "build"
+        },
+        {
+            "label": "Serve lowpoly (wasm)",
+            "type": "shell",
+            "command": "python3 -u -m http.server 8090 --bind 127.0.0.1 --directory build/wasm/site",
+            "options": {"cwd": "${workspaceFolder}"},
+            "dependsOn": "Build lowpoly (wasm)",
+            "isBackground": true,
+            // Ready once the server says so; it never reports problems
+            "problemMatcher": {
+                "owner": "lowpoly-serve",
+                "pattern": {"regexp": "^never matches$"},
+                "background": {
+                    "activesBegin": true,
+                    "beginsPattern": "^Serving HTTP",
+                    "endsPattern": "^Serving HTTP"
+                }
+            }
+        },
+        {
+            // Stops the server after a browser session, so the next launch builds afresh
+            "label": "Stop lowpoly server",
+            "type": "shell",
+            "command": "echo ${input:terminateServer}",
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "terminateServer",
+            "type": "command",
+            "command": "workbench.action.tasks.terminate",
+            "args": "Serve lowpoly (wasm)"
+        }
+    ]
+}
