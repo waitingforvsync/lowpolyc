@@ -1,6 +1,5 @@
 {
     // The wasm page, built and served for the "Lowpoly (wasm) in Chrome" launch configuration.
-    // The site is static files, so Python's own server is all it needs.
     "version": "2.0.0",
     "tasks": [
         {
@@ -13,37 +12,20 @@
             "group": "build"
         },
         {
+            // Returns once the page is being served; see tools/serve_site.sh
             "label": "Serve lowpoly (wasm)",
             "type": "shell",
-            "command": "python3 -u -m http.server 8090 --bind 127.0.0.1 --directory build/wasm/site",
+            "command": "tools/serve_site.sh start",
             "options": {"cwd": "${workspaceFolder}"},
             "dependsOn": "Build lowpoly (wasm)",
-            "isBackground": true,
-            // Ready once the server says so; it never reports problems
-            "problemMatcher": {
-                "owner": "lowpoly-serve",
-                "pattern": {"regexp": "^never matches$"},
-                "background": {
-                    "activesBegin": true,
-                    "beginsPattern": "^Serving HTTP",
-                    "endsPattern": "^Serving HTTP"
-                }
-            }
+            "problemMatcher": []
         },
         {
-            // Stops the server after a browser session, so the next launch builds afresh
             "label": "Stop lowpoly server",
             "type": "shell",
-            "command": "echo ${input:terminateServer}",
+            "command": "tools/serve_site.sh stop",
+            "options": {"cwd": "${workspaceFolder}"},
             "problemMatcher": []
-        }
-    ],
-    "inputs": [
-        {
-            "id": "terminateServer",
-            "type": "command",
-            "command": "workbench.action.tasks.terminate",
-            "args": "Serve lowpoly (wasm)"
         }
     ]
 }
