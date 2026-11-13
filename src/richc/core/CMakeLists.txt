@@ -4,6 +4,7 @@ add_library(richc STATIC
     src/arena.c
     src/bitset.c
     src/hash.c
+    src/hash_index.c
     src/mstr.c
     src/str.c
     include/richc/arena.h
@@ -12,6 +13,8 @@ add_library(richc STATIC
     include/richc/genpool.template.h
     include/richc/handle.template.h
     include/richc/hash.h
+    include/richc/hash_index.h
+    include/richc/hash_index.template.h
     include/richc/hash_trie.template.h
     include/richc/hash_trie_foreach.template.h
     include/richc/macros.h
