@@ -168,7 +168,7 @@ typedef struct rc_test {
         int32_t: rc_test_check_int, \
         uint32_t: rc_test_check_int, \
         int64_t: rc_test_check_int, \
-        uint64_t: rc_test_check_int, \
+        uint64_t: rc_test_check_u64, \
         float: rc_test_check_f32, \
         double: rc_test_check_f64, \
         rc_str: rc_test_check_str \
@@ -177,6 +177,7 @@ typedef struct rc_test {
 // Check functions behind RC_CHECK, one per operand type.
 void rc_test_check_bool(bool actual, const char *op, bool expected, const char *expr, const char *file, int line);
 void rc_test_check_int(int64_t actual, const char *op, int64_t expected, const char *expr, const char *file, int line);
+void rc_test_check_u64(uint64_t actual, const char *op, uint64_t expected, const char *expr, const char *file, int line);
 void rc_test_check_f32(float actual, const char *op, float expected, const char *expr, const char *file, int line);
 void rc_test_check_f64(double actual, const char *op, double expected, const char *expr, const char *file, int line);
 void rc_test_check_str(rc_str actual, const char *op, rc_str expected, const char *expr, const char *file, int line);

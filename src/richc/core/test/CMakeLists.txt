@@ -6,6 +6,9 @@ add_executable(richc_core_test
     test_array.c
     test_bitset.c
     test_genpool.c
+    test_hash.c
+    test_hash_trie.c
+    test_hash_trie_foreach.c
     test_mstr.c
     test_ops.c
     test_pool.c

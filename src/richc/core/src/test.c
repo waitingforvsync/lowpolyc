@@ -111,6 +111,40 @@ void rc_test_check_int(int64_t actual, const char *op, int64_t expected, const c
 }
 
 
+void rc_test_check_u64(uint64_t actual, const char *op, uint64_t expected, const char *expr, const char *file, int line)
+{
+    bool pass = false;
+
+    if (rc_test_op_is(op, "==")) {
+        pass = actual == expected;
+    }
+    else if (rc_test_op_is(op, "!=")) {
+        pass = actual != expected;
+    }
+    else if (rc_test_op_is(op, "<")) {
+        pass = actual < expected;
+    }
+    else if (rc_test_op_is(op, ">")) {
+        pass = actual > expected;
+    }
+    else if (rc_test_op_is(op, "<=")) {
+        pass = actual <= expected;
+    }
+    else if (rc_test_op_is(op, ">=")) {
+        pass = actual >= expected;
+    }
+    else {
+        rc_test_unsupported(op, file, line);
+    }
+
+    if (pass) {
+        return;
+    }
+    printf("[FAIL]\n%s:%d: %s: actual %" PRIu64 "\n", file, line, expr, actual);
+    rc_test_fail();
+}
+
+
 void rc_test_check_f64(double actual, const char *op, double expected, const char *expr, const char *file, int line)
 {
     bool pass = false;
