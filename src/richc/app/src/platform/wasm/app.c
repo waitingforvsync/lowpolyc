@@ -2,10 +2,11 @@
 //
 // wasm32: the app on a web page. The page's script (app.js) owns the canvas and the loop:
 // rc_app_run sets the app up and returns, then the script calls rc_wasm_frame on each animation
-// frame and rc_wasm_key for each key event.
+// frame, and rc_wasm_key and rc_wasm_char for keyboard input.
 
 #include "richc/app/app.h"
 
+#include "keys.h"
 #include "log.h"
 
 #define RC_WASM_IMPORT_(name) __attribute__((import_module("richc"), import_name(name)))
@@ -57,15 +58,35 @@ void rc_wasm_frame(void)
 }
 
 
-// A key event: type is an rc_app_event_type and key an rc_key, which app.js maps from the DOM's
-// key codes. app.js drops repeats of a held key.
-RC_WASM_EXPORT_("rc_wasm_key") void rc_wasm_key(uint32_t type, uint32_t key);
-
-void rc_wasm_key(uint32_t type, uint32_t key)
+// Pass event to the app's event callback, if it has one.
+static void rc_wasm_send(rc_app_event event)
 {
     if (rc_wasm_running && rc_wasm_app.event) {
-        rc_app_event event = {.type = (uint8_t)type, .key = (uint16_t)key};
-
         rc_wasm_app.event(rc_wasm_app.user, &event);
     }
+}
+
+
+// A key event: type is an rc_app_event_type and scancode an rc_scancode, both mapped by app.js
+// from KeyboardEvent.code, layout_char the character the key types in the current layout with no
+// modifiers (0 if the browser cannot say), and modifiers rc_modifier bits.
+RC_WASM_EXPORT_("rc_wasm_key") void rc_wasm_key(uint32_t type, uint32_t scancode, uint32_t layout_char, uint32_t modifiers);
+
+void rc_wasm_key(uint32_t type, uint32_t scancode, uint32_t layout_char, uint32_t modifiers)
+{
+    rc_wasm_send((rc_app_event) {
+        .type = (uint8_t)type,
+        .modifiers = (uint8_t)modifiers,
+        .scancode = (uint16_t)scancode,
+        .key = rc_app_keycode((rc_scancode)scancode, layout_char)
+    });
+}
+
+
+// A char event: a character, or an editing key's rc_key, which app.js takes from KeyboardEvent.key.
+RC_WASM_EXPORT_("rc_wasm_char") void rc_wasm_char(uint32_t codepoint, uint32_t modifiers);
+
+void rc_wasm_char(uint32_t codepoint, uint32_t modifiers)
+{
+    rc_wasm_send((rc_app_event) {.type = RC_APP_EVENT_CHAR, .modifiers = (uint8_t)modifiers, .codepoint = codepoint});
 }

@@ -24,6 +24,20 @@ typedef struct rc_x11_window {
     // so the loop draws nothing until it is mapped.
     bool mapped;
 
+    // The X modifier masks alt, super and num lock are on, which the server's modifier mapping
+    // decides; shift, ctrl and caps lock have fixed ones
+    uint32_t alt_mask;
+    uint32_t super_mask;
+    uint32_t num_lock_mask;
+
+    // The rc_modifier bits as of the last key event, for the key ups sent on losing focus
+    uint8_t modifiers;
+
+    // The input method that turns key presses into text, and our context in it; both NULL if the
+    // display has none
+    XIM im;
+    XIC ic;
+
     // Which keys are down, by keycode, so a held key's repeats are not taken for new presses
     bool key_down[RC_X11_KEYCODES];
 } rc_x11_window;

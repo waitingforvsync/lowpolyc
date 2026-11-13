@@ -10,27 +10,37 @@
 #ifndef RC_APP_APP_H_
 #define RC_APP_APP_H_
 
+#include "richc/app/keys.h"
 #include "richc/str.h"
 
 // ---- input ----
 
-// A key, by its position on a US layout, whatever the user's layout.
-// Codes are added as we need them.
-typedef enum rc_key {
-    RC_KEY_UNKNOWN,
-    RC_KEY_SPACE
-} rc_key;
-
 typedef enum rc_app_event_type {
     RC_APP_EVENT_NONE,
+
+    // A key went down or came up: once each per press, however long the key is held. For keys as
+    // controls (by scancode) and hotkeys (by keycode and modifiers).
     RC_APP_EVENT_KEY_DOWN,
-    RC_APP_EVENT_KEY_UP
+    RC_APP_EVENT_KEY_UP,
+
+    // A held key, at the system's auto-repeat rate, between its down and its up. For the few
+    // hotkeys that should repeat, such as undo; everything else can ignore it.
+    RC_APP_EVENT_KEY_REPEAT,
+
+    // Typing, for text fields: a character, after the layout, shift, caps lock, AltGr, dead keys
+    // and compose have had their say; or an editing key (an arrow, home, end, page up or down,
+    // insert, delete, backspace, tab, enter or escape), as its rc_key. Repeats while the key is
+    // held. Ctrl or super with a character key is a hotkey rather than typing, so gives no char.
+    RC_APP_EVENT_CHAR
 } rc_app_event_type;
 
 // Something that happened to the window, passed to the event callback.
 typedef struct rc_app_event {
-    uint8_t type;  // rc_app_event_type
-    uint16_t key;  // rc_key, for the key events
+    uint8_t type;        // rc_app_event_type
+    uint8_t modifiers;   // rc_modifier bits, for key and char events, including the event's own key
+    uint16_t scancode;   // rc_scancode, for key events
+    uint32_t key;        // rc_key, for key events
+    uint32_t codepoint;  // for char events: the character, or the editing key's rc_key
 } rc_app_event;
 
 // ---- running ----

@@ -1,9 +1,12 @@
 # ---- app library ----
 
 add_library(richc_app STATIC
+    src/keys.c
     include/richc/app/app.h
+    include/richc/app/keys.h
     include/richc/gfx/gfx.h
     src/gl_context.h
+    src/keys.h
     src/log.h
 )
 
@@ -41,6 +44,16 @@ elseif(UNIX AND NOT APPLE)
         src/platform/x11/gl_context.c
         src/platform/x11/x11.h)
     target_link_libraries(richc_app PRIVATE X11::X11 ${RICHC_EGL_LIBRARY})
+elseif(WIN32)
+    # Not written yet: the stub stops the build with an #error
+    target_sources(richc_app PRIVATE src/platform/win32/app.c)
+elseif(APPLE)
+    # Not written yet: the stub stops the build with an #error
+    target_sources(richc_app PRIVATE src/platform/cocoa/app.c)
 else()
-    message(FATAL_ERROR "richc_app has no windowing backend for this platform yet: configure with RICHC_BUILD_APP=OFF")
+    message(FATAL_ERROR "richc_app has no platform for ${CMAKE_SYSTEM_NAME} yet: configure with RICHC_BUILD_APP=OFF")
+endif()
+
+if(RICHC_BUILD_TESTS)
+    add_subdirectory(test)
 endif()

@@ -71,6 +71,9 @@ All paths are under `src/richc/app/`.
 | `src/platform/x11/x11.h` | Private: the open X11 window, for the GL context |
 | `src/platform/x11/gl_context.c` | EGL on the X11 window |
 | `src/platform/wasm/gl_context.c`, `gl.js` | WebGL2 context and GL call forwarding |
+| `src/keys.c`, `src/keys.h` | Private: the keycode rules every platform shares |
+| `src/platform/win32/app.c`, `src/platform/cocoa/app.c` | Stubs that stop the build, describing how each platform will do the keyboard |
+| `test/` | `richc_app_test`, for what needs no window or GPU |
 | `tools/serve_site.sh` (repo root) | Serves `build/wasm/site` locally; VS Code's "Lowpoly (wasm) in Chrome" uses it |
 | `src/gfx/gl/` | The GL backend: `gfx.c`, plus `gl.h` declaring the GL subset it uses and `gl.c` loading it natively |
 
@@ -116,15 +119,45 @@ the window exits; in the browser, closing the tab is the end of it.
    GitHub Pages.
    - `gfx.c` is shared unchanged: `gl.h` declares the GL functions as imports
      on wasm, and as pointers loaded through EGL natively.
-   - `app.js` maps `KeyboardEvent.code` to `rc_key`, a second table to keep in
-     step with the X11 one. The canvas is sized in device pixels for now (see
-     high-DPI below).
-5. **Tidy up.**
-   - CI installs the X11 and EGL headers (`libx11-dev`, `libegl-dev`, both
-     added) and builds the native app.
-   - Unit tests for whatever needs no GPU, such as key mapping. The graphical
-     part is checked by running it.
-   - Update `CODING_STANDARDS.md`, `TODO.md` and this file.
+   - The canvas is sized in device pixels for now (see high-DPI below).
+
+### Keyboard input
+
+Three kinds of event, each for its own use (`richc/app/app.h`, `keys.h`):
+
+| Event | Carries | For | Repeats |
+|-------|---------|-----|---------|
+| `KEY_DOWN`, `KEY_UP` | scancode, keycode, modifiers | controls (by scancode), hotkeys (by keycode) | no: once each per press |
+| `KEY_REPEAT` | the same | the few hotkeys that should repeat, such as undo | yes |
+| `CHAR` | a character, or an editing key's keycode; modifiers | text fields | yes |
+
+- **Scancodes** say where a key is (USB HID usages, as SDL's). **Keycodes** say
+  what it means: the character the key types with no modifiers, lowercased,
+  with SDL's adjustments (the number row gives digits; a non-Latin character
+  gives the US one), or a named key. The editing keys' keycodes are what char
+  events carry for them; the ones macOS has are its function-key code points.
+- **Modifiers** come from the platform's own state on each event, including
+  the event's own key, so the app never tracks them.
+- Every platform gives the same values. Each finds a key's scancode and its
+  layout character; the shared `src/keys.c` turns those into the keycode, so
+  the rules live in one place and are unit tested (`richc_app_test`).
+- On losing focus, every key still down gets its key up.
+- X11: scancodes from evdev codes; layout characters from the keysym at level
+  0 of the event's group; text through an X input method (setting `LC_CTYPE`
+  from the environment if the program left it at "C"), editing keys from the
+  keysym; modifiers from the event state and the modifier mapping. Servers
+  without detectable auto-repeat are handled by pairing each repeat's release
+  with its press.
+- Browser: scancodes from `KeyboardEvent.code` (a second table to keep in step
+  with the X11 one); layout characters from the keyboard layout map where the
+  browser has one (Chromium), otherwise from `KeyboardEvent.key`; text and
+  editing keys from `KeyboardEvent.key`.
+- Win32 and macOS have stubs that stop the build with an `#error`. Their
+  comments map each technique onto the platform: `WM_KEYDOWN` and `WM_CHAR`,
+  `ToUnicodeEx`; `NSEvent`, `UCKeyTranslate`, `NSTextInputClient`.
+- Not yet: IME composition (Chinese, Japanese, Korean input), which needs
+  events for the text being composed and where to show it. Dead keys and
+  compose already work, since they arrive as finished characters.
 
 ## After milestone 1
 

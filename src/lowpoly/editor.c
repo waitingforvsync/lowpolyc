@@ -46,7 +46,7 @@ static void editor_event(void *user, const rc_app_event *event)
 {
     editor *ed = user;
 
-    if (event->type == RC_APP_EVENT_KEY_DOWN && event->key == RC_KEY_SPACE) {
+    if (event->type == RC_APP_EVENT_KEY_DOWN && event->scancode == RC_SCANCODE_SPACE) {
         ed->alt_colour = !ed->alt_colour;
     }
 }
@@ -112,7 +112,7 @@ int32_t editor_run(void)
 RC_TEST(editor, space_toggles_colour)
 {
     editor ed = {0};
-    rc_app_event space = {.type = RC_APP_EVENT_KEY_DOWN, .key = RC_KEY_SPACE};
+    rc_app_event space = {.type = RC_APP_EVENT_KEY_DOWN, .scancode = RC_SCANCODE_SPACE};
     rc_gfx_color first = editor_clear_colour(&ed);
 
     editor_event(&ed, &space);
@@ -125,8 +125,8 @@ RC_TEST(editor, space_toggles_colour)
 RC_TEST(editor, other_events_leave_colour)
 {
     editor ed = {0};
-    rc_app_event release = {.type = RC_APP_EVENT_KEY_UP, .key = RC_KEY_SPACE};
-    rc_app_event other = {.type = RC_APP_EVENT_KEY_DOWN, .key = RC_KEY_UNKNOWN};
+    rc_app_event release = {.type = RC_APP_EVENT_KEY_UP, .scancode = RC_SCANCODE_SPACE};
+    rc_app_event other = {.type = RC_APP_EVENT_KEY_DOWN, .scancode = RC_SCANCODE_UNKNOWN};
 
     editor_event(&ed, &release);
     editor_event(&ed, &other);
