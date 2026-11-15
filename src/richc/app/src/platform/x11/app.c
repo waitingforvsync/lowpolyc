@@ -10,11 +10,10 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 #include <locale.h>
-#include <stdio.h>
 
 #include "keys.h"
-#include "log.h"
 #include "platform/x11/x11.h"
+#include "richc/print.h"
 
 enum {
     RC_X11_DEFAULT_WIDTH = 1280,
@@ -648,20 +647,13 @@ const rc_x11_window *rc_x11_app_window(void)
 }
 
 
-void rc_app_log(rc_str message)
-{
-    fwrite(message.data, 1, message.len, stderr);
-    fputc('\n', stderr);
-}
-
-
 int32_t rc_app_run(const rc_app_desc *desc)
 {
     rc_x11_window w = {0};
 
     RC_ASSERT(desc);
     if (!rc_x11_open(&w, desc)) {
-        rc_app_log(RC_STR("rc_app_run: cannot open the X display"));
+        rc_print_err(RC_STR("rc_app_run: cannot open the X display\n"));
         return 1;
     }
 

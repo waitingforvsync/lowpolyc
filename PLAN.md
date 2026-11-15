@@ -66,7 +66,6 @@ All paths are under `src/richc/app/`.
 | `include/richc/gfx/gfx.h` | The GPU API |
 | `src/platform/x11/app.c` | `rc_app_run` natively: the Xlib window, its events and the frame loop |
 | `src/platform/wasm/app.c`, `app.js` | `rc_app_run` on wasm: canvas, `requestAnimationFrame` loop, input |
-| `src/log.h` | Private: reporting failures from shared code (stderr, or the console) |
 | `src/gl_context.h` | Private GL context interface: create, present, look up functions |
 | `src/platform/x11/x11.h` | Private: the open X11 window, for the GL context |
 | `src/platform/x11/gl_context.c` | EGL on the X11 window |
@@ -90,7 +89,6 @@ richc (`~/dev/richc/src/core`).
 
 | Feature | First needed for | In the old richc |
 |---------|------------------|------------------|
-| Debug output | reporting errors natively (stderr) and on wasm (the console). richc_app has a private `rc_app_log` for now | nothing; a new platform capability |
 | Monotonic time | frame timing, once something animates; a frame cap where presenting does not wait | `time.h` |
 | `vec2i` and friends | window size and mouse position, after milestone 1 | `math/vec2i.h` and the rest of `math/` |
 

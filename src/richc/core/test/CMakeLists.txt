@@ -5,6 +5,8 @@ add_executable(richc_core_test
     test_arena.c
     test_array.c
     test_bitset.c
+    test_bytes.c
+    test_file.c
     test_genpool.c
     test_hash.c
     test_hash_index.c

@@ -16,6 +16,9 @@ richc.
 - [macros.h, ops.h and mem.h](#macrosh-opsh-and-memh)
 - [str.h](#strh)
 - [mstr.h](#mstrh)
+- [bytes.h](#bytesh)
+- [file.h](#fileh)
+- [print.h](#printh)
 - [hash.h](#hashh)
 - [The array template](#the-array-template)
 - [bitset.h](#bitseth)
@@ -59,6 +62,14 @@ find them.
     compare equal must hash alike.
   - Blocks hold 4 nodes, not 16, so `pool_make(n)` and `pool_reserve(n)`
     reserve a quarter of the slots they did.
+- **Files:**
+  - `rc_file_exists` is false for a directory; it used to report anything
+    there.
+  - A path over 1023 bytes used to be cut short, so a different file was
+    opened; it is now `RC_FILE_ERROR_BAD_NAME`.
+  - On Windows, paths are UTF-8; they used to be in the ANSI code page.
+  - Loading a directory is `RC_FILE_ERROR_NOT_FOUND`; on Linux it used to be
+    `RC_FILE_ERROR_IO`.
 - **Tests:**
   - `RC_CHECK` on a `uint64_t` (and `size_t` on 64-bit targets) compares
     unsigned.
@@ -170,6 +181,8 @@ even between different arenas.
     - `rc_deg_to_rad`
   - `rc_clz_*`, `rc_ctz_*`, `rc_popcount_u32` and `rc_bitcast_f32/f64` are
     unchanged.
+  - New: `rc_bitcast_u32` and `rc_bitcast_u64`, which go the other way, from
+    bits to a float or double.
   - It no longer includes `<stdlib.h>`.
 - **mem.h** is new:
   - `rc_memcpy`, `rc_memmove`, `rc_memset` and `rc_memcmp`, with `uint32_t`
@@ -196,12 +209,44 @@ even between different arenas.
 ## mstr.h
 
 - **`rc_mstr_deinit` is now `rc_mstr_release`.**
-- **Float formatting is gone for now:** `rc_mstr_append_f32`,
-  `rc_mstr_append_f64` and `rc_float_format`. The old versions used
-  `snprintf`, and richc needs its own formatter first (see `TODO.md`).
+- **Float formatting is richc's own**, with the same API: `rc_mstr_append_f32`,
+  `rc_mstr_append_f64` and `rc_float_format`. The text is what `snprintf`
+  gives with `%.*g` or `%.*f`, except that NaN is always `nan`, never `-nan`.
 - **Lengths that would overflow `uint32_t` panic**, where they used to wrap.
 - **Unchanged:** the other appends (integers, hex, chars), `make`, `from_str`,
   `from_cstr`, `reset`, `reserve` and `replace`.
+
+## bytes.h
+
+- **Back with the same names:** `rc_view_bytes`, `rc_span_bytes`,
+  `rc_array_bytes`, `rc_view_bytes_as_str`, `rc_span_bytes_as_str` and
+  `rc_array_bytes_to_mstr`.
+- **The containers follow the new array template** (see
+  [The array template](#the-array-template)): `make_copy(view, ...)` is now
+  `from_view`, `deinit` is now `release`, and so on.
+
+## file.h
+
+- **Same functions and arguments:** `rc_file_size`, `rc_file_exists`,
+  `rc_file_load_text`, `rc_file_load_binary`, `rc_file_save_text`,
+  `rc_file_save_binary` and `rc_file_delete`.
+- **The result structs' `error` is a `uint8_t`**, holding an `rc_file_error`,
+  following the rule that struct members never have enum types. Comparisons,
+  switches and assignments to an `rc_file_error` still work.
+- **New error `RC_FILE_ERROR_BAD_NAME`**, for a path holding a null byte or too
+  long for the platform. A `switch` that lists every error needs a case for it.
+- **Behaviour changes** are under [Check these first](#check-these-first).
+- **On wasm**, files live in the page's memory, in the store `richc/fs.js`
+  keeps: the page fills it and takes saved files from it.
+
+## print.h
+
+- **New:** `rc_print` and `rc_print_err` write an `rc_str` to standard output
+  and standard error, as it is, with no formatting and no line break added.
+  Library code that called `printf` or `fputs` builds its text with the
+  `rc_mstr_append_*` functions and prints that.
+- **On wasm**, the page needs the imports from `richc/print.js`, which sends
+  each finished line to the console.
 
 ## hash.h
 
@@ -405,8 +450,6 @@ After:
 | Old | What it was |
 |---|---|
 | `richc/array/*.h` | per-type arrays: `u8` to `u64`, `i8` to `i64`, `f32`, `f64`, `bool`, `str`, `mstr`, `bitset` |
-| `richc/bytes.h` | `uint8_t` arrays (`rc_view_bytes` etc.), with conversions to and from strings |
-| `richc/file.h` | load and save whole files |
 | `richc/random.h` | `rc_random`, a PRNG |
 | `richc/time.h` | a monotonic nanosecond clock |
 | `richc/rect_pack.h` | a rectangle packer |
@@ -417,7 +460,7 @@ After:
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
 | `richc/zip/inflate.h` | DEFLATE and zlib decompression |
 | `richc/math/` | vectors, matrices, quaternions, rationals, polynomial solvers, and their arrays |
-| float formatting and number parsing | `rc_mstr_append_f32/f64`, `rc_float_format` |
+| number parsing | nothing yet stood in for `strtod` and `strtol` |
 
 To use an old algorithm template before it is ported, copy it and update its
 calls: `get_head` to `first`, `get_tail` to `drop_first`, and the bitset
@@ -436,11 +479,8 @@ What Baron uses that changed, roughly in order of effort:
   - `permanent_start = permanent.top` in `baron.c` and `baron.h`.
 - **Missing modules:**
   - the array headers for `u8`, `u32`, `i32`, `i64`, `str` and `bitset`
-  - `bytes.h` and `file.h`
   - `random.h`, for `RND`
   - `sort.h` (3 uses) and `lower_bound.h` (1)
-  - `rc_mstr_append_f64` with `rc_float_format` (2 uses in `value.c`), which
-    waits on float formatting
 - **`rc_str_substr`:** 11 calls in `assemble.c`, `expression.c` and `lexer.c`.
   Each already passes a difference (`x - start`), so it becomes
   `rc_str_substr(s, start, x)`.
@@ -448,6 +488,10 @@ What Baron uses that changed, roughly in order of effort:
   - Use the new macros and names.
   - Check the 4096-block `pool_make` reserves against the narrower blocks.
   - Rerun the tests, since walk order changes.
+- **Files** (17 calls in `main.c`, `output.c`, `assemble.c` and
+  `source_files.c`): add a case for `RC_FILE_ERROR_BAD_NAME` wherever errors
+  are listed, and check any code that relied on `rc_file_exists` seeing a
+  directory.
 - **Renames:**
   - `rc_arena_deinit` to `rc_arena_release` (about 200 calls)
   - the bitset `get_first_set`, `get_next_set` and `reset` (about 60)

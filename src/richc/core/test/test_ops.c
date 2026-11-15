@@ -56,3 +56,18 @@ RC_TEST(ops, popcount)
     RC_CHECK(rc_popcount_u32(0x55555555u), ==, 16u);
     RC_CHECK(rc_popcount_u32(0x80000001u), ==, 2u);
 }
+
+
+RC_TEST(ops, bitcast)
+{
+    RC_CHECK(rc_bitcast_f32(1.0f), ==, 0x3f800000u);
+    RC_CHECK(rc_bitcast_f32(-0.0f), ==, 0x80000000u);
+    RC_CHECK(rc_bitcast_f64(1.0), ==, 0x3ff0000000000000ull);
+    RC_CHECK(rc_bitcast_f64(-2.0), ==, 0xc000000000000000ull);
+    RC_CHECK_TRUE(rc_bitcast_u32(0x3f800000u) == 1.0f);
+    RC_CHECK_TRUE(rc_bitcast_u64(0xc000000000000000ull) == -2.0);
+
+    // Round trips keep every bit, signed zeros included
+    RC_CHECK(rc_bitcast_f32(rc_bitcast_u32(0x80000000u)), ==, 0x80000000u);
+    RC_CHECK(rc_bitcast_f64(rc_bitcast_u64(0x000fffffffffffffull)), ==, 0x000fffffffffffffull);
+}

@@ -169,7 +169,8 @@ wasm runtime defines those four symbols.
 
 `rc_arena` replaces `malloc`. `RC_ASSERT` / `RC_PANIC` replace `assert` /
 `abort`. `rc_mstr_append_*` and core number formatting and parsing replace
-`printf` / `strtod`. ASCII helpers in `richc/str.h` replace `<ctype.h>`. The
+`printf` / `strtod`, and `rc_print` / `rc_print_err` write the result to the
+standard streams. ASCII helpers in `richc/str.h` replace `<ctype.h>`. The
 platform layer handles files and time.
 
 ### The wasm runtime
@@ -594,9 +595,10 @@ type private to a single `.c`.
    identical bits on wasm are never checked there. Option: a small check
    module without the test framework (no `setjmp`) that runs under node and
    compares the golden math values, plus a few smoke checks.
-2. **Float formatting and parsing.** Shortest round-trip output (Ryu-style) or
-   fixed-precision only? Needed for OBJ/glTF export and the measurement box.
-   (Library code cannot call `snprintf`, so this is ours either way.)
+2. **Float formatting and parsing.** `rc_mstr_append_f32/f64` give `%g` and
+   `%f` with a precision, exactly. Is a shortest round-trip form (Ryu-style)
+   wanted as well, for OBJ/glTF export? And parsing (`strtod`) is still to
+   come.
 3. **Threads.** Keep the existing `thread/` module and scheduler as native-only,
    or leave them out of the new core until there is a need?
 4. **Geometry precision.** The TypeScript editor uses doubles throughout. richc

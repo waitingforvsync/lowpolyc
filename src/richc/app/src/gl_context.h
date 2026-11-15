@@ -5,7 +5,7 @@
 //
 // The backend holds the context in its device and the window in its surface, and passes them back
 // in. The fields are the platform's own handles, and {0} is none. Everything that can fail
-// reports why through rc_app_log.
+// reports why through rc_print_err.
 
 #ifndef RC_APP_GL_CONTEXT_H_
 #define RC_APP_GL_CONTEXT_H_

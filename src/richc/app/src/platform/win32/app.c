@@ -1,7 +1,7 @@
 // app.c
 //
-// Win32: not written yet. It needs rc_app_run (a window, its message loop and the frame loop) and
-// rc_app_log, as the X11 platform has, plus a GL context (WGL) or another gfx backend.
+// Win32: not written yet. It needs rc_app_run (a window, its message loop and the frame loop), as
+// the X11 platform has, plus a GL context (WGL) or another gfx backend.
 //
 // The keyboard maps onto Win32 as it does onto X11, through the shared rules in keys.h:
 //

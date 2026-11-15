@@ -1,10 +1,12 @@
 // lowpoly.js
 //
-// Loads lowpoly.wasm and runs it on the page's canvas. richc's app.js and gl.js supply the
-// module's imports and drive it; lowpoly itself adds nothing to them yet.
+// Loads lowpoly.wasm and runs it on the page's canvas. richc's app.js, gl.js, fs.js and print.js
+// supply the module's imports and drive it; lowpoly itself adds nothing to them yet.
 
 import { createApp } from './richc/app.js';
+import { createFs } from './richc/fs.js';
 import { createGl } from './richc/gl.js';
+import { createPrint } from './richc/print.js';
 
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
@@ -25,10 +27,15 @@ try {
     // The GL context comes first: the module expects it ready when it starts
     const gl = createGl(canvas);
     const app = createApp(canvas);
-    const { instance } = await load('lowpoly.wasm', { richc: { ...app.imports, ...gl.imports } });
+    const fs = createFs();
+    const print = createPrint();
+    const imports = { richc: { ...app.imports, ...gl.imports, ...fs.imports, ...print.imports } };
+    const { instance } = await load('lowpoly.wasm', imports);
 
     app.bind(instance);
     gl.bind(instance);
+    fs.bind(instance);
+    print.bind(instance);
 
     const result = instance.exports.start();
     if (result !== 0) {

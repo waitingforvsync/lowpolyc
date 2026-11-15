@@ -7,16 +7,12 @@
 #include "richc/app/app.h"
 
 #include "keys.h"
-#include "log.h"
 
 #define RC_WASM_IMPORT_(name) __attribute__((import_module("richc"), import_name(name)))
 #define RC_WASM_EXPORT_(name) __attribute__((export_name(name)))
 
 // Set the page's title from UTF-8 text.
 RC_WASM_IMPORT_("app_set_title") void rc_wasm_set_title(const char *data, uint32_t len);
-
-// Write a line to the console as an error.
-RC_WASM_IMPORT_("app_log") void rc_wasm_log(const char *data, uint32_t len);
 
 // The app, copied from rc_app_run's desc, which need only last as long as the call.
 static rc_app_desc rc_wasm_app;
@@ -36,12 +32,6 @@ int32_t rc_app_run(const rc_app_desc *desc)
         desc->init(desc->user);
     }
     return 0;
-}
-
-
-void rc_app_log(rc_str message)
-{
-    rc_wasm_log(message.data, message.len);
 }
 
 

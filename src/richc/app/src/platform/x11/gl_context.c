@@ -6,9 +6,9 @@
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <stdio.h>
 
 #include "platform/x11/x11.h"
+#include "richc/print.h"
 
 enum {
     // How many of EGL's matching configs we look through for one that suits the window
@@ -18,7 +18,17 @@ enum {
 // Report a failed EGL call, with EGL's error code.
 static void rc_egl_report(const char *what)
 {
-    fprintf(stderr, "%s (EGL error 0x%04x)\n", what, (unsigned)eglGetError());
+    static const char digits[] = "0123456789abcdef";
+    uint32_t error = (uint32_t)eglGetError();
+    char code[4];
+
+    for (uint32_t i = 0; i < 4; i++) {
+        code[i] = digits[(error >> (12 - 4 * i)) & 15u];
+    }
+    rc_print_err(rc_str_from_cstr(what));
+    rc_print_err(RC_STR(" (EGL error 0x"));
+    rc_print_err(rc_str_from_ptr(code, 4));
+    rc_print_err(RC_STR(")\n"));
 }
 
 

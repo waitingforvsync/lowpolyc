@@ -49,7 +49,7 @@ endif()
 
 # ---- web page (wasm only) ----
 
-# The site GitHub Pages serves: lowpoly.wasm, the files in web/ and richc_app's
+# The site GitHub Pages serves: lowpoly.wasm, the files in web/ and richc's
 # scripts (in richc/), gathered in <build>/site. tools/serve_site.sh serves
 # build/wasm/site over http to try it locally.
 if(RICHC_WASM)
@@ -68,9 +68,10 @@ if(RICHC_WASM)
         list(APPEND LOWPOLY_SITE_FILES ${LOWPOLY_SITE_DIR}/${file})
     endforeach()
 
-    # richc_app's scripts, which lowpoly.js imports from richc/
-    get_target_property(RICHC_WEB_FILES richc_app RICHC_WEB_FILES)
-    foreach(source ${RICHC_WEB_FILES})
+    # richc's and richc_app's scripts, which lowpoly.js imports from richc/
+    get_target_property(RICHC_CORE_WEB_FILES richc RICHC_WEB_FILES)
+    get_target_property(RICHC_APP_WEB_FILES richc_app RICHC_WEB_FILES)
+    foreach(source ${RICHC_CORE_WEB_FILES} ${RICHC_APP_WEB_FILES})
         get_filename_component(file ${source} NAME)
         add_custom_command(
             OUTPUT ${LOWPOLY_SITE_DIR}/richc/${file}

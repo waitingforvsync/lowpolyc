@@ -122,7 +122,6 @@ export function createApp(canvas) {
         app_set_title: (data, len) => {
             document.title = text(data, len);
         },
-        app_log: (data, len) => console.error(text(data, len)),
     };
 
     // Draw in device pixels, filling the canvas's size on the page

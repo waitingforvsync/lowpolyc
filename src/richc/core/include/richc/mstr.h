@@ -18,6 +18,14 @@
 // We only ever take an arena by pointer, so a forward declaration will do.
 typedef struct rc_arena rc_arena;
 
+// How rc_mstr_append_f32 and _f64 write a number. The zero value is "%g" with six significant
+// digits: the shortest of fixed point or exponent form, with trailing zeros dropped, so a whole
+// number within the precision comes out with no point at all.
+typedef struct rc_float_format {
+    uint8_t precision;  // significant digits (fixed: places); 0 = 6; 17 round-trips a double
+    bool fixed;         // fixed point, as "%f", rather than "%g"
+} rc_float_format;
+
 typedef struct rc_mstr {
     union {
         struct {
@@ -77,6 +85,11 @@ void rc_mstr_append_i32(rc_mstr *s, int32_t value, rc_arena *arena);
 void rc_mstr_append_i64(rc_mstr *s, int64_t value, rc_arena *arena);
 void rc_mstr_append_u32(rc_mstr *s, uint32_t value, rc_arena *arena);
 void rc_mstr_append_u64(rc_mstr *s, uint64_t value, rc_arena *arena);
+
+// Append a floating-point number in decimal, exactly as C's "%.*g" or "%.*f" would. Infinities are
+// "inf" and "-inf", and NaN is always "nan", whatever its sign.
+void rc_mstr_append_f32(rc_mstr *s, float value, rc_float_format fmt, rc_arena *arena);
+void rc_mstr_append_f64(rc_mstr *s, double value, rc_float_format fmt, rc_arena *arena);
 
 // Append a number in upper-case hex, zero-padded to its full width (two digits for hex8, up to
 // sixteen for hex64).

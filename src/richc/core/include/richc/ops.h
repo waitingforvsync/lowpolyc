@@ -111,4 +111,26 @@ static inline uint64_t rc_bitcast_f64(double x)
     return pun.u;
 }
 
+// The float with the bits of x.
+static inline float rc_bitcast_u32(uint32_t x)
+{
+    union {
+        uint32_t u;
+        float f;
+    } pun = {.u = x};
+
+    return pun.f;
+}
+
+// The double with the bits of x.
+static inline double rc_bitcast_u64(uint64_t x)
+{
+    union {
+        uint64_t u;
+        double f;
+    } pun = {.u = x};
+
+    return pun.f;
+}
+
 #endif // RC_OPS_H_

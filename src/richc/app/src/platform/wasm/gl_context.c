@@ -6,7 +6,7 @@
 
 #include "gl_context.h"
 
-#include "log.h"
+#include "richc/print.h"
 
 // The id of gl.js's WebGL2 context, or 0 if the browser could not make one.
 __attribute__((import_module("richc"), import_name("gl_context_id"))) uint32_t rc_wasm_gl_context_id(void);
@@ -21,7 +21,7 @@ rc_gl_context rc_gl_context_make(void)
     uint32_t id = rc_wasm_gl_context_id();
 
     if (id == 0) {
-        rc_app_log(RC_STR("rc_gl_context_make: the browser has no WebGL2"));
+        rc_print_err(RC_STR("rc_gl_context_make: the browser has no WebGL2\n"));
         return (rc_gl_context) {0};
     }
     return (rc_gl_context) {.context_ = (void *)(uintptr_t)id};

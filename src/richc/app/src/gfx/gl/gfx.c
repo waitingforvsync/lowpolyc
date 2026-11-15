@@ -13,9 +13,9 @@
 #include "richc/gfx/gfx.h"
 
 #include "gfx/gl/gl.h"
-#include "log.h"
 #include "richc/arena.h"
 #include "richc/mstr.h"
+#include "richc/print.h"
 
 // ---- commands ----
 
@@ -130,7 +130,8 @@ static void rc_gl_report_errors(rc_str where)
 
         rc_mstr_append(&message, RC_STR(": GL error 0x"), &scratch);
         rc_mstr_append_hex16(&message, (uint16_t)error, &scratch);
-        rc_app_log(message.view);
+        rc_mstr_append_char(&message, '\n', &scratch);
+        rc_print_err(message.view);
     }
 }
 #endif
@@ -141,7 +142,7 @@ static void rc_gl_report_errors(rc_str where)
 rc_gfx_device rc_gfx_device_make(void)
 {
     if (!rc_gfx_device_is_none(the_backend.device)) {
-        rc_app_log(RC_STR("rc_gfx_device_make: the GL backend has one device at a time"));
+        rc_print_err(RC_STR("rc_gfx_device_make: the GL backend has one device at a time\n"));
         return (rc_gfx_device) {0};
     }
 
@@ -157,7 +158,8 @@ rc_gfx_device rc_gfx_device_make(void)
         rc_mstr message = rc_mstr_from_str(RC_STR("rc_gfx_device_make: GL has no "), 64, &scratch);
 
         rc_mstr_append(&message, rc_str_from_cstr(missing), &scratch);
-        rc_app_log(message.view);
+        rc_mstr_append_char(&message, '\n', &scratch);
+        rc_print_err(message.view);
         rc_arena_release(&scratch);
         rc_gl_context_release(&context);
         return (rc_gfx_device) {0};

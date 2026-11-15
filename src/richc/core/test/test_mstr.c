@@ -4,7 +4,10 @@
 
 #include "richc/mstr.h"
 
+#include <stdio.h>
+
 #include "richc/arena.h"
+#include "richc/ops.h"
 #include "richc/test.h"
 
 // Most tests run against a fresh default arena.
@@ -476,6 +479,172 @@ RC_TEST_STEP(mstr, append_hex, fix)
     rc_mstr_append_hex8(&m, UINT8_MAX, &fix->a);
     rc_mstr_append_hex64(&m, UINT64_MAX, &fix->a);
     RC_CHECK(m.view, ==, RC_STR("FFFFFFFFFFFFFFFFFF"));
+}
+
+
+// ---- float appends ----
+
+// value written with fmt, as a fresh string.
+static rc_str float_text(double value, rc_float_format fmt, rc_arena *arena)
+{
+    rc_mstr s = {0};
+
+    rc_mstr_append_f64(&s, value, fmt, arena);
+    return s.view;
+}
+
+
+// True if value with fmt matches what the C library's printf gives.
+static bool float_matches_printf(double value, rc_float_format fmt, rc_arena *arena)
+{
+    static char expected[1024];
+    int32_t precision = fmt.precision != 0 ? fmt.precision : 6;
+    int32_t len = snprintf(expected, sizeof expected, fmt.fixed ? "%.*f" : "%.*g", precision,
+        value);
+    rc_str got = float_text(value, fmt, arena);
+
+    if (!rc_str_is_equal(got, rc_str_from_ptr(expected, (uint32_t)len))) {
+        printf("    %.17g with %s%d: expected %s, got %.*s\n", value, fmt.fixed ? "f" : "g",
+            precision, expected, (int)got.len, got.data);
+        return false;
+    }
+    return true;
+}
+
+
+RC_TEST_STEP(mstr, append_f64_shortest, fix)
+{
+    rc_float_format g = {0};
+
+    RC_CHECK(float_text(0.0, g, &fix->a), ==, RC_STR("0"));
+    RC_CHECK(float_text(-0.0, g, &fix->a), ==, RC_STR("-0"));
+    RC_CHECK(float_text(1.0, g, &fix->a), ==, RC_STR("1"));
+    RC_CHECK(float_text(-2.5, g, &fix->a), ==, RC_STR("-2.5"));
+    RC_CHECK(float_text(0.1, g, &fix->a), ==, RC_STR("0.1"));
+    RC_CHECK(float_text(123456.0, g, &fix->a), ==, RC_STR("123456"));
+    RC_CHECK(float_text(1234567.0, g, &fix->a), ==, RC_STR("1.23457e+06"));
+    RC_CHECK(float_text(0.0001, g, &fix->a), ==, RC_STR("0.0001"));
+    RC_CHECK(float_text(0.00001, g, &fix->a), ==, RC_STR("1e-05"));
+    RC_CHECK(float_text(1e100, g, &fix->a), ==, RC_STR("1e+100"));
+    RC_CHECK(float_text(5e-324, g, &fix->a), ==, RC_STR("4.94066e-324"));
+    RC_CHECK(float_text(999999.5, g, &fix->a), ==, RC_STR("1e+06"));
+}
+
+
+RC_TEST_STEP(mstr, append_f64_precision, fix)
+{
+    RC_CHECK(float_text(0.1, (rc_float_format) {.precision = 17}, &fix->a), ==,
+        RC_STR("0.10000000000000001"));
+    RC_CHECK(float_text(3.14159265358979, (rc_float_format) {.precision = 3}, &fix->a), ==,
+        RC_STR("3.14"));
+    RC_CHECK(float_text(2.5, (rc_float_format) {.precision = 1}, &fix->a), ==, RC_STR("2"));
+    RC_CHECK(float_text(3.5, (rc_float_format) {.precision = 1}, &fix->a), ==, RC_STR("4"));
+    RC_CHECK(float_text(9.5, (rc_float_format) {.precision = 1}, &fix->a), ==, RC_STR("1e+01"));
+}
+
+
+RC_TEST_STEP(mstr, append_f64_fixed, fix)
+{
+    rc_float_format f = {.fixed = true};
+
+    RC_CHECK(float_text(0.0, f, &fix->a), ==, RC_STR("0.000000"));
+    RC_CHECK(float_text(1.5, f, &fix->a), ==, RC_STR("1.500000"));
+    RC_CHECK(float_text(-1e-7, f, &fix->a), ==, RC_STR("-0.000000"));
+    RC_CHECK(float_text(0.9999999, f, &fix->a), ==, RC_STR("1.000000"));
+    RC_CHECK(float_text(1e20, f, &fix->a), ==, RC_STR("100000000000000000000.000000"));
+    RC_CHECK(float_text(0.125, (rc_float_format) {.precision = 2, .fixed = true}, &fix->a), ==,
+        RC_STR("0.12"));
+    RC_CHECK(float_text(0.375, (rc_float_format) {.precision = 2, .fixed = true}, &fix->a), ==,
+        RC_STR("0.38"));
+
+    // Stored a hair either side of the tie, so the exact value decides
+    RC_CHECK(float_text(1.005, (rc_float_format) {.precision = 2, .fixed = true}, &fix->a), ==,
+        RC_STR("1.00"));
+    RC_CHECK(float_text(99.995, (rc_float_format) {.precision = 2, .fixed = true}, &fix->a), ==,
+        RC_STR("100.00"));
+}
+
+
+RC_TEST_STEP(mstr, append_f64_special, fix)
+{
+    rc_float_format g = {0};
+    double inf = rc_bitcast_u64(0x7ff0000000000000ull);
+
+    RC_CHECK(float_text(inf, g, &fix->a), ==, RC_STR("inf"));
+    RC_CHECK(float_text(-inf, (rc_float_format) {.fixed = true}, &fix->a), ==, RC_STR("-inf"));
+    RC_CHECK(float_text(inf - inf, g, &fix->a), ==, RC_STR("nan"));
+    RC_CHECK(float_text(-(inf - inf), g, &fix->a), ==, RC_STR("nan"));
+}
+
+
+RC_TEST_STEP(mstr, append_f32_widens, fix)
+{
+    rc_mstr s = {0};
+
+    rc_mstr_append_f32(&s, 0.1f, (rc_float_format) {0}, &fix->a);
+    rc_mstr_append_char(&s, ' ', &fix->a);
+    rc_mstr_append_f32(&s, 0.1f, (rc_float_format) {.precision = 9}, &fix->a);
+    RC_CHECK(s.view, ==, RC_STR("0.1 0.100000001"));
+}
+
+
+RC_TEST_STEP(mstr, append_f64_extremes_match_printf, fix)
+{
+    // The largest and smallest, normal and subnormal, at every precision
+    static const uint64_t patterns[] = {
+        0x7fefffffffffffffull, 0x0010000000000000ull, 0x000fffffffffffffull,
+        0x0000000000000001ull, 0x3ff0000000000000ull, 0x3fefffffffffffffull,
+        0x4340000000000000ull, 0x433fffffffffffffull, 0x3fb999999999999aull
+    };
+    bool ok = true;
+
+    for (uint32_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
+        double value = rc_bitcast_u64(patterns[i]);
+
+        for (uint32_t precision = 1; precision <= 255; precision++) {
+            rc_arena_mark mark = rc_arena_save(&fix->a);
+
+            ok &= float_matches_printf(value, (rc_float_format) {.precision = (uint8_t)precision},
+                &fix->a);
+            ok &= float_matches_printf(value,
+                (rc_float_format) {.precision = (uint8_t)precision, .fixed = true}, &fix->a);
+            rc_arena_restore(&fix->a, mark);
+        }
+    }
+    RC_CHECK_TRUE(ok);
+}
+
+
+RC_TEST_STEP(mstr, append_f64_random_matches_printf, fix)
+{
+    // Random bit patterns cover every exponent; random short decimals land on ties
+    uint64_t state = 0x9e3779b97f4a7c15ull;
+    bool ok = true;
+
+    for (uint32_t i = 0; i < 20000 && ok; i++) {
+        rc_arena_mark mark = rc_arena_save(&fix->a);
+        double value;
+        uint8_t precision;
+
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        value = rc_bitcast_u64(state);
+        if (i % 2 == 1) {
+            value = (double)(int64_t)(state >> 44) / 1000.0;
+        }
+        if (value != value || value - value != 0.0) {
+            continue;
+        }
+        precision = (uint8_t)(1 + (state >> 20) % 20);
+        ok &= float_matches_printf(value, (rc_float_format) {0}, &fix->a);
+        ok &= float_matches_printf(value, (rc_float_format) {.precision = precision}, &fix->a);
+        ok &= float_matches_printf(value, (rc_float_format) {.precision = 17}, &fix->a);
+        if (value < 1e30 && value > -1e30) {
+            ok &= float_matches_printf(value, (rc_float_format) {.precision = precision,
+                .fixed = true}, &fix->a);
+        }
+        rc_arena_restore(&fix->a, mark);
+    }
+    RC_CHECK_TRUE(ok);
 }
 
 

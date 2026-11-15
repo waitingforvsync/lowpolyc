@@ -8,11 +8,6 @@ it is done.
 Library code cannot call libc (see `CODING_STANDARDS.md`), so these old richc
 features were left out until richc has its own implementation.
 
-- **`rc_mstr_append_f32` / `rc_mstr_append_f64`** and `rc_float_format`. The old
-  versions called `snprintf` with `%g` / `%f`. They need richc's own float
-  formatting, which is open question 2 in `CODING_STANDARDS.md` (shortest
-  round-trip, or fixed precision only?). The old tests for them are in
-  `~/dev/richc/src/core/test/test_mstr.c` (`append_floats*`).
 - **Number parsing** to replace `strtod` / `strtol`, which nothing has needed
   yet.
 - **Public ASCII helpers** in `richc/str.h` to replace `<ctype.h>`. For now

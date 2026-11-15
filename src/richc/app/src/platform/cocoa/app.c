@@ -1,8 +1,8 @@
 // app.c
 //
 // macOS (Cocoa): not written yet, and will be Objective-C (app.m). It needs rc_app_run (an
-// NSApplication, a window and the frame loop) and rc_app_log, as the X11 platform has, plus a gfx
-// backend (Metal, or GL through ANGLE).
+// NSApplication, a window and the frame loop), as the X11 platform has, plus a gfx backend (Metal,
+// or GL through ANGLE).
 //
 // The keyboard maps onto Cocoa as it does onto X11, through the shared rules in keys.h:
 //
