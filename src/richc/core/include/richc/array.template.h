@@ -44,9 +44,9 @@
 #define RC_AT(c, i) (*(RC_ASSERT((uint32_t)(i) < (c).num), (c).data + (uint32_t)(i)))
 
 // Brace initialisers for a view or span of a C array, for declarations only. Never pass a
-// pointer: the count comes from sizeof.
-#define RC_VIEW(arr) {.data = (arr), .num = (uint32_t)(sizeof(arr) / sizeof((arr)[0]))}
-#define RC_SPAN(arr) {.data = (arr), .num = (uint32_t)(sizeof(arr) / sizeof((arr)[0]))}
+// pointer: the count comes from RC_COUNT.
+#define RC_VIEW(arr) {.data = (arr), .num = RC_COUNT(arr)}
+#define RC_SPAN(arr) {.data = (arr), .num = RC_COUNT(arr)}
 
 #endif // RC_ARRAY_TEMPLATE_H_
 

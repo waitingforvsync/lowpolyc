@@ -31,14 +31,14 @@ RC_TEST_STEP(file, text_round_trip, fix)
     rc_str path = RC_STR("richc_test_file_text.txt");
     rc_str text = RC_STR("hello\nworld\r\n");
 
-    RC_CHECK(rc_file_save_text(path, text), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_text(path, text), ==, RC_FILE_ERROR_NONE);
 
     rc_file_load_text_result loaded = rc_file_load_text(path, 0, &fix->a);
-    RC_CHECK(loaded.error, ==, RC_FILE_OK);
+    RC_CHECK(loaded.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.text.view, ==, text);
     RC_CHECK_TRUE(loaded.text.data[loaded.text.len] == '\0');
     RC_CHECK(loaded.text.cap, >=, loaded.text.len + 1);
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 
@@ -48,13 +48,13 @@ RC_TEST_STEP(file, binary_round_trip_keeps_zero_bytes, fix)
     rc_view_bytes bytes = RC_VIEW(data);
     rc_str path = RC_STR("richc_test_file_binary.bin");
 
-    RC_CHECK(rc_file_save_binary(path, bytes), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_binary(path, bytes), ==, RC_FILE_ERROR_NONE);
 
     rc_file_load_binary_result loaded = rc_file_load_binary(path, 0, &fix->a);
-    RC_CHECK(loaded.error, ==, RC_FILE_OK);
+    RC_CHECK(loaded.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.contents.num, ==, 5u);
     RC_CHECK(rc_memcmp(loaded.contents.data, data, 5), ==, 0);
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 
@@ -70,14 +70,14 @@ RC_TEST_STEP(file, a_large_file_round_trips, fix)
         state = state * 1664525u + 1013904223u;
         rc_array_bytes_push(&data, (uint8_t)(state >> 24), NULL);
     }
-    RC_CHECK(rc_file_save_binary(path, data.view), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_binary(path, data.view), ==, RC_FILE_ERROR_NONE);
 
     rc_file_load_binary_result loaded = rc_file_load_binary(path, 0, &fix->a);
-    RC_CHECK(loaded.error, ==, RC_FILE_OK);
+    RC_CHECK(loaded.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.contents.num, ==, size);
     RC_CHECK(rc_memcmp(loaded.contents.data, data.data, size), ==, 0);
     RC_CHECK(rc_file_size(path).size, ==, size);
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 
@@ -85,21 +85,21 @@ RC_TEST_STEP(file, empty_file, fix)
 {
     rc_str path = RC_STR("richc_test_file_empty.txt");
 
-    RC_CHECK(rc_file_save_text(path, RC_STR("")), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_text(path, RC_STR("")), ==, RC_FILE_ERROR_NONE);
     RC_CHECK(rc_file_size(path).size, ==, 0u);
 
     // Still a valid, terminated string, and valid bytes
     rc_file_load_text_result text = rc_file_load_text(path, 0, &fix->a);
-    RC_CHECK(text.error, ==, RC_FILE_OK);
+    RC_CHECK(text.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK_TRUE(rc_mstr_is_valid(&text.text));
     RC_CHECK(text.text.len, ==, 0u);
     RC_CHECK_TRUE(text.text.data[0] == '\0');
 
     rc_file_load_binary_result binary = rc_file_load_binary(path, 0, &fix->a);
-    RC_CHECK(binary.error, ==, RC_FILE_OK);
+    RC_CHECK(binary.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK_TRUE(rc_array_bytes_is_valid(&binary.contents));
     RC_CHECK(binary.contents.num, ==, 0u);
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 
@@ -108,12 +108,12 @@ RC_TEST_STEP(file, capacity, fix)
     // One spare byte by default, or the minimum asked for
     rc_str path = RC_STR("richc_test_file_capacity.bin");
 
-    RC_CHECK(rc_file_save_text(path, RC_STR("0123456789")), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_text(path, RC_STR("0123456789")), ==, RC_FILE_ERROR_NONE);
     RC_CHECK(rc_file_load_binary(path, 0, &fix->a).contents.cap, ==, 11u);
     RC_CHECK(rc_file_load_binary(path, 1000, &fix->a).contents.cap, ==, 1000u);
     RC_CHECK(rc_file_load_text(path, 0, &fix->a).text.cap, ==, 11u);
     RC_CHECK(rc_file_load_text(path, 64, &fix->a).text.cap, ==, 64u);
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 
@@ -121,10 +121,10 @@ RC_TEST_STEP(file, saving_truncates, fix)
 {
     rc_str path = RC_STR("richc_test_file_truncate.txt");
 
-    RC_CHECK(rc_file_save_text(path, RC_STR("a much longer first version")), ==, RC_FILE_OK);
-    RC_CHECK(rc_file_save_text(path, RC_STR("short")), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_text(path, RC_STR("a much longer first version")), ==, RC_FILE_ERROR_NONE);
+    RC_CHECK(rc_file_save_text(path, RC_STR("short")), ==, RC_FILE_ERROR_NONE);
     RC_CHECK(rc_file_load_text(path, 0, &fix->a).text.view, ==, RC_STR("short"));
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 
@@ -134,11 +134,11 @@ RC_TEST_STEP(file, paths_need_no_terminator, fix)
     rc_str longer = RC_STR("richc_test_file_unterminated.txtXYZ");
     rc_str path = rc_str_drop_last(longer, 3);
 
-    RC_CHECK(rc_file_save_text(path, RC_STR("abc")), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_text(path, RC_STR("abc")), ==, RC_FILE_ERROR_NONE);
     RC_CHECK_TRUE(rc_file_exists(RC_STR("richc_test_file_unterminated.txt")));
     RC_CHECK_FALSE(rc_file_exists(longer));
     RC_CHECK(rc_file_load_text(path, 0, &fix->a).text.view, ==, RC_STR("abc"));
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
 }
 
 // ---- measuring, existence and deleting ----
@@ -147,13 +147,13 @@ RC_TEST(file, size_and_exists)
 {
     rc_str path = RC_STR("richc_test_file_size.txt");
 
-    RC_CHECK(rc_file_save_text(path, RC_STR("12345")), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_save_text(path, RC_STR("12345")), ==, RC_FILE_ERROR_NONE);
 
     rc_file_size_result size = rc_file_size(path);
-    RC_CHECK(size.error, ==, RC_FILE_OK);
+    RC_CHECK(size.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(size.size, ==, 5u);
     RC_CHECK_TRUE(rc_file_exists(path));
-    RC_CHECK(rc_file_delete(path), ==, RC_FILE_OK);
+    RC_CHECK(rc_file_delete(path), ==, RC_FILE_ERROR_NONE);
     RC_CHECK_FALSE(rc_file_exists(path));
 }
 

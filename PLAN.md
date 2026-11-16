@@ -162,25 +162,63 @@ Three kinds of event, each for its own use (`richc/app/app.h`, `keys.h`):
 What lowpoly needs next sets the order. Likely:
 
 - Window resize and mouse input.
-- Buffers, shaders, pipelines and bind groups, for the first mesh. This needs
-  the shader decision below.
+- Buffers, shaders, pipelines and bind groups, for the first mesh. The
+  shaders come from richc_shader: see below.
 - Textures, then text.
 - A WebGPU backend in the browser, and a Vulkan backend natively.
 - Rendering on its own thread natively, chosen through `rc_app_desc`.
 - Wayland, Windows and macOS.
 
+## Shaders
+
+Shaders are written in WGSL, in `.wgsl` files, and translated by richc's own
+translator, the `richc_shader` library in `src/richc/shader/`. It depends only
+on core, so it builds anywhere, freestanding wasm included.
+
+- `rc_add_shaders(target file.wgsl ...)` in CMake runs the shader tool on each
+  file at build time. The program includes `"shaders/file.wgsl.h"`, which
+  defines a static `rc_shader_package` called `file_wgsl`. A wasm build makes
+  a native copy of the tool first, through ExternalProject.
+- A package (`richc/shader/shader.h`) holds the WGSL, each entry point's
+  GLSL ES 3.00 and GLSL 4.60, and the reflection a backend needs: every
+  binding with its type, the stages that use it and a buffer's least size, and
+  each entry point's combined samplers, blocks, vertex inputs and fragment
+  outputs.
+- `rc_wgsl_translate` makes a package at run time too.
+- We translate the subset of WGSL our shaders use: vertex and fragment
+  shaders, uniform and storage buffers, textures and samplers, and the
+  built-in functions that go with them. Anything else, and anything a target
+  can't express, is an error, never a quiet mistranslation.
+
+What the GL backend must do to match:
+
+- Bind each combined sampler (`rc_t0_1_s0_2`: texture 0/1 with sampler 0/2,
+  or `rc_t0_1` for a texture read without one) to a texture unit, and each
+  block (`rc_ubo_0_0`, `rc_ssbo_0_1`) to a buffer binding point, by name.
+- Vertex inputs are at their locations. Values between the stages are matched
+  by name (`rc_var_N`), since GLSL ES 3.00 has no locations for them.
+- On GL 4.6, set `glClipControl` for 0 to 1 depth; the GLSL ES 3.00 shaders
+  remap depth themselves. Neither flips y: the backend decides how to match
+  WebGPU's y-down framebuffer.
+- WGSL's flat interpolation takes the first vertex, and GL's the last:
+  `glProvokingVertex` on desktop GL, `WEBGL_provoking_vertex` where WebGL2 has
+  it.
+
+The tests save every GLSL program they write, from small cases and from a
+corpus of whole shaders in `test/data/corpus/`. Where glslang is installed
+(`glslang-tools` on Ubuntu), the build compiles each one and fails if any
+doesn't compile.
+
+Still to do:
+
+- Compute shaders, workgroup memory, atomics and storage textures.
+- Textures and samplers passed to functions, which GLSL needs specialised
+  copies of the function for.
+- SPIR-V and MSL, for the Vulkan and Metal backends.
+
 ## Open questions
 
-1. **Shader language.** WebGPU uses WGSL, GL wants GLSL ES 3.00 and Vulkan
-   wants SPIR-V. Options:
-   - Write WGSL and translate it at build time with a third-party tool (Tint
-     or Naga), which never ships with the app.
-   - Write our own translator for the subset of WGSL we use. WGSL to GLSL is
-     text to text; SPIR-V can wait for Vulkan.
-   - Write each shader once per language.
-
-   Decide when the first shader is needed.
-2. **A render thread.** What it means for the callbacks, and for which thread
+1. **A render thread.** What it means for the callbacks, and for which thread
    owns gfx objects.
-3. **High-DPI.** Whether window sizes are in pixels or in points, and how the
+2. **High-DPI.** Whether window sizes are in pixels or in points, and how the
    frame callback learns the scale.

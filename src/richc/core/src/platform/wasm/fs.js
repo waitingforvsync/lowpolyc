@@ -7,7 +7,7 @@
 // from the module richc.
 
 // rc_file_error values (richc/file.h)
-const FILE_OK = 0;
+const FILE_ERROR_NONE = 0;
 const FILE_ERROR_NOT_FOUND = 1;
 const FILE_ERROR_IO = 4;
 
@@ -51,7 +51,7 @@ export function createFs() {
                 }
                 bytesAt(dst, size).set(file.bytes.subarray(file.at, end));
                 file.at = end;
-                return FILE_OK;
+                return FILE_ERROR_NONE;
             },
             fs_close: (handle) => {
                 opened.delete(handle);
@@ -62,9 +62,9 @@ export function createFs() {
 
                 files.set(name, bytes);
                 fs.onWrite?.(name, bytes);
-                return FILE_OK;
+                return FILE_ERROR_NONE;
             },
-            fs_delete: (path, len) => (files.delete(nameAt(path, len)) ? FILE_OK : FILE_ERROR_NOT_FOUND),
+            fs_delete: (path, len) => (files.delete(nameAt(path, len)) ? FILE_ERROR_NONE : FILE_ERROR_NOT_FOUND),
             fs_exists: (path, len) => (files.has(nameAt(path, len)) ? 1 : 0),
         },
 

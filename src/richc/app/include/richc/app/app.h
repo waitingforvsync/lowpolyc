@@ -16,22 +16,22 @@
 // ---- input ----
 
 typedef enum rc_app_event_type {
-    RC_APP_EVENT_NONE,
+    RC_APP_EVENT_TYPE_NONE,
 
     // A key went down or came up: once each per press, however long the key is held. For keys as
     // controls (by scancode) and hotkeys (by keycode and modifiers).
-    RC_APP_EVENT_KEY_DOWN,
-    RC_APP_EVENT_KEY_UP,
+    RC_APP_EVENT_TYPE_KEY_DOWN,
+    RC_APP_EVENT_TYPE_KEY_UP,
 
     // A held key, at the system's auto-repeat rate, between its down and its up. For the few
     // hotkeys that should repeat, such as undo; everything else can ignore it.
-    RC_APP_EVENT_KEY_REPEAT,
+    RC_APP_EVENT_TYPE_KEY_REPEAT,
 
     // Typing, for text fields: a character, after the layout, shift, caps lock, AltGr, dead keys
     // and compose have had their say; or an editing key (an arrow, home, end, page up or down,
     // insert, delete, backspace, tab, enter or escape), as its rc_key. Repeats while the key is
     // held. Ctrl or super with a character key is a hotkey rather than typing, so gives no char.
-    RC_APP_EVENT_CHAR
+    RC_APP_EVENT_TYPE_CHAR
 } rc_app_event_type;
 
 // Something that happened to the window, passed to the event callback.

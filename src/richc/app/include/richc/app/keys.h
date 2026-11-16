@@ -30,7 +30,7 @@
 // ---- scancodes ----
 
 typedef enum rc_scancode {
-    RC_SCANCODE_UNKNOWN = 0,
+    RC_SCANCODE_NONE = 0,
 
     RC_SCANCODE_A = 4,
     RC_SCANCODE_B = 5,
@@ -154,7 +154,7 @@ typedef enum rc_scancode {
 // ---- keycodes ----
 
 typedef enum rc_key {
-    RC_KEY_UNKNOWN = 0,
+    RC_KEY_NONE = 0,
 
     // Keys whose keycodes are ASCII control characters
     RC_KEY_BACKSPACE = 0x08,

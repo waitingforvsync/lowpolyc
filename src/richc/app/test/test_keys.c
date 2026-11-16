@@ -76,10 +76,10 @@ RC_TEST(keys, unknown_layout_characters_fall_back_to_us)
 RC_TEST(keys, unmapped_scancodes)
 {
     // A key with no known position goes by what it types
-    RC_CHECK(rc_app_keycode(RC_SCANCODE_UNKNOWN, 'x'), ==, (uint32_t)'x');
-    RC_CHECK(rc_app_keycode(RC_SCANCODE_UNKNOWN, 0x44F), ==, (uint32_t)RC_KEY_UNKNOWN);
-    RC_CHECK(rc_app_keycode(RC_SCANCODE_UNKNOWN, 0), ==, (uint32_t)RC_KEY_UNKNOWN);
-    RC_CHECK(rc_app_keycode((rc_scancode)500, 'x'), ==, (uint32_t)RC_KEY_UNKNOWN);
+    RC_CHECK(rc_app_keycode(RC_SCANCODE_NONE, 'x'), ==, (uint32_t)'x');
+    RC_CHECK(rc_app_keycode(RC_SCANCODE_NONE, 0x44F), ==, (uint32_t)RC_KEY_NONE);
+    RC_CHECK(rc_app_keycode(RC_SCANCODE_NONE, 0), ==, (uint32_t)RC_KEY_NONE);
+    RC_CHECK(rc_app_keycode((rc_scancode)500, 'x'), ==, (uint32_t)RC_KEY_NONE);
 }
 
 

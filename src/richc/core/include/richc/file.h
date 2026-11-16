@@ -5,9 +5,9 @@
 // Paths are rc_str in UTF-8 and need no terminator. All I/O is binary, with no line-ending
 // translation. Loads allocate from the arena they are given.
 //
-// Every function reports an rc_file_error, where RC_FILE_OK (0) is success. A failed load returns
-// the invalid {0} contents alongside its error. A path too long for the platform, or holding a
-// null byte, is RC_FILE_ERROR_BAD_NAME, never quietly cut short.
+// Every function reports an rc_file_error, where RC_FILE_ERROR_NONE (0) is success. A failed load
+// returns the invalid {0} contents alongside its error. A path too long for the platform, or
+// holding a null byte, is RC_FILE_ERROR_BAD_NAME, never quietly cut short.
 //
 // A load returns a growable result, since loaded data is often changed after reading (parsed in
 // place, appended to). The arena owns it, so its lifetime is the arena's; take .view for read-only
@@ -26,7 +26,7 @@
 #include "richc/bytes.h"
 
 typedef enum rc_file_error {
-    RC_FILE_OK = 0,
+    RC_FILE_ERROR_NONE = 0,
     RC_FILE_ERROR_NOT_FOUND,
     RC_FILE_ERROR_ACCESS_DENIED,
     RC_FILE_ERROR_TOO_LARGE,

@@ -24,6 +24,7 @@ richc.
 - [bitset.h](#bitseth)
 - [Pools](#pools)
 - [Genpools and handles](#genpools-and-handles)
+- [lower_bound](#lower_bound)
 - [The hash trie](#the-hash-trie)
 - [test.h](#testh)
 - [Not ported yet](#not-ported-yet)
@@ -114,6 +115,7 @@ find them.
   | `richc/genpool_handle.h` | `richc/handle.template.h` |
   | `richc/template/hash_trie.h` | `richc/hash_trie.template.h` |
   | `richc/template/algorithm/hash_trie_foreach.h` | `richc/hash_trie_foreach.template.h` |
+  | `richc/template/algorithm/lower_bound.h` | `richc/lower_bound.template.h` |
 
 - **Template `NAME` macros are a suffix**, never the full type name: the type
   is always `rc_pool_<NAME>`, `rc_genpool_<NAME>` or `rc_hash_trie_<NAME>`.
@@ -233,6 +235,8 @@ even between different arenas.
 - **The result structs' `error` is a `uint8_t`**, holding an `rc_file_error`,
   following the rule that struct members never have enum types. Comparisons,
   switches and assignments to an `rc_file_error` still work.
+- **`RC_FILE_OK` is now `RC_FILE_ERROR_NONE`**, still zero, so every value
+  shares the enum's stem.
 - **New error `RC_FILE_ERROR_BAD_NAME`**, for a path holding a null byte or too
   long for the platform. A `switch` that lists every error needs a case for it.
 - **Behaviour changes** are under [Check these first](#check-these-first).
@@ -357,6 +361,19 @@ are unchanged apart from the type name.
 | `free_bitset` | none | loop to `num_slots`, using `is_live` |
 | `template/algorithm/genpool_foreach.h` | none | the same loop, with no scratch arena |
 
+## lower_bound
+
+| Old | New | Notes |
+|---|---|---|
+| `RC_LOWER_BOUND_NAME` the function name | `RC_LOWER_BOUND_NAME` a suffix | the function is `rc_lower_bound_<NAME>`, searching `rc_view_<NAME>` |
+| `RC_LOWER_BOUND_VIEW` | none | the view is always `rc_view_<NAME>` |
+
+- **New:** `RC_LOWER_BOUND_KEY_TYPE`, so the key searched for can be a
+  different type from the elements (a name, searching records by name).
+- **Unchanged:** `RC_LOWER_BOUND_TYPE`, `RC_LOWER_BOUND_CMP` and
+  `RC_LOWER_BOUND_CTX`, and the arguments, `(view, key)` or
+  `(view, ctx, key)`.
+
 ## The hash trie
 
 | Old | New | Notes |
@@ -454,7 +471,7 @@ After:
 | `richc/time.h` | a monotonic nanosecond clock |
 | `richc/rect_pack.h` | a rectangle packer |
 | `template/algorithm/sort.h` | introsort on a span |
-| `template/algorithm/lower_bound.h`, `upper_bound.h` | binary search on a view |
+| `template/algorithm/upper_bound.h` | binary search on a view (`lower_bound` is ported) |
 | `template/algorithm/min_element.h`, `max_element.h` | index of the smallest or largest element |
 | `template/algorithm/bitset_foreach.h` | visit the set bits (or loop with `first_set` and `next_set`) |
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
@@ -480,7 +497,10 @@ What Baron uses that changed, roughly in order of effort:
 - **Missing modules:**
   - the array headers for `u8`, `u32`, `i32`, `i64`, `str` and `bitset`
   - `random.h`, for `RND`
-  - `sort.h` (3 uses) and `lower_bound.h` (1)
+  - `sort.h` (3 uses)
+- **`lower_bound.h` in `symdump.c`:** include `richc/lower_bound.template.h`,
+  set `RC_LOWER_BOUND_NAME` to `u32` and drop `RC_LOWER_BOUND_VIEW`. The one
+  call becomes `rc_lower_bound_u32(own, pos)`.
 - **`rc_str_substr`:** 11 calls in `assemble.c`, `expression.c` and `lexer.c`.
   Each already passes a difference (`x - start`), so it becomes
   `rc_str_substr(s, start, x)`.

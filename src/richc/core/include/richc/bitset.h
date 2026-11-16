@@ -17,7 +17,6 @@
 
 #include "richc/macros.h"
 
-// We only ever take an arena by pointer, so a forward declaration will do.
 typedef struct rc_arena rc_arena;
 
 typedef struct rc_bitset {

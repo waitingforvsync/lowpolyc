@@ -39,6 +39,11 @@ RC_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 #define RC_STRINGIFY_(x) #x
 #define RC_STRINGIFY(x)  RC_STRINGIFY_(x)
 
+// ---- arrays ----
+
+// The number of elements in a C array, as a uint32_t. Never pass a pointer, as it uses sizeof.
+#define RC_COUNT(arr) ((uint32_t)(sizeof(arr) / sizeof((arr)[0])))
+
 // ---- sentinels ----
 
 // The "not found" / "invalid" index.

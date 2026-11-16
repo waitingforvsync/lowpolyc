@@ -138,7 +138,7 @@ static uint32_t rc_app_lower(uint32_t codepoint)
 uint32_t rc_app_keycode(rc_scancode scancode, uint32_t layout_char)
 {
     if ((uint32_t)scancode >= RC_SCANCODE_COUNT) {
-        return RC_KEY_UNKNOWN;
+        return RC_KEY_NONE;
     }
 
     uint32_t named = rc_app_named_keys[scancode];
@@ -149,7 +149,7 @@ uint32_t rc_app_keycode(rc_scancode scancode, uint32_t layout_char)
     // A key we know no position for keys by whatever it types
     uint32_t us_char = rc_app_us_chars[scancode];
     if (us_char == 0) {
-        return rc_app_is_latin(layout_char) ? rc_app_lower(layout_char) : RC_KEY_UNKNOWN;
+        return rc_app_is_latin(layout_char) ? rc_app_lower(layout_char) : RC_KEY_NONE;
     }
 
     // The number row gives digits whatever the layout types there, and a key whose character is not

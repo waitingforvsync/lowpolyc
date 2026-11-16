@@ -16,6 +16,7 @@ else()
 endif()
 
 add_subdirectory(core)
+add_subdirectory(shader)
 if(RICHC_BUILD_APP)
     add_subdirectory(app)
 endif()

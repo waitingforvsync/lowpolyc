@@ -1,0 +1,156 @@
+// glsl_names.c
+//
+// Names in GLSL. A WGSL name passes through unless GLSL reserves it (a keyword, a type, a built-in
+// function, anything starting gl_ or holding a double underscore) or it starts rc_, which our own
+// names do. Those gain a prefix of rc_u_, which keeps every name distinct: a name that changes
+// starts rc_, and one that doesn't, doesn't.
+
+#include "glsl_writer.h"
+
+#define RC_ARRAY_TYPE rc_str
+#define RC_ARRAY_NAME glsl_word
+#include "richc/array.template.h"
+
+#define RC_LOWER_BOUND_TYPE rc_str
+#define RC_LOWER_BOUND_NAME glsl_word
+#define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
+#include "richc/lower_bound.template.h"
+
+// GLSL's keywords, reserved words, types and built-in functions, in byte order.
+static const rc_str rc_glsl_words[] = {
+    RC_STR_INIT("EmitStreamVertex"), RC_STR_INIT("EmitVertex"), RC_STR_INIT("EndPrimitive"),
+    RC_STR_INIT("EndStreamPrimitive"), RC_STR_INIT("abs"), RC_STR_INIT("acos"),
+    RC_STR_INIT("acosh"), RC_STR_INIT("active"), RC_STR_INIT("all"), RC_STR_INIT("allInvocations"),
+    RC_STR_INIT("allInvocationsEqual"), RC_STR_INIT("any"), RC_STR_INIT("anyInvocation"),
+    RC_STR_INIT("asin"), RC_STR_INIT("asinh"), RC_STR_INIT("asm"), RC_STR_INIT("atan"),
+    RC_STR_INIT("atanh"), RC_STR_INIT("atomicAdd"), RC_STR_INIT("atomicAnd"),
+    RC_STR_INIT("atomicCompSwap"), RC_STR_INIT("atomicCounter"),
+    RC_STR_INIT("atomicCounterDecrement"), RC_STR_INIT("atomicCounterIncrement"),
+    RC_STR_INIT("atomicExchange"), RC_STR_INIT("atomicMax"), RC_STR_INIT("atomicMin"),
+    RC_STR_INIT("atomicOr"), RC_STR_INIT("atomicXor"), RC_STR_INIT("atomic_uint"),
+    RC_STR_INIT("attribute"), RC_STR_INIT("barrier"), RC_STR_INIT("bitCount"),
+    RC_STR_INIT("bitfieldExtract"), RC_STR_INIT("bitfieldInsert"), RC_STR_INIT("bitfieldReverse"),
+    RC_STR_INIT("bool"), RC_STR_INIT("break"), RC_STR_INIT("buffer"), RC_STR_INIT("bvec2"),
+    RC_STR_INIT("bvec3"), RC_STR_INIT("bvec4"), RC_STR_INIT("case"), RC_STR_INIT("cast"),
+    RC_STR_INIT("ceil"), RC_STR_INIT("centroid"), RC_STR_INIT("clamp"), RC_STR_INIT("class"),
+    RC_STR_INIT("coherent"), RC_STR_INIT("common"), RC_STR_INIT("const"), RC_STR_INIT("continue"),
+    RC_STR_INIT("cos"), RC_STR_INIT("cosh"), RC_STR_INIT("cross"), RC_STR_INIT("dFdx"),
+    RC_STR_INIT("dFdxCoarse"), RC_STR_INIT("dFdxFine"), RC_STR_INIT("dFdy"),
+    RC_STR_INIT("dFdyCoarse"), RC_STR_INIT("dFdyFine"), RC_STR_INIT("default"),
+    RC_STR_INIT("degrees"), RC_STR_INIT("determinant"), RC_STR_INIT("discard"),
+    RC_STR_INIT("distance"), RC_STR_INIT("dmat2"), RC_STR_INIT("dmat2x2"), RC_STR_INIT("dmat2x3"),
+    RC_STR_INIT("dmat2x4"), RC_STR_INIT("dmat3"), RC_STR_INIT("dmat3x2"), RC_STR_INIT("dmat3x3"),
+    RC_STR_INIT("dmat3x4"), RC_STR_INIT("dmat4"), RC_STR_INIT("dmat4x2"), RC_STR_INIT("dmat4x3"),
+    RC_STR_INIT("dmat4x4"), RC_STR_INIT("do"), RC_STR_INIT("dot"), RC_STR_INIT("double"),
+    RC_STR_INIT("dvec2"), RC_STR_INIT("dvec3"), RC_STR_INIT("dvec4"), RC_STR_INIT("else"),
+    RC_STR_INIT("enum"), RC_STR_INIT("equal"), RC_STR_INIT("exp"), RC_STR_INIT("exp2"),
+    RC_STR_INIT("extern"), RC_STR_INIT("external"), RC_STR_INIT("faceforward"),
+    RC_STR_INIT("false"), RC_STR_INIT("filter"), RC_STR_INIT("findLSB"), RC_STR_INIT("findMSB"),
+    RC_STR_INIT("fixed"), RC_STR_INIT("flat"), RC_STR_INIT("float"), RC_STR_INIT("floatBitsToInt"),
+    RC_STR_INIT("floatBitsToUint"), RC_STR_INIT("floor"), RC_STR_INIT("fma"), RC_STR_INIT("for"),
+    RC_STR_INIT("fract"), RC_STR_INIT("frexp"), RC_STR_INIT("fvec2"), RC_STR_INIT("fvec3"),
+    RC_STR_INIT("fvec4"), RC_STR_INIT("fwidth"), RC_STR_INIT("fwidthCoarse"),
+    RC_STR_INIT("fwidthFine"), RC_STR_INIT("goto"), RC_STR_INIT("greaterThan"),
+    RC_STR_INIT("greaterThanEqual"), RC_STR_INIT("groupMemoryBarrier"), RC_STR_INIT("half"),
+    RC_STR_INIT("highp"), RC_STR_INIT("hvec2"), RC_STR_INIT("hvec3"), RC_STR_INIT("hvec4"),
+    RC_STR_INIT("if"), RC_STR_INIT("iimage1D"), RC_STR_INIT("iimage1DArray"),
+    RC_STR_INIT("iimage2D"), RC_STR_INIT("iimage2DArray"), RC_STR_INIT("iimage2DMS"),
+    RC_STR_INIT("iimage2DMSArray"), RC_STR_INIT("iimage2DRect"), RC_STR_INIT("iimage3D"),
+    RC_STR_INIT("iimageBuffer"), RC_STR_INIT("iimageCube"), RC_STR_INIT("iimageCubeArray"),
+    RC_STR_INIT("image1D"), RC_STR_INIT("image1DArray"), RC_STR_INIT("image2D"),
+    RC_STR_INIT("image2DArray"), RC_STR_INIT("image2DMS"), RC_STR_INIT("image2DMSArray"),
+    RC_STR_INIT("image2DRect"), RC_STR_INIT("image3D"), RC_STR_INIT("imageAtomicAdd"),
+    RC_STR_INIT("imageAtomicAnd"), RC_STR_INIT("imageAtomicCompSwap"),
+    RC_STR_INIT("imageAtomicExchange"), RC_STR_INIT("imageAtomicMax"),
+    RC_STR_INIT("imageAtomicMin"), RC_STR_INIT("imageAtomicOr"), RC_STR_INIT("imageAtomicXor"),
+    RC_STR_INIT("imageBuffer"), RC_STR_INIT("imageCube"), RC_STR_INIT("imageCubeArray"),
+    RC_STR_INIT("imageLoad"), RC_STR_INIT("imageSamples"), RC_STR_INIT("imageSize"),
+    RC_STR_INIT("imageStore"), RC_STR_INIT("imulExtended"), RC_STR_INIT("in"),
+    RC_STR_INIT("inline"), RC_STR_INIT("inout"), RC_STR_INIT("input"), RC_STR_INIT("int"),
+    RC_STR_INIT("intBitsToFloat"), RC_STR_INIT("interface"), RC_STR_INIT("interpolateAtCentroid"),
+    RC_STR_INIT("interpolateAtOffset"), RC_STR_INIT("interpolateAtSample"),
+    RC_STR_INIT("invariant"), RC_STR_INIT("inverse"), RC_STR_INIT("inversesqrt"),
+    RC_STR_INIT("isampler1D"), RC_STR_INIT("isampler1DArray"), RC_STR_INIT("isampler2D"),
+    RC_STR_INIT("isampler2DArray"), RC_STR_INIT("isampler2DMS"), RC_STR_INIT("isampler2DMSArray"),
+    RC_STR_INIT("isampler2DRect"), RC_STR_INIT("isampler3D"), RC_STR_INIT("isamplerBuffer"),
+    RC_STR_INIT("isamplerCube"), RC_STR_INIT("isamplerCubeArray"), RC_STR_INIT("isinf"),
+    RC_STR_INIT("isnan"), RC_STR_INIT("ivec2"), RC_STR_INIT("ivec3"), RC_STR_INIT("ivec4"),
+    RC_STR_INIT("layout"), RC_STR_INIT("ldexp"), RC_STR_INIT("length"), RC_STR_INIT("lessThan"),
+    RC_STR_INIT("lessThanEqual"), RC_STR_INIT("log"), RC_STR_INIT("log2"), RC_STR_INIT("long"),
+    RC_STR_INIT("lowp"), RC_STR_INIT("main"), RC_STR_INIT("mat2"), RC_STR_INIT("mat2x2"),
+    RC_STR_INIT("mat2x3"), RC_STR_INIT("mat2x4"), RC_STR_INIT("mat3"), RC_STR_INIT("mat3x2"),
+    RC_STR_INIT("mat3x3"), RC_STR_INIT("mat3x4"), RC_STR_INIT("mat4"), RC_STR_INIT("mat4x2"),
+    RC_STR_INIT("mat4x3"), RC_STR_INIT("mat4x4"), RC_STR_INIT("matrixCompMult"), RC_STR_INIT("max"),
+    RC_STR_INIT("mediump"), RC_STR_INIT("memoryBarrier"), RC_STR_INIT("memoryBarrierAtomicCounter"),
+    RC_STR_INIT("memoryBarrierBuffer"), RC_STR_INIT("memoryBarrierImage"),
+    RC_STR_INIT("memoryBarrierShared"), RC_STR_INIT("min"), RC_STR_INIT("mix"), RC_STR_INIT("mod"),
+    RC_STR_INIT("modf"), RC_STR_INIT("namespace"), RC_STR_INIT("noinline"), RC_STR_INIT("noise1"),
+    RC_STR_INIT("noise2"), RC_STR_INIT("noise3"), RC_STR_INIT("noise4"),
+    RC_STR_INIT("noperspective"), RC_STR_INIT("normalize"), RC_STR_INIT("not"),
+    RC_STR_INIT("notEqual"), RC_STR_INIT("out"), RC_STR_INIT("outerProduct"), RC_STR_INIT("output"),
+    RC_STR_INIT("packDouble2x32"), RC_STR_INIT("packHalf2x16"), RC_STR_INIT("packSnorm2x16"),
+    RC_STR_INIT("packSnorm4x8"), RC_STR_INIT("packUnorm2x16"), RC_STR_INIT("packUnorm4x8"),
+    RC_STR_INIT("partition"), RC_STR_INIT("patch"), RC_STR_INIT("pow"), RC_STR_INIT("precise"),
+    RC_STR_INIT("precision"), RC_STR_INIT("public"), RC_STR_INIT("radians"),
+    RC_STR_INIT("readonly"), RC_STR_INIT("reflect"), RC_STR_INIT("refract"),
+    RC_STR_INIT("resource"), RC_STR_INIT("restrict"), RC_STR_INIT("return"), RC_STR_INIT("round"),
+    RC_STR_INIT("roundEven"), RC_STR_INIT("sample"), RC_STR_INIT("sampler1D"),
+    RC_STR_INIT("sampler1DArray"), RC_STR_INIT("sampler1DArrayShadow"),
+    RC_STR_INIT("sampler1DShadow"), RC_STR_INIT("sampler2D"), RC_STR_INIT("sampler2DArray"),
+    RC_STR_INIT("sampler2DArrayShadow"), RC_STR_INIT("sampler2DMS"),
+    RC_STR_INIT("sampler2DMSArray"), RC_STR_INIT("sampler2DRect"),
+    RC_STR_INIT("sampler2DRectShadow"), RC_STR_INIT("sampler2DShadow"), RC_STR_INIT("sampler3D"),
+    RC_STR_INIT("sampler3DRect"), RC_STR_INIT("samplerBuffer"), RC_STR_INIT("samplerCube"),
+    RC_STR_INIT("samplerCubeArray"), RC_STR_INIT("samplerCubeArrayShadow"),
+    RC_STR_INIT("samplerCubeShadow"), RC_STR_INIT("samplerExternalOES"), RC_STR_INIT("shared"),
+    RC_STR_INIT("short"), RC_STR_INIT("sign"), RC_STR_INIT("sin"), RC_STR_INIT("sinh"),
+    RC_STR_INIT("sizeof"), RC_STR_INIT("smooth"), RC_STR_INIT("smoothstep"), RC_STR_INIT("sqrt"),
+    RC_STR_INIT("static"), RC_STR_INIT("step"), RC_STR_INIT("struct"), RC_STR_INIT("subroutine"),
+    RC_STR_INIT("superp"), RC_STR_INIT("switch"), RC_STR_INIT("tan"), RC_STR_INIT("tanh"),
+    RC_STR_INIT("template"), RC_STR_INIT("texelFetch"), RC_STR_INIT("texelFetchOffset"),
+    RC_STR_INIT("texture"), RC_STR_INIT("textureGather"), RC_STR_INIT("textureGatherOffset"),
+    RC_STR_INIT("textureGatherOffsets"), RC_STR_INIT("textureGrad"),
+    RC_STR_INIT("textureGradOffset"), RC_STR_INIT("textureLod"), RC_STR_INIT("textureLodOffset"),
+    RC_STR_INIT("textureOffset"), RC_STR_INIT("textureProj"), RC_STR_INIT("textureProjGrad"),
+    RC_STR_INIT("textureProjGradOffset"), RC_STR_INIT("textureProjLod"),
+    RC_STR_INIT("textureProjLodOffset"), RC_STR_INIT("textureProjOffset"),
+    RC_STR_INIT("textureQueryLevels"), RC_STR_INIT("textureQueryLod"),
+    RC_STR_INIT("textureSamples"), RC_STR_INIT("textureSize"), RC_STR_INIT("this"),
+    RC_STR_INIT("transpose"), RC_STR_INIT("true"), RC_STR_INIT("trunc"), RC_STR_INIT("typedef"),
+    RC_STR_INIT("uaddCarry"), RC_STR_INIT("uimage1D"), RC_STR_INIT("uimage1DArray"),
+    RC_STR_INIT("uimage2D"), RC_STR_INIT("uimage2DArray"), RC_STR_INIT("uimage2DMS"),
+    RC_STR_INIT("uimage2DMSArray"), RC_STR_INIT("uimage2DRect"), RC_STR_INIT("uimage3D"),
+    RC_STR_INIT("uimageBuffer"), RC_STR_INIT("uimageCube"), RC_STR_INIT("uimageCubeArray"),
+    RC_STR_INIT("uint"), RC_STR_INIT("uintBitsToFloat"), RC_STR_INIT("umulExtended"),
+    RC_STR_INIT("uniform"), RC_STR_INIT("union"), RC_STR_INIT("unpackDouble2x32"),
+    RC_STR_INIT("unpackHalf2x16"), RC_STR_INIT("unpackSnorm2x16"), RC_STR_INIT("unpackSnorm4x8"),
+    RC_STR_INIT("unpackUnorm2x16"), RC_STR_INIT("unpackUnorm4x8"), RC_STR_INIT("unsigned"),
+    RC_STR_INIT("usampler1D"), RC_STR_INIT("usampler1DArray"), RC_STR_INIT("usampler2D"),
+    RC_STR_INIT("usampler2DArray"), RC_STR_INIT("usampler2DMS"), RC_STR_INIT("usampler2DMSArray"),
+    RC_STR_INIT("usampler2DRect"), RC_STR_INIT("usampler3D"), RC_STR_INIT("usamplerBuffer"),
+    RC_STR_INIT("usamplerCube"), RC_STR_INIT("usamplerCubeArray"), RC_STR_INIT("using"),
+    RC_STR_INIT("usubBorrow"), RC_STR_INIT("uvec2"), RC_STR_INIT("uvec3"), RC_STR_INIT("uvec4"),
+    RC_STR_INIT("varying"), RC_STR_INIT("vec2"), RC_STR_INIT("vec3"), RC_STR_INIT("vec4"),
+    RC_STR_INIT("void"), RC_STR_INIT("volatile"), RC_STR_INIT("while"), RC_STR_INIT("writeonly"),
+};
+
+// True if GLSL keeps name for itself.
+static bool rc_glsl_is_reserved(rc_str name)
+{
+    rc_view_glsl_word words = RC_VIEW(rc_glsl_words);
+    uint32_t i = rc_lower_bound_glsl_word(words, name);
+
+    if (i < words.num && rc_str_is_equal(rc_view_glsl_word_get(words, i), name)) {
+        return true;
+    }
+    return rc_str_starts_with(name, RC_STR("gl_")) || rc_str_contains(name, RC_STR("__"));
+}
+
+
+void rc_glsl_append_name(rc_mstr *out, rc_str name, rc_arena *arena)
+{
+    if (rc_glsl_is_reserved(name) || rc_str_starts_with(name, RC_STR("rc_"))) {
+        rc_mstr_append(out, RC_STR("rc_u_"), arena);
+    }
+    rc_mstr_append(out, name, arena);
+}

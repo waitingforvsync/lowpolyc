@@ -21,6 +21,7 @@ add_library(richc STATIC
     include/richc/hash_index.template.h
     include/richc/hash_trie.template.h
     include/richc/hash_trie_foreach.template.h
+    include/richc/lower_bound.template.h
     include/richc/macros.h
     include/richc/mem.h
     include/richc/mstr.h

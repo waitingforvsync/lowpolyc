@@ -77,14 +77,17 @@ typedef struct rc_gfx_color {
     float a;
 } rc_gfx_color;
 
-// What a render pass does with an attachment's contents first. Zero clears.
+// What a render pass does with an attachment's contents first. None, the default, clears.
 typedef enum rc_gfx_load_op {
+    RC_GFX_LOAD_OP_NONE = 0,
     RC_GFX_LOAD_OP_CLEAR,
     RC_GFX_LOAD_OP_LOAD
 } rc_gfx_load_op;
 
-// What a render pass does with an attachment's contents at the end. Zero keeps them.
+// What a render pass does with an attachment's contents at the end. None, the default, keeps
+// them.
 typedef enum rc_gfx_store_op {
+    RC_GFX_STORE_OP_NONE = 0,
     RC_GFX_STORE_OP_STORE,
     RC_GFX_STORE_OP_DISCARD
 } rc_gfx_store_op;

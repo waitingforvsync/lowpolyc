@@ -598,7 +598,7 @@ RC_TEST_STEP(mstr, append_f64_extremes_match_printf, fix)
     };
     bool ok = true;
 
-    for (uint32_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
+    for (uint32_t i = 0; i < RC_COUNT(patterns); i++) {
         double value = rc_bitcast_u64(patterns[i]);
 
         for (uint32_t precision = 1; precision <= 255; precision++) {

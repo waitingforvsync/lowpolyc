@@ -27,7 +27,7 @@ static rc_file_load_binary_result rc_file_load(rc_str path, uint32_t minimum_cap
     }
 
     rc_fs_open_result file = rc_fs_open(path);
-    if (file.error != RC_FILE_OK) {
+    if (file.error != RC_FILE_ERROR_NONE) {
         return (rc_file_load_binary_result) {.error = file.error};
     }
     if (file.size >= UINT32_MAX) {
@@ -41,9 +41,9 @@ static rc_file_load_binary_result rc_file_load(rc_str path, uint32_t minimum_cap
     rc_array_bytes contents = rc_array_bytes_make(capacity, arena);
     rc_array_bytes_resize(&contents, size, NULL);
 
-    rc_file_error error = size > 0 ? rc_fs_read(file.handle, contents.data, size) : RC_FILE_OK;
+    rc_file_error error = size > 0 ? rc_fs_read(file.handle, contents.data, size) : RC_FILE_ERROR_NONE;
     rc_fs_close(file.handle);
-    if (error != RC_FILE_OK) {
+    if (error != RC_FILE_ERROR_NONE) {
         rc_array_bytes_release(&contents, arena);
         return (rc_file_load_binary_result) {.error = (uint8_t)error};
     }
@@ -58,7 +58,7 @@ rc_file_size_result rc_file_size(rc_str path)
     }
 
     rc_fs_open_result file = rc_fs_open(path);
-    if (file.error != RC_FILE_OK) {
+    if (file.error != RC_FILE_ERROR_NONE) {
         return (rc_file_size_result) {.error = file.error};
     }
 
@@ -79,7 +79,7 @@ bool rc_file_exists(rc_str path)
 rc_file_load_text_result rc_file_load_text(rc_str path, uint32_t minimum_capacity, rc_arena *arena)
 {
     rc_file_load_binary_result loaded = rc_file_load(path, minimum_capacity, arena);
-    if (loaded.error != RC_FILE_OK) {
+    if (loaded.error != RC_FILE_ERROR_NONE) {
         return (rc_file_load_text_result) {.error = loaded.error};
     }
 

@@ -78,5 +78,5 @@ RC_WASM_EXPORT_("rc_wasm_char") void rc_wasm_char(uint32_t codepoint, uint32_t m
 
 void rc_wasm_char(uint32_t codepoint, uint32_t modifiers)
 {
-    rc_wasm_send((rc_app_event) {.type = RC_APP_EVENT_CHAR, .modifiers = (uint8_t)modifiers, .codepoint = codepoint});
+    rc_wasm_send((rc_app_event) {.type = RC_APP_EVENT_TYPE_CHAR, .modifiers = (uint8_t)modifiers, .codepoint = codepoint});
 }

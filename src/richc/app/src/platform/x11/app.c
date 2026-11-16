@@ -147,7 +147,7 @@ static const uint8_t rc_x11_scancodes[RC_X11_EVDEV_CODES] = {
 static rc_scancode rc_x11_scancode(uint32_t keycode)
 {
     if (keycode < RC_X11_EVDEV_OFFSET || keycode - RC_X11_EVDEV_OFFSET >= RC_X11_EVDEV_CODES) {
-        return RC_SCANCODE_UNKNOWN;
+        return RC_SCANCODE_NONE;
     }
     return (rc_scancode)rc_x11_scancodes[keycode - RC_X11_EVDEV_OFFSET];
 }
@@ -481,7 +481,7 @@ static void rc_x11_send_typing(rc_x11_window *w, XKeyEvent *xkey, uint8_t modifi
     bool has_keysym = status == XLookupKeySym || status == XLookupBoth;
     uint32_t editing_key = has_keysym ? rc_x11_editing_key(keysym) : 0;
     if (editing_key != 0) {
-        rc_x11_send(desc, (rc_app_event) {.type = RC_APP_EVENT_CHAR, .modifiers = modifiers, .codepoint = editing_key});
+        rc_x11_send(desc, (rc_app_event) {.type = RC_APP_EVENT_TYPE_CHAR, .modifiers = modifiers, .codepoint = editing_key});
         return;
     }
     if ((modifiers & (RC_MODIFIER_CTRL | RC_MODIFIER_SUPER)) != 0) {
@@ -499,7 +499,7 @@ static void rc_x11_send_typing(rc_x11_window *w, XKeyEvent *xkey, uint8_t modifi
         uint32_t codepoint = w->ic ? rc_x11_decode_utf8(bytes + i, (uint32_t)len - i, &size) : bytes[i];
 
         if (rc_app_is_text(codepoint)) {
-            rc_x11_send(desc, (rc_app_event) {.type = RC_APP_EVENT_CHAR, .modifiers = modifiers, .codepoint = codepoint});
+            rc_x11_send(desc, (rc_app_event) {.type = RC_APP_EVENT_TYPE_CHAR, .modifiers = modifiers, .codepoint = codepoint});
         }
         i += size;
     }
@@ -532,7 +532,7 @@ static void rc_x11_handle_key_press(rc_x11_window *w, XKeyEvent *xkey, bool filt
     }
 
     uint8_t modifiers = rc_x11_modifiers_after(w, xkey, true);
-    rc_x11_send_key(w, xkey, repeat ? RC_APP_EVENT_KEY_REPEAT : RC_APP_EVENT_KEY_DOWN, modifiers, desc);
+    rc_x11_send_key(w, xkey, repeat ? RC_APP_EVENT_TYPE_KEY_REPEAT : RC_APP_EVENT_TYPE_KEY_DOWN, modifiers, desc);
     if (!filtered) {
         rc_x11_send_typing(w, xkey, modifiers, desc);
     }
@@ -557,7 +557,7 @@ static void rc_x11_handle_key_release(rc_x11_window *w, const XKeyEvent *xkey, c
 
     if (keycode < RC_X11_KEYCODES && w->key_down[keycode]) {
         w->key_down[keycode] = false;
-        rc_x11_send_key(w, xkey, RC_APP_EVENT_KEY_UP, rc_x11_modifiers_after(w, xkey, false), desc);
+        rc_x11_send_key(w, xkey, RC_APP_EVENT_TYPE_KEY_UP, rc_x11_modifiers_after(w, xkey, false), desc);
     }
 }
 
@@ -577,7 +577,7 @@ static void rc_x11_release_all_keys(rc_x11_window *w, const rc_app_desc *desc)
         uint8_t locks = w->modifiers & (RC_MODIFIER_CAPS_LOCK | RC_MODIFIER_NUM_LOCK);
         uint8_t modifiers = (uint8_t)(locks | rc_x11_modifiers_held(w));
 
-        rc_x11_send_key(w, &xkey, RC_APP_EVENT_KEY_UP, modifiers, desc);
+        rc_x11_send_key(w, &xkey, RC_APP_EVENT_TYPE_KEY_UP, modifiers, desc);
     }
 }
 

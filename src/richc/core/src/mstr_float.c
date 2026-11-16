@@ -3,11 +3,11 @@
 // rc_mstr_append_f64 and _f32: floating point as decimal text, the same text C's "%.*g" and "%.*f"
 // give, with no libc.
 //
-// A double is m x 2^e exactly, so its decimal expansion is finite, and we work it out exactly with a
-// little bignum: the integer part by dividing by 10^9 again and again, the fraction by multiplying
-// by 10 and taking the bits that cross the binary point. Rounding sees the exact value, so a tie
-// rounds to even, as printf does. It is slow next to Ryu, but small and plainly right, which will
-// do until number formatting turns up somewhere hot.
+// A double is m x 2^e exactly, so its decimal expansion is finite, and we work it out exactly with
+// a little bignum: the integer part by dividing by 10^9 again and again, the fraction by
+// multiplying by 10 and taking the bits that cross the binary point. Rounding sees the exact value,
+// so a tie rounds to even, as printf does. It is slow next to Ryu, but small and plainly right,
+// which will do until number formatting turns up somewhere hot.
 
 #include "richc/mstr.h"
 

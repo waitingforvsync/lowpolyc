@@ -98,6 +98,16 @@ RC_TEST(array, make_empty)
 }
 
 
+RC_TEST(array, count)
+{
+    int32_t three[] = {1, 2, 3};
+    rc_view_i32 v = RC_VIEW(three);
+
+    RC_CHECK(RC_COUNT(three), ==, 3u);
+    RC_CHECK(v.num, ==, 3u);
+}
+
+
 RC_TEST_STEP(array, from_view, fix)
 {
     int32_t src[] = {1, 2, 3, 4};

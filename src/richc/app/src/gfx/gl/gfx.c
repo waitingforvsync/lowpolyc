@@ -20,8 +20,9 @@
 // ---- commands ----
 
 typedef enum rc_gl_command_type {
-    RC_GL_COMMAND_BEGIN_RENDER_PASS,
-    RC_GL_COMMAND_END_RENDER_PASS
+    RC_GL_COMMAND_TYPE_NONE = 0,
+    RC_GL_COMMAND_TYPE_BEGIN_RENDER_PASS,
+    RC_GL_COMMAND_TYPE_END_RENDER_PASS
 } rc_gl_command_type;
 
 typedef struct rc_gl_command {
@@ -263,7 +264,7 @@ rc_gfx_render_pass rc_gfx_command_encoder_begin_render_pass(rc_gfx_command_encod
         RC_ASSERT(rc_genpool_gl_texture_view_is_valid(&b->texture_views, desc->color[i].view));
     }
 
-    rc_gl_command command = {.type = RC_GL_COMMAND_BEGIN_RENDER_PASS, .begin_render_pass = *desc};
+    rc_gl_command command = {.type = RC_GL_COMMAND_TYPE_BEGIN_RENDER_PASS, .begin_render_pass = *desc};
     rc_array_gl_command_push(&e->commands, command, &b->arena);
     e->in_render_pass = true;
 
@@ -279,7 +280,7 @@ void rc_gfx_render_pass_end(rc_gfx_render_pass pass)
     rc_gl_encoder *e = rc_genpool_gl_encoder_at(&b->encoders, encoder);
 
     RC_ASSERT(e->in_render_pass);
-    rc_array_gl_command_push(&e->commands, (rc_gl_command) {.type = RC_GL_COMMAND_END_RENDER_PASS}, &b->arena);
+    rc_array_gl_command_push(&e->commands, (rc_gl_command) {.type = RC_GL_COMMAND_TYPE_END_RENDER_PASS}, &b->arena);
     e->in_render_pass = false;
 }
 
@@ -310,7 +311,7 @@ static void rc_gl_begin_render_pass(const rc_gfx_render_pass_desc *desc)
     for (uint32_t i = 0; i < desc->color_count; i++) {
         const rc_gfx_color_attachment *attachment = &desc->color[i];
 
-        if (attachment->load_op == RC_GFX_LOAD_OP_CLEAR) {
+        if (attachment->load_op != RC_GFX_LOAD_OP_LOAD) {
             rc_gfx_color c = attachment->clear_value;
             GLfloat value[4] = {c.r, c.g, c.b, c.a};
 
@@ -343,12 +344,12 @@ static void rc_gl_replay(rc_view_gl_command commands)
         const rc_gl_command *command = rc_view_gl_command_at(commands, i);
 
         switch (command->type) {
-            case RC_GL_COMMAND_BEGIN_RENDER_PASS:
+            case RC_GL_COMMAND_TYPE_BEGIN_RENDER_PASS:
                 pass = &command->begin_render_pass;
                 rc_gl_begin_render_pass(pass);
                 break;
 
-            case RC_GL_COMMAND_END_RENDER_PASS:
+            case RC_GL_COMMAND_TYPE_END_RENDER_PASS:
                 RC_ASSERT(pass);
                 rc_gl_end_render_pass(pass);
                 pass = NULL;

@@ -15,7 +15,6 @@
 
 #include "richc/str.h"
 
-// We only ever take an arena by pointer, so a forward declaration will do.
 typedef struct rc_arena rc_arena;
 
 // How rc_mstr_append_f32 and _f64 write a number. The zero value is "%g" with six significant

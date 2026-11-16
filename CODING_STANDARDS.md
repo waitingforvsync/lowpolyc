@@ -35,6 +35,7 @@ this table.
 | Directory | Library | Role |
 |-----------|---------|------|
 | `src/richc/core/` | `richc` | Data structures, algorithms, math, strings, formatting, the platform layer. No external dependencies. |
+| `src/richc/shader/` | `richc_shader` | The WGSL translator, shader packages and the shader tool. Built on core. |
 | `src/richc/app/` | `richc_app` | Windowing, input, gfx, image, font, UI. Built on core. |
 | `src/lowpoly/` | `lowpoly` (executable) | The mesh editor itself. Built on core and app. |
 
@@ -353,7 +354,7 @@ core. Nothing outside the platform backends knows which target it is running on.
   sizes: compute in a wider type, or use the `rc_*_overflows_*` checks, and
   reject before anything wraps.
 - **Error results are for conditions a caller genuinely handles.** They are an
-  enum (first enumerator `..._OK` / zero) or a small result struct.
+  enum, whose zero is no error (`RC_FILE_ERROR_NONE`), or a small result struct.
 - On wasm a trap is the `unreachable` instruction, which the host sees as a
   `RuntimeError`. The host prints the reason passed through the platform layer
   before the trap, where one is available.
@@ -380,9 +381,12 @@ core. Nothing outside the platform backends knows which target it is running on.
   (`rc_{view,span,array}_<name>_{get,set,at}`), never `.data[i]` or `RC_AT`.
   They bounds-check in debug builds. `RC_AT` is not type-checked and exists only
   as a convenience for code outside richc and lowpoly.
-- **Prefer indices to pointers**, including as return values: a lookup returns a
-  `uint32_t` index, or `RC_INDEX_NONE` for "not found". Indices survive growth
-  and relocation, are half the size of a 64-bit pointer, and serialise trivially.
+- **Always prefer indices to pointers**, in return values, parameters and
+  struct members alike. A lookup returns a `uint32_t` index, or `RC_INDEX_NONE`
+  for "not found", never a pointer or `NULL`, and the caller reads the element
+  through the typed accessors. Indices survive growth and relocation, are half
+  the size of a 64-bit pointer, and serialise trivially. The pointer an `_at`
+  accessor gives is only for changing that element in place, there and then.
 - **A pointer to a whole allocation is stable; a pointer to an element is not.**
   Re-fetch by index after any push to the same array.
 - **A membership set is an `rc_bitset`** when iteration cost allows. A sparse set
@@ -429,8 +433,28 @@ core. Nothing outside the platform backends knows which target it is running on.
   math helpers always carry one (`rc_min_i32`, `rc_sqrt_f32`), which also
   avoids the Windows `min`/`max`/`near`/`far` macros. The unsuffixed name
   (`rc_sqrt`, `rc_min`) is a `_Generic` dispatcher over the suffixed forms.
-- **The first enumerator is the zero/default.** Tagged-union discriminant enums
-  are named `..._type`, not `..._kind`.
+- **An enum and its values share one stem:** `rc_wgsl_space` holds
+  `RC_WGSL_SPACE_PRIVATE`, and `rc_file_error` holds `RC_FILE_ERROR_NOT_FOUND`.
+  Pick whichever name reads better and make the other match it. If the stem
+  already names a struct, lengthen the enum's name and its values with it:
+  `rc_wgsl_layout_rule` holds `RC_WGSL_LAYOUT_RULE_STD140`.
+- **A sum type's discriminator is a field called `type`**, and its enum is
+  the struct's name with `_type`: `rc_wgsl_token` has `type`, an
+  `rc_wgsl_token_type`, which holds `RC_WGSL_TOKEN_TYPE_IDENT`. Its zero is
+  `NONE`, as for every enum.
+- **No sum type's name ends in `_type`**, since its discriminator's enum would
+  then end in `_type_type`. Name it for what it holds instead: a WGSL type's
+  description is an `rc_wgsl_typeinfo`, whose `type` is an
+  `rc_wgsl_typeinfo_type`.
+- **Field names say what they hold.** A field is never just `kind`, `a` or
+  `b`, and is only `type` when it is a sum type's discriminator: write
+  `operand_type`, `texture_class`, `columns`. One field holds one thing; if
+  its meaning would change with the case, split it into fields named for each.
+- **The first enumerator, 0, is the default or uninitialised value, named
+  `NONE`** (`RC_WGSL_TOKEN_TYPE_NONE`, `RC_GFX_LOAD_OP_NONE`), so a zeroed struct
+  holds it. Where an API has a default, `NONE` means it. For an error enum,
+  `NONE` is no error. Bit flags and named constants in an `enum` are not
+  enumerations, and have no `NONE`.
 - **Public structs are tagged with their typedef name**
   (`typedef struct rc_foo {...} rc_foo;`) so they can be forward-declared.
 
@@ -442,6 +466,12 @@ core. Nothing outside the platform backends knows which target it is running on.
 - **Comments wrap at 100 columns**, not 80. Lines of code aim for the same
   margin, but it is not enforced strictly: a line that reads better slightly
   long stays long.
+- **A table indexed by an enum names each index:**
+  `[RC_WGSL_SPACE_FUNCTION] = RC_STR_INIT("function")`, so every value stays
+  beside its key and reordering the enum can't misalign the table. Assert the
+  index is in range before reading it: `RC_ASSERT(space < RC_COUNT(names));`.
+- **Count a C array's elements with `RC_COUNT`**, never a hand-written
+  `sizeof` division.
 - **Compound literals:** a space between the closing `)` of the type and the
   `{`; no space after the `{` or before the `}` (`(rc_str) {.data = p, .len = n}`,
   `{0}`, never `{ 0 }`).
@@ -528,7 +558,7 @@ core. Nothing outside the platform backends knows which target it is running on.
   already provides.
 - **Forward-declare instead of including** when only a pointer to a type is
   needed: `typedef struct rc_foo rc_foo;` (a repeated typedef is valid since
-  C11).
+  C11). It needs no comment.
 - **Every header is self-sufficient**, proved by being the first include of its
   own `.c`.
 - **CMake source lists are alphabetical**, sources before headers, and entries

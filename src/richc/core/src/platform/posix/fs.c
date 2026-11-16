@@ -94,7 +94,7 @@ rc_file_error rc_fs_read(uintptr_t handle, void *dst, uint32_t size)
         at += got;
         size -= (uint32_t)got;
     }
-    return RC_FILE_OK;
+    return RC_FILE_ERROR_NONE;
 }
 
 
@@ -137,7 +137,7 @@ rc_file_error rc_fs_write(rc_str path, const void *data, uint32_t size)
     if (close(fd) != 0) {
         return RC_FILE_ERROR_IO;
     }
-    return RC_FILE_OK;
+    return RC_FILE_ERROR_NONE;
 }
 
 
@@ -151,7 +151,7 @@ rc_file_error rc_fs_delete(rc_str path)
     if (unlink(name) != 0) {
         return rc_fs_error_from_errno();
     }
-    return RC_FILE_OK;
+    return RC_FILE_ERROR_NONE;
 }
 
 
