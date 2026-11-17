@@ -34,12 +34,13 @@ typedef struct rc_wgsl_translate_result {
     rc_wgsl_error error;
 } rc_wgsl_translate_result;
 
-// The package for the WGSL module source, allocated from arena, or why there can't be one.
-rc_wgsl_translate_result rc_wgsl_translate(rc_str source, rc_arena *arena);
+// The package for the WGSL module source with a program for each target in targets (a set of
+// RC_SHADER_TARGET_BIT), allocated from arena; or why there can't be one. Everything else it
+// needs along the way comes from scratch.
+rc_wgsl_translate_result rc_wgsl_translate(rc_str source, uint32_t targets, rc_arena *arena, rc_arena scratch);
 
 // Append package as C: a header defining it as a static const rc_shader_package called name,
 // which must be a C identifier.
-void rc_shader_package_append_c(rc_mstr *out, rc_shader_package package, rc_str name,
-    rc_arena *arena);
+void rc_shader_package_append_c(rc_mstr *out, rc_shader_package package, rc_str name, rc_arena *arena);
 
 #endif // RC_SHADER_WGSL_H_

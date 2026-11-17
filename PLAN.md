@@ -175,26 +175,54 @@ Shaders are written in WGSL, in `.wgsl` files, and translated by richc's own
 translator, the `richc_shader` library in `src/richc/shader/`. It depends only
 on core, so it builds anywhere, freestanding wasm included.
 
-- `rc_add_shaders(target file.wgsl ...)` in CMake runs the shader tool on each
-  file at build time. The program includes `"shaders/file.wgsl.h"`, which
-  defines a static `rc_shader_package` called `file_wgsl`. A wasm build makes
-  a native copy of the tool first, through ExternalProject.
+- `rc_add_shaders(target file.wgsl ... [TARGETS glsl_es300 glsl_460])` in CMake
+  runs the shader tool on each file at build time, for the targets named (all
+  of them by default). The program includes `"shaders/file.wgsl.h"`, which
+  defines a static `rc_shader_package` called `file_wgsl`. A wasm build makes a
+  native copy of the tool first, through ExternalProject.
 - A package (`richc/shader/shader.h`) holds the WGSL, each entry point's
-  GLSL ES 3.00 and GLSL 4.60, and the reflection a backend needs: every
-  binding with its type, the stages that use it and a buffer's least size, and
-  each entry point's combined samplers, blocks, vertex inputs and fragment
-  outputs.
-- `rc_wgsl_translate` makes a package at run time too.
+  program for each target, and the reflection a backend needs: every binding
+  with its type, the stages that use it and a buffer's least size, each
+  program's slots (where it finds each binding), and each entry point's vertex
+  inputs and fragment outputs.
+- `rc_wgsl_translate(source, targets, arena, scratch)` makes a package at run
+  time too. Only the package goes in `arena`; everything else comes from
+  `scratch`.
 - We translate the subset of WGSL our shaders use: vertex and fragment
   shaders, uniform and storage buffers, textures and samplers, and the
   built-in functions that go with them. Anything else, and anything a target
   can't express, is an error, never a quiet mistranslation.
+- WebGPU's limits are the checker's: groups 0 to 3, bindings 0 to 999,
+  locations 0 to 15. Each entry point must bind each group and binding once.
+- WGSL forbids a call that can reach the same memory two ways when either way
+  writes it. We forbid it outright, written or not: two pointer arguments into
+  the same variable, or a pointer to a private var the callee uses itself.
+- An index the checker can't check is clamped in GLSL, as WGSL requires,
+  against the count or, for an array sized at run time, its length.
+
+How it fits together, for adding a target (HLSL for a win32 backend, SPIR-V
+for Vulkan, MSL for Metal):
+
+- The front end (lexer, parser, checker) knows no target. For each entry point
+  the checker records everything it reaches, each thing after what it depends
+  on (`rc_wgsl_entry`: structs, globals, functions, resources, texture and
+  sampler pairs, and its inputs and outputs flattened into slots).
+- `writer.h` is what every text target shares: errors, the polyfills written,
+  slots, name escaping, literals, and the type an abstract const takes where
+  it is written out. A target adds its own writer beside `glsl*.c`, and a case
+  to `rc_package_write` in `package.c`, an `RC_SHADER_TARGET_*`, and its names
+  in the tool and `package_c.c`. A binary target such as SPIR-V shares the
+  checker's results and `layout.c`, not the text writer.
+- Limits that are only a target's belong in its writer, as "can't be written
+  in" errors: GLSL refuses textures and samplers as parameters, since it
+  combines each texture with its sampler where they are declared.
 
 What the GL backend must do to match:
 
-- Bind each combined sampler (`rc_t0_1_s0_2`: texture 0/1 with sampler 0/2,
-  or `rc_t0_1` for a texture read without one) to a texture unit, and each
-  block (`rc_ubo_0_0`, `rc_ssbo_0_1`) to a buffer binding point, by name.
+- Bind each program's slots by name: a combined sampler (`rc_t0_1_s0_2`:
+  texture 0/1 with sampler 0/2, or `rc_t0_1` for a texture read without one)
+  to a texture unit, and a block (`rc_ubo_0_0`, `rc_ssbo_0_1`) to a buffer
+  binding point.
 - Vertex inputs are at their locations. Values between the stages are matched
   by name (`rc_var_N`), since GLSL ES 3.00 has no locations for them.
 - On GL 4.6, set `glClipControl` for 0 to 1 depth; the GLSL ES 3.00 shaders
@@ -212,9 +240,10 @@ doesn't compile.
 Still to do:
 
 - Compute shaders, workgroup memory, atomics and storage textures.
-- Textures and samplers passed to functions, which GLSL needs specialised
-  copies of the function for.
-- SPIR-V and MSL, for the Vulkan and Metal backends.
+- Pointers to uniform, storage and workgroup memory.
+- Textures and samplers passed to functions in GLSL, which needs specialised
+  copies of each function for each pair it is called with.
+- HLSL, SPIR-V and MSL, for the win32, Vulkan and Metal backends.
 
 ## Open questions
 

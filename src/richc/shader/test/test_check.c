@@ -28,8 +28,7 @@ RC_TEST_GROUP_DEINIT(check, fix)
 
 
 // Declarations every test can use.
-static const char prelude[] =
-    "struct S { a: f32, b: i32 }\n"
+static const char prelude[] = "struct S { a: f32, b: i32 }\n"
     "var<private> f: f32;\n"
     "var<private> i: i32;\n"
     "var<private> u: u32;\n"
@@ -58,10 +57,12 @@ static rc_wgsl_check_result check(const char *text, rc_arena *arena)
     if (rc_wgsl_error_is_set(lexed.error)) {
         return (rc_wgsl_check_result) {.error = lexed.error};
     }
+
     parsed = rc_wgsl_parse(source.view, lexed.tokens, arena);
     if (rc_wgsl_error_is_set(parsed.error)) {
         return (rc_wgsl_check_result) {.error = parsed.error};
     }
+
     return rc_wgsl_check(parsed.ast, arena);
 }
 
@@ -103,8 +104,8 @@ static rc_str type_name(rc_wgsl_check_result result, uint32_t decl, rc_arena *ar
     if (rc_wgsl_error_is_set(result.error)) {
         return result.error.message;
     }
-    rc_wgsl_type_append_name(&name, result.module.types,
-        rc_wgsl_module_sema(result.module, decl).type, result.module.ast, arena);
+
+    rc_wgsl_type_append_name(&name, result.module.types, rc_wgsl_module_sema(result.module, decl).type, result.module.ast, arena);
     return name.view;
 }
 
@@ -122,6 +123,7 @@ static rc_str let_type(const char *expression, rc_arena *arena)
     if (rc_wgsl_error_is_set(result.error)) {
         return result.error.message;
     }
+
     body = rc_wgsl_ast_fn_parts(result.module.ast, last_decl(result.module)).body;
     return type_name(result, rc_view_wgsl_index_get(rc_wgsl_ast_list(result.module.ast,
         rc_wgsl_ast_node(result.module.ast, body).lhs), 0), arena);
@@ -137,8 +139,7 @@ static rc_str const_type(const char *expression, rc_arena *arena)
     rc_mstr_append(&text, rc_str_from_cstr(expression), arena);
     rc_mstr_append(&text, RC_STR(";\n"), arena);
     result = check(text.data, arena);
-    return type_name(result, rc_wgsl_error_is_set(result.error) ? 0 : last_decl(result.module),
-        arena);
+    return type_name(result, rc_wgsl_error_is_set(result.error) ? 0 : last_decl(result.module), arena);
 }
 
 
@@ -155,6 +156,7 @@ static int64_t const_value(const char *expression, rc_arena *arena)
     if (rc_wgsl_error_is_set(result.error)) {
         return -999;
     }
+
     sema = rc_wgsl_module_sema(result.module, last_decl(result.module));
     return (sema.flags & RC_WGSL_SEMA_VALUE) ? sema.value : -999;
 }
@@ -221,8 +223,7 @@ RC_TEST_STEP(check, names, fix)
 
 RC_TEST_STEP(check, declarations_in_any_order, fix)
 {
-    RC_CHECK(errors("fn g() -> T { return T(N); }\nstruct T { x: i32 }\nconst N = 3;\n", &fix->a),
-        ==, RC_STR(""));
+    RC_CHECK(errors("fn g() -> T { return T(N); }\nstruct T { x: i32 }\nconst N = 3;\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(errors("const A = B;\nconst B = A;\n", &fix->a), ==, RC_STR("'A' depends on itself"));
     RC_CHECK(errors("struct R { r: R }\n", &fix->a), ==, RC_STR("'R' depends on itself"));
     RC_CHECK(errors("const f = 1;\n", &fix->a), ==, RC_STR("'f' is already declared"));
@@ -232,15 +233,11 @@ RC_TEST_STEP(check, declarations_in_any_order, fix)
 RC_TEST_STEP(check, scopes, fix)
 {
     RC_CHECK(body_errors("let a = 1; { let a = 2.0; }", &fix->a), ==, RC_STR(""));
-    RC_CHECK(body_errors("let a = 1; let a = 2;", &fix->a), ==,
-        RC_STR("'a' is already declared here"));
-    RC_CHECK(body_errors("{ let a = 1; } let b = a;", &fix->a), ==,
-        RC_STR("there is nothing called 'a'"));
+    RC_CHECK(body_errors("let a = 1; let a = 2;", &fix->a), ==, RC_STR("'a' is already declared here"));
+    RC_CHECK(body_errors("{ let a = 1; } let b = a;", &fix->a), ==, RC_STR("there is nothing called 'a'"));
     RC_CHECK(body_errors("let f = 1; let g: i32 = f;", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("fn h(p: i32) { let p = 2; }\n", &fix->a), ==,
-        RC_STR("'p' is already declared here"));
-    RC_CHECK(errors("fn h(p: i32, p: f32) {}\n", &fix->a), ==,
-        RC_STR("'p' is already a parameter"));
+    RC_CHECK(errors("fn h(p: i32) { let p = 2; }\n", &fix->a), ==, RC_STR("'p' is already declared here"));
+    RC_CHECK(errors("fn h(p: i32, p: f32) {}\n", &fix->a), ==, RC_STR("'p' is already a parameter"));
 }
 
 // ---- operators ----
@@ -271,10 +268,8 @@ RC_TEST_STEP(check, matrices, fix)
     RC_CHECK(let_type("m * 2", &fix->a), ==, RC_STR("mat4x4<f32>"));
     RC_CHECK(let_type("m + m", &fix->a), ==, RC_STR("mat4x4<f32>"));
     RC_CHECK(let_type("mat2x3f() * mat4x2f()", &fix->a), ==, RC_STR("mat4x3<f32>"));
-    RC_CHECK(let_type("m * v3", &fix->a), ==,
-        RC_STR("can't use '*' on mat4x4<f32> and vec3<f32>"));
-    RC_CHECK(let_type("m / m", &fix->a), ==,
-        RC_STR("can't use '/' on mat4x4<f32> and mat4x4<f32>"));
+    RC_CHECK(let_type("m * v3", &fix->a), ==, RC_STR("can't use '*' on mat4x4<f32> and vec3<f32>"));
+    RC_CHECK(let_type("m / m", &fix->a), ==, RC_STR("can't use '/' on mat4x4<f32> and mat4x4<f32>"));
 }
 
 
@@ -335,8 +330,7 @@ RC_TEST_STEP(check, constant_errors, fix)
     // Worked out whole, then converted, so the parts needn't fit an i32
     RC_CHECK(let_type("4000000000 / 4", &fix->a), ==, RC_STR("i32"));
     RC_CHECK(let_type("4000000000 / 1", &fix->a), ==, RC_STR("this is out of range for i32"));
-    RC_CHECK(const_type("f", &fix->a), ==,
-        RC_STR("a const needs a value known before the shader runs"));
+    RC_CHECK(const_type("f", &fix->a), ==, RC_STR("a const needs a value known before the shader runs"));
 }
 
 // ---- indexing and members ----
@@ -381,12 +375,9 @@ RC_TEST_STEP(check, vector_constructors, fix)
     RC_CHECK(let_type("vec3<f32>(0.5)", &fix->a), ==, RC_STR("vec3<f32>"));
     RC_CHECK(let_type("vec3f(iv3)", &fix->a), ==, RC_STR("vec3<f32>"));
     RC_CHECK(let_type("vec3f()", &fix->a), ==, RC_STR("vec3<f32>"));
-    RC_CHECK(let_type("vec3f(1, 2)", &fix->a), ==,
-        RC_STR("these don't add up to the vector's size"));
-    RC_CHECK(let_type("vec2(i, u)", &fix->a), ==,
-        RC_STR("the arguments to 'vec2' have no type in common"));
-    RC_CHECK(let_type("vec3()", &fix->a), ==,
-        RC_STR("'vec3' needs its element type when it has no arguments"));
+    RC_CHECK(let_type("vec3f(1, 2)", &fix->a), ==, RC_STR("these don't add up to the vector's size"));
+    RC_CHECK(let_type("vec2(i, u)", &fix->a), ==, RC_STR("the arguments to 'vec2' have no type in common"));
+    RC_CHECK(let_type("vec3()", &fix->a), ==, RC_STR("'vec3' needs its element type when it has no arguments"));
 }
 
 
@@ -395,8 +386,7 @@ RC_TEST_STEP(check, other_constructors, fix)
     RC_CHECK(let_type("array(1, 2, 3)", &fix->a), ==, RC_STR("array<i32, 3>"));
     RC_CHECK(let_type("array(1, 2.5)", &fix->a), ==, RC_STR("array<f32, 2>"));
     RC_CHECK(let_type("array<f32, 2>(1, 2)", &fix->a), ==, RC_STR("array<f32, 2>"));
-    RC_CHECK(let_type("array(vec2(0.0, 0.5), vec2(1.0, 1.0))", &fix->a), ==,
-        RC_STR("array<vec2<f32>, 2>"));
+    RC_CHECK(let_type("array(vec2(0.0, 0.5), vec2(1.0, 1.0))", &fix->a), ==, RC_STR("array<vec2<f32>, 2>"));
     RC_CHECK(let_type("mat2x2(1, 2, 3, 4)", &fix->a), ==, RC_STR("mat2x2<f32>"));
     RC_CHECK(let_type("mat2x2f(v2, v2)", &fix->a), ==, RC_STR("mat2x2<f32>"));
     RC_CHECK(let_type("S(1.0, 2)", &fix->a), ==, RC_STR("S"));
@@ -408,8 +398,7 @@ RC_TEST_STEP(check, other_constructors, fix)
     RC_CHECK(let_type("array<f32, 2>(1)", &fix->a), ==, RC_STR("'array' takes 2 arguments, not 1"));
     RC_CHECK(let_type("S(1.0)", &fix->a), ==, RC_STR("'S' takes 2 arguments, not 1"));
     RC_CHECK(let_type("S(1.0, 2.5)", &fix->a), ==, RC_STR("expected i32, got a number"));
-    RC_CHECK(let_type("mat2x2f(1, 2, 3)", &fix->a), ==,
-        RC_STR("mat2x2<f32> takes its columns, or all its numbers"));
+    RC_CHECK(let_type("mat2x2f(1, 2, 3)", &fix->a), ==, RC_STR("mat2x2<f32> takes its columns, or all its numbers"));
 }
 
 // ---- built-in functions ----
@@ -448,13 +437,11 @@ RC_TEST_STEP(check, builtin_mismatches, fix)
     RC_CHECK(let_type("sin(i)", &fix->a), ==, RC_STR("'sin' can't take (i32)"));
     RC_CHECK(let_type("max(i, u)", &fix->a), ==, RC_STR("'max' can't take (i32, u32)"));
     RC_CHECK(let_type("dot(f, f)", &fix->a), ==, RC_STR("'dot' can't take (f32, f32)"));
-    RC_CHECK(let_type("cross(v2, v2)", &fix->a), ==,
-        RC_STR("'cross' can't take (vec2<f32>, vec2<f32>)"));
+    RC_CHECK(let_type("cross(v2, v2)", &fix->a), ==, RC_STR("'cross' can't take (vec2<f32>, vec2<f32>)"));
     RC_CHECK(let_type("sign(u)", &fix->a), ==, RC_STR("'sign' can't take (u32)"));
     RC_CHECK(let_type("max(f)", &fix->a), ==, RC_STR("'max' can't take (f32)"));
     RC_CHECK(let_type("bitcast<u32>(v2)", &fix->a), ==, RC_STR("'bitcast' can't take (vec2<f32>)"));
-    RC_CHECK(let_type("bitcast(f)", &fix->a), ==,
-        RC_STR("bitcast needs its type, as bitcast<u32>(x)"));
+    RC_CHECK(let_type("bitcast(f)", &fix->a), ==, RC_STR("bitcast needs its type, as bitcast<u32>(x)"));
     RC_CHECK(let_type("atomicAdd(i, 1)", &fix->a), ==, RC_STR("'atomicAdd' isn't supported yet"));
     RC_CHECK(let_type("nope(1)", &fix->a), ==, RC_STR("there is no function called 'nope'"));
 }
@@ -478,22 +465,15 @@ RC_TEST_STEP(check, textures, fix)
 
 RC_TEST_STEP(check, texture_mistakes, fix)
 {
-    RC_CHECK(let_type("textureSample(t, cs, v2)", &fix->a), ==,
-        RC_STR("expected sampler, got sampler_comparison"));
+    RC_CHECK(let_type("textureSample(t, cs, v2)", &fix->a), ==, RC_STR("expected sampler, got sampler_comparison"));
     RC_CHECK(let_type("textureSample(s, s, v2)", &fix->a), ==, RC_STR("this can't take sampler"));
-    RC_CHECK(let_type("textureSample(t, s, v3)", &fix->a), ==,
-        RC_STR("expected vec2<f32>, got vec3<f32>"));
+    RC_CHECK(let_type("textureSample(t, s, v3)", &fix->a), ==, RC_STR("expected vec2<f32>, got vec3<f32>"));
     RC_CHECK(let_type("textureSample(t, s)", &fix->a), ==, RC_STR("this needs more arguments"));
-    RC_CHECK(let_type("textureSample(t, s, v2, vec2i(1), 3)", &fix->a), ==,
-        RC_STR("this is one argument too many"));
-    RC_CHECK(let_type("textureSample(t, s, v2, vec2(i, i))", &fix->a), ==,
-        RC_STR("an offset must be known before the shader runs"));
-    RC_CHECK(let_type("textureSampleCompare(t, cs, v2, 0.5)", &fix->a), ==,
-        RC_STR("this can't take texture_2d<f32>"));
-    RC_CHECK(let_type("textureLoad(t, v2, 0)", &fix->a), ==,
-        RC_STR("expected i32 or u32 here, not vec2<f32>"));
-    RC_CHECK(let_type("textureNumLayers(t)", &fix->a), ==,
-        RC_STR("only an arrayed texture has layers"));
+    RC_CHECK(let_type("textureSample(t, s, v2, vec2i(1), 3)", &fix->a), ==, RC_STR("this is one argument too many"));
+    RC_CHECK(let_type("textureSample(t, s, v2, vec2(i, i))", &fix->a), ==, RC_STR("an offset must be known before the shader runs"));
+    RC_CHECK(let_type("textureSampleCompare(t, cs, v2, 0.5)", &fix->a), ==, RC_STR("this can't take texture_2d<f32>"));
+    RC_CHECK(let_type("textureLoad(t, v2, 0)", &fix->a), ==, RC_STR("expected i32 or u32 here, not vec2<f32>"));
+    RC_CHECK(let_type("textureNumLayers(t)", &fix->a), ==, RC_STR("only an arrayed texture has layers"));
 }
 
 // ---- statements ----
@@ -501,19 +481,16 @@ RC_TEST_STEP(check, texture_mistakes, fix)
 RC_TEST_STEP(check, assignments, fix)
 {
     RC_CHECK(body_errors("var x = 1.0; x = 2; x += 1; x *= f;", &fix->a), ==, RC_STR(""));
-    RC_CHECK(body_errors("f = 1; v3.x = 2; v3 = vec3(1, 2, 3); arr[1] = f;", &fix->a), ==,
-        RC_STR(""));
+    RC_CHECK(body_errors("f = 1; v3.x = 2; v3 = vec3(1, 2, 3); arr[1] = f;", &fix->a), ==, RC_STR(""));
     RC_CHECK(body_errors("var x = 1; x <<= 2; x++; x--;", &fix->a), ==, RC_STR(""));
     RC_CHECK(body_errors("let x = 1; x = 2;", &fix->a), ==, RC_STR("'x' can't change: make it a var"));
     RC_CHECK(body_errors("uni.a = 1.0;", &fix->a), ==, RC_STR("this is read-only"));
-    RC_CHECK(body_errors("v3.xy = v2;", &fix->a), ==,
-        RC_STR("can only change a var, or part of one"));
+    RC_CHECK(body_errors("v3.xy = v2;", &fix->a), ==, RC_STR("can only change a var, or part of one"));
     RC_CHECK(body_errors("f = i;", &fix->a), ==, RC_STR("expected f32, got i32"));
     RC_CHECK(body_errors("i += 1u;", &fix->a), ==, RC_STR("can't apply this to i32 with u32"));
     RC_CHECK(body_errors("f++;", &fix->a), ==, RC_STR("only an i32 or u32 counts up or down, not f32"));
     RC_CHECK(body_errors("_ = f; _ = sin(1.0);", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("fn h(p: i32) { p = 2; }\n", &fix->a), ==,
-        RC_STR("'p' is a parameter, which can't change"));
+    RC_CHECK(errors("fn h(p: i32) { p = 2; }\n", &fix->a), ==, RC_STR("'p' is a parameter, which can't change"));
 }
 
 
@@ -522,28 +499,22 @@ RC_TEST_STEP(check, calls_as_statements, fix)
     RC_CHECK(errors("fn g() -> i32 { return 1; }\nfn h() { g(); }\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(body_errors("sin(1.0);", &fix->a), ==, RC_STR("the result of 'sin' must be used"));
     RC_CHECK(body_errors("vec3f(1.0);", &fix->a), ==, RC_STR("a value made here must be used"));
-    RC_CHECK(errors("fn g() {}\nfn h() { let x = g(); }\n", &fix->a), ==,
-        RC_STR("this gives no value"));
+    RC_CHECK(errors("fn g() {}\nfn h() { let x = g(); }\n", &fix->a), ==, RC_STR("this gives no value"));
 }
 
 
 RC_TEST_STEP(check, returns, fix)
 {
     RC_CHECK(errors("fn g() -> f32 { return 1; }\n", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("fn g() -> f32 { if b { return 1.0; } else { return 2.0; } }\n", &fix->a),
-        ==, RC_STR(""));
+    RC_CHECK(errors("fn g() -> f32 { if b { return 1.0; } else { return 2.0; } }\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(errors("fn g() -> f32 { loop { } }\n", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("fn g() -> f32 { if b { return 1.0; } }\n", &fix->a), ==,
-        RC_STR("this function can end without returning a value"));
-    RC_CHECK(errors("fn g() -> f32 { loop { break; } }\n", &fix->a), ==,
-        RC_STR("this function can end without returning a value"));
+    RC_CHECK(errors("fn g() -> f32 { if b { return 1.0; } }\n", &fix->a), ==, RC_STR("this function can end without returning a value"));
+    RC_CHECK(errors("fn g() -> f32 { loop { break; } }\n", &fix->a), ==, RC_STR("this function can end without returning a value"));
     RC_CHECK(errors("fn g() -> f32 { for (;;) { } }\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(errors("fn g() -> f32 { while true { return 1.0; } }\n", &fix->a), ==,
         RC_STR("this function can end without returning a value"));
-    RC_CHECK(errors("fn g() -> f32 { switch i { default: { return 1.0; } } }\n", &fix->a), ==,
-        RC_STR(""));
-    RC_CHECK(errors("fn g() -> f32 { return; }\n", &fix->a), ==,
-        RC_STR("this function must return f32"));
+    RC_CHECK(errors("fn g() -> f32 { switch i { default: { return 1.0; } } }\n", &fix->a), ==, RC_STR(""));
+    RC_CHECK(errors("fn g() -> f32 { return; }\n", &fix->a), ==, RC_STR("this function must return f32"));
     RC_CHECK(errors("fn g() { return 1; }\n", &fix->a), ==, RC_STR("this function returns nothing"));
     RC_CHECK(errors("fn g() -> f32 { return b; }\n", &fix->a), ==, RC_STR("expected f32, got bool"));
 }
@@ -552,43 +523,31 @@ RC_TEST_STEP(check, returns, fix)
 RC_TEST_STEP(check, control_flow, fix)
 {
     RC_CHECK(body_errors("if f > 0 { } else if b { } else { }", &fix->a), ==, RC_STR(""));
-    RC_CHECK(body_errors("for (var j = 0; j < 4; j++) { if j == 2 { continue; } break; }", &fix->a),
-        ==, RC_STR(""));
-    RC_CHECK(body_errors("loop { let k = 1; continuing { let l = k; break if l > 0; } }",
-        &fix->a), ==, RC_STR(""));
+    RC_CHECK(body_errors("for (var j = 0; j < 4; j++) { if j == 2 { continue; } break; }", &fix->a), ==, RC_STR(""));
+    RC_CHECK(body_errors("loop { let k = 1; continuing { let l = k; break if l > 0; } }", &fix->a), ==, RC_STR(""));
     RC_CHECK(body_errors("if i { }", &fix->a), ==, RC_STR("expected bool, got i32"));
     RC_CHECK(body_errors("while 1 { }", &fix->a), ==, RC_STR("expected bool, got an integer"));
     RC_CHECK(body_errors("break;", &fix->a), ==, RC_STR("a break must be in a loop or switch"));
     RC_CHECK(body_errors("continue;", &fix->a), ==, RC_STR("a continue must be in a loop"));
     RC_CHECK(body_errors("loop { continuing { if b { break; } } }", &fix->a), ==,
         RC_STR("a continuing block leaves its loop by 'break if'"));
-    RC_CHECK(body_errors("loop { continuing { continue; } }", &fix->a), ==,
-        RC_STR("a continuing block can't continue"));
-    RC_CHECK(body_errors("loop { continuing { return; } }", &fix->a), ==,
-        RC_STR("a continuing block can't return"));
-    RC_CHECK(body_errors("loop { continuing { loop { break; } break if b; } }", &fix->a), ==,
-        RC_STR(""));
+    RC_CHECK(body_errors("loop { continuing { continue; } }", &fix->a), ==, RC_STR("a continuing block can't continue"));
+    RC_CHECK(body_errors("loop { continuing { return; } }", &fix->a), ==, RC_STR("a continuing block can't return"));
+    RC_CHECK(body_errors("loop { continuing { loop { break; } break if b; } }", &fix->a), ==, RC_STR(""));
 }
 
 
 RC_TEST_STEP(check, switches, fix)
 {
-    RC_CHECK(body_errors("switch i { case 1, 2: { } case 3: { break; } default: { } }", &fix->a),
-        ==, RC_STR(""));
+    RC_CHECK(body_errors("switch i { case 1, 2: { } case 3: { break; } default: { } }", &fix->a), ==, RC_STR(""));
     RC_CHECK(body_errors("switch u { case 1u: { } default: { } }", &fix->a), ==, RC_STR(""));
     RC_CHECK(body_errors("switch 2 { case 1u: { } default: { } }", &fix->a), ==, RC_STR(""));
-    RC_CHECK(body_errors("switch i { case 1, 1: { } default: { } }", &fix->a), ==,
-        RC_STR("an earlier case has this value"));
-    RC_CHECK(body_errors("switch i { case 1: { } }", &fix->a), ==,
-        RC_STR("a switch needs a default case"));
-    RC_CHECK(body_errors("switch i { default: { } default: { } }", &fix->a), ==,
-        RC_STR("a switch has only one default case"));
-    RC_CHECK(body_errors("switch f { default: { } }", &fix->a), ==,
-        RC_STR("a switch needs an integer, not f32"));
-    RC_CHECK(body_errors("switch i { case i: { } default: { } }", &fix->a), ==,
-        RC_STR("a case must be known before the shader runs"));
-    RC_CHECK(body_errors("switch i { case 1u: { } default: { } }", &fix->a), ==,
-        RC_STR("expected i32, got u32"));
+    RC_CHECK(body_errors("switch i { case 1, 1: { } default: { } }", &fix->a), ==, RC_STR("an earlier case has this value"));
+    RC_CHECK(body_errors("switch i { case 1: { } }", &fix->a), ==, RC_STR("a switch needs a default case"));
+    RC_CHECK(body_errors("switch i { default: { } default: { } }", &fix->a), ==, RC_STR("a switch has only one default case"));
+    RC_CHECK(body_errors("switch f { default: { } }", &fix->a), ==, RC_STR("a switch needs an integer, not f32"));
+    RC_CHECK(body_errors("switch i { case i: { } default: { } }", &fix->a), ==, RC_STR("a case must be known before the shader runs"));
+    RC_CHECK(body_errors("switch i { case 1u: { } default: { } }", &fix->a), ==, RC_STR("expected i32, got u32"));
 }
 
 
@@ -598,8 +557,7 @@ RC_TEST_STEP(check, pointers, fix)
         "fn h() { var x = 0.0; g(&x); let p = &x; *p = 2.0; }\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(errors("fn g(p: ptr<private, vec3f>) { (*p).x = 1.0; p.y = 2.0; }\n"
         "fn h() { g(&v3); }\n", &fix->a), ==, RC_STR(""));
-    RC_CHECK(body_errors("let p = &1;", &fix->a), ==,
-        RC_STR("only memory has an address: a var, or part of one"));
+    RC_CHECK(body_errors("let p = &1;", &fix->a), ==, RC_STR("only memory has an address: a var, or part of one"));
     RC_CHECK(body_errors("let p = &v3.x;", &fix->a), ==, RC_STR("can't take the address of this"));
     RC_CHECK(body_errors("let x = *f;", &fix->a), ==, RC_STR("'*' needs a pointer, not f32"));
     RC_CHECK(errors("fn g(p: ptr<uniform, S>) {}\n", &fix->a), ==,
@@ -611,8 +569,7 @@ RC_TEST_STEP(check, const_asserts, fix)
 {
     RC_CHECK(errors("const_assert 1 < 2;\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(errors("const_assert 2 < 1;\n", &fix->a), ==, RC_STR("this const_assert fails"));
-    RC_CHECK(errors("const_assert 1.0 < 2.0;\n", &fix->a), ==,
-        RC_STR("this condition must be made of integers and bools we can work out"));
+    RC_CHECK(errors("const_assert 1.0 < 2.0;\n", &fix->a), ==, RC_STR("this condition must be made of integers and bools we can work out"));
     RC_CHECK(body_errors("const n = 4; const_assert n == 4;", &fix->a), ==, RC_STR(""));
 }
 
@@ -622,59 +579,37 @@ RC_TEST_STEP(check, module_vars, fix)
 {
     RC_CHECK(errors("var<private> p: f32 = 1.0;\n", &fix->a), ==, RC_STR(""));
     RC_CHECK(errors("var<private> p = vec2(1, 2);\n", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("@group(1) @binding(0) var<storage, read_write> sb: array<f32>;\n", &fix->a),
-        ==, RC_STR(""));
-    RC_CHECK(errors("var p: f32;\n", &fix->a), ==,
-        RC_STR("this var needs an address space, such as var<private>"));
-    RC_CHECK(errors("var<uniform> p: f32;\n", &fix->a), ==,
-        RC_STR("this var needs @group and @binding"));
-    RC_CHECK(errors("@group(0) @binding(9) var<uniform, read> p: f32;\n", &fix->a), ==,
-        RC_STR("only storage vars take an access mode"));
-    RC_CHECK(errors("@group(0) @binding(9) var<uniform> p: bool;\n", &fix->a), ==,
-        RC_STR("a buffer can't hold bool"));
-    RC_CHECK(errors("@group(0) @binding(9) var<uniform> p: array<f32>;\n", &fix->a), ==,
-        RC_STR("a uniform buffer can't hold array<f32>"));
+    RC_CHECK(errors("@group(1) @binding(0) var<storage, read_write> sb: array<f32>;\n", &fix->a), ==, RC_STR(""));
+    RC_CHECK(errors("var p: f32;\n", &fix->a), ==, RC_STR("this var needs an address space, such as var<private>"));
+    RC_CHECK(errors("var<uniform> p: f32;\n", &fix->a), ==, RC_STR("this var needs @group and @binding"));
+    RC_CHECK(errors("@group(0) @binding(9) var<uniform, read> p: f32;\n", &fix->a), ==, RC_STR("only storage vars take an access mode"));
+    RC_CHECK(errors("@group(0) @binding(9) var<uniform> p: bool;\n", &fix->a), ==, RC_STR("a buffer can't hold bool"));
+    RC_CHECK(errors("@group(0) @binding(9) var<uniform> p: array<f32>;\n", &fix->a), ==, RC_STR("a uniform buffer can't hold array<f32>"));
     RC_CHECK(errors("@group(0) @binding(9) var<private> p: f32;\n", &fix->a), ==,
         RC_STR("only uniform, storage and handle vars take attributes"));
-    RC_CHECK(errors("var<private> p: f32 = f;\n", &fix->a), ==,
-        RC_STR("a module-scope var needs a value known before the shader runs"));
-    RC_CHECK(errors("var<function> p: f32;\n", &fix->a), ==,
-        RC_STR("function vars only go in functions"));
-    RC_CHECK(errors("var<workgroup> p: f32;\n", &fix->a), ==,
-        RC_STR("workgroup vars aren't supported yet"));
-    RC_CHECK(errors("var<private> p: sampler;\n", &fix->a), ==,
-        RC_STR("samplers and textures take no address space"));
-    RC_CHECK(errors("var<bogus> p: f32;\n", &fix->a), ==,
-        RC_STR("expected an address space, such as 'private' or 'uniform'"));
+    RC_CHECK(errors("var<private> p: f32 = f;\n", &fix->a), ==, RC_STR("a module-scope var needs a value known before the shader runs"));
+    RC_CHECK(errors("var<function> p: f32;\n", &fix->a), ==, RC_STR("function vars only go in functions"));
+    RC_CHECK(errors("var<workgroup> p: f32;\n", &fix->a), ==, RC_STR("workgroup vars aren't supported yet"));
+    RC_CHECK(errors("var<private> p: sampler;\n", &fix->a), ==, RC_STR("samplers and textures take no address space"));
+    RC_CHECK(errors("var<bogus> p: f32;\n", &fix->a), ==, RC_STR("expected an address space, such as 'private' or 'uniform'"));
 }
 
 
 RC_TEST_STEP(check, types_in_declarations, fix)
 {
-    RC_CHECK(errors("var<private> p: array<f32, 0>;\n", &fix->a), ==,
-        RC_STR("this must be from 1 to 4294967295"));
-    RC_CHECK(errors("const N = 3u;\nvar<private> p: array<vec2<f32>, N * 2>;\n", &fix->a), ==,
-        RC_STR(""));
-    RC_CHECK(errors("var<private> p: array<f32, f>;\n", &fix->a), ==,
-        RC_STR("expected an integer, got f32"));
-    RC_CHECK(errors("var<private> p: vec3;\n", &fix->a), ==,
-        RC_STR("'vec3' takes 1 template argument"));
-    RC_CHECK(errors("var<private> p: vec3<S>;\n", &fix->a), ==,
-        RC_STR("expected a scalar type, got S"));
-    RC_CHECK(errors("var<private> p: mat2x2<i32>;\n", &fix->a), ==,
-        RC_STR("expected f32, got i32"));
-    RC_CHECK(errors("var<private> p: f32<i32>;\n", &fix->a), ==,
-        RC_STR("'f32' takes no template list"));
-    RC_CHECK(errors("var<private> p: nope;\n", &fix->a), ==,
-        RC_STR("there is no type called 'nope'"));
+    RC_CHECK(errors("var<private> p: array<f32, 0>;\n", &fix->a), ==, RC_STR("this must be from 1 to 4294967295"));
+    RC_CHECK(errors("const N = 3u;\nvar<private> p: array<vec2<f32>, N * 2>;\n", &fix->a), ==, RC_STR(""));
+    RC_CHECK(errors("var<private> p: array<f32, f>;\n", &fix->a), ==, RC_STR("expected an integer, got f32"));
+    RC_CHECK(errors("var<private> p: vec3;\n", &fix->a), ==, RC_STR("'vec3' takes 1 template argument"));
+    RC_CHECK(errors("var<private> p: vec3<S>;\n", &fix->a), ==, RC_STR("expected a scalar type, got S"));
+    RC_CHECK(errors("var<private> p: mat2x2<i32>;\n", &fix->a), ==, RC_STR("expected f32, got i32"));
+    RC_CHECK(errors("var<private> p: f32<i32>;\n", &fix->a), ==, RC_STR("'f32' takes no template list"));
+    RC_CHECK(errors("var<private> p: nope;\n", &fix->a), ==, RC_STR("there is no type called 'nope'"));
     RC_CHECK(errors("var<private> p: f16;\n", &fix->a), ==, RC_STR("'f16' isn't supported yet"));
-    RC_CHECK(errors("var<private> p: atomic<i32>;\n", &fix->a), ==,
-        RC_STR("atomics aren't supported yet"));
+    RC_CHECK(errors("var<private> p: atomic<i32>;\n", &fix->a), ==, RC_STR("atomics aren't supported yet"));
     RC_CHECK(errors("alias V = vec3f;\nvar<private> p: V;\n", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("struct Q { a: f32, a: i32 }\n", &fix->a), ==,
-        RC_STR("'a' is already a member"));
-    RC_CHECK(errors("struct Q { a: array<f32>, b: f32 }\n", &fix->a), ==,
-        RC_STR("only the last member can be sized at run time"));
+    RC_CHECK(errors("struct Q { a: f32, a: i32 }\n", &fix->a), ==, RC_STR("'a' is already a member"));
+    RC_CHECK(errors("struct Q { a: array<f32>, b: f32 }\n", &fix->a), ==, RC_STR("only the last member can be sized at run time"));
     RC_CHECK(errors("struct Q { a: sampler }\n", &fix->a), ==, RC_STR("a struct can't hold sampler"));
 }
 
@@ -682,40 +617,29 @@ RC_TEST_STEP(check, types_in_declarations, fix)
 RC_TEST_STEP(check, attributes, fix)
 {
     RC_CHECK(errors("struct Q { @align(16) @size(32) a: f32 }\n", &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("struct Q { @nope a: f32 }\n", &fix->a), ==,
-        RC_STR("there is no attribute @nope"));
+    RC_CHECK(errors("struct Q { @nope a: f32 }\n", &fix->a), ==, RC_STR("there is no attribute @nope"));
     RC_CHECK(errors("struct Q { @group(0) a: f32 }\n", &fix->a), ==, RC_STR("@group can't go here"));
-    RC_CHECK(errors("struct Q { @size(0) a: f32 }\n", &fix->a), ==,
-        RC_STR("this must be from 1 to 4294967295"));
-    RC_CHECK(errors("struct Q { @align(4) @align(8) a: f32 }\n", &fix->a), ==,
-        RC_STR("@align is here already"));
-    RC_CHECK(errors("struct Q { @size a: f32 }\n", &fix->a), ==,
-        RC_STR("@size has the wrong number of arguments"));
-    RC_CHECK(errors("@vertex(1) fn g() -> @builtin(position) vec4f { return v4; }\n", &fix->a),
-        ==, RC_STR("@vertex takes no arguments"));
-    RC_CHECK(errors("struct Q { @builtin(nope) a: f32 }\n", &fix->a), ==,
-        RC_STR("expected a built-in value, such as 'position'"));
-    RC_CHECK(errors("struct Q { @interpolate(flat, nope) a: f32 }\n", &fix->a), ==,
-        RC_STR("expected a sampling, such as 'centroid'"));
+    RC_CHECK(errors("struct Q { @size(0) a: f32 }\n", &fix->a), ==, RC_STR("this must be from 1 to 4294967295"));
+    RC_CHECK(errors("struct Q { @align(4) @align(8) a: f32 }\n", &fix->a), ==, RC_STR("@align is here already"));
+    RC_CHECK(errors("struct Q { @size a: f32 }\n", &fix->a), ==, RC_STR("@size has the wrong number of arguments"));
+    RC_CHECK(errors("@vertex(1) fn g() -> @builtin(position) vec4f { return v4; }\n", &fix->a), ==, RC_STR("@vertex takes no arguments"));
+    RC_CHECK(errors("struct Q { @builtin(nope) a: f32 }\n", &fix->a), ==, RC_STR("expected a built-in value, such as 'position'"));
+    RC_CHECK(errors("struct Q { @interpolate(flat, nope) a: f32 }\n", &fix->a), ==, RC_STR("expected a sampling, such as 'centroid'"));
 }
 
 // ---- functions and entry points ----
 
 RC_TEST_STEP(check, function_calls, fix)
 {
-    RC_CHECK(errors("fn g(a: f32, b: i32) -> f32 { return a; }\nfn h() { _ = g(1, 2); }\n",
-        &fix->a), ==, RC_STR(""));
-    RC_CHECK(errors("fn g(a: f32) {}\nfn h() { g(); }\n", &fix->a), ==,
-        RC_STR("'g' takes 1 argument, not 0"));
-    RC_CHECK(errors("fn g(a: f32) {}\nfn h() { g(i); }\n", &fix->a), ==,
-        RC_STR("expected f32, got i32"));
-    RC_CHECK(errors("fn g() { h(); }\nfn h() { g(); }\n", &fix->a), ==,
-        RC_STR("functions can't call themselves, even through others"));
-    RC_CHECK(errors("fn g() { g(); }\n", &fix->a), ==,
-        RC_STR("functions can't call themselves, even through others"));
+    RC_CHECK(errors("fn g(a: f32, b: i32) -> f32 { return a; }\nfn h() { _ = g(1, 2); }\n", &fix->a), ==, RC_STR(""));
+    RC_CHECK(errors("fn g(a: f32) {}\nfn h() { g(); }\n", &fix->a), ==, RC_STR("'g' takes 1 argument, not 0"));
+    RC_CHECK(errors("fn g(a: f32) {}\nfn h() { g(i); }\n", &fix->a), ==, RC_STR("expected f32, got i32"));
+    RC_CHECK(errors("fn g() { h(); }\nfn h() { g(); }\n", &fix->a), ==, RC_STR("functions can't call themselves, even through others"));
+    RC_CHECK(errors("fn g() { g(); }\n", &fix->a), ==, RC_STR("functions can't call themselves, even through others"));
     RC_CHECK(body_errors("f();", &fix->a), ==, RC_STR("'f' can't be called"));
-    RC_CHECK(errors("fn g(x: sampler) {}\n", &fix->a), ==,
-        RC_STR("passing samplers and textures to functions isn't supported yet"));
+    RC_CHECK(errors("fn takes(x: sampler, y: texture_2d<f32>) -> vec4f "
+        "{ return textureSample(y, x, v2); }\n", &fix->a), ==, RC_STR(""));
+    RC_CHECK(errors("@fragment fn fs(x: sampler) {}\n", &fix->a), ==, RC_STR("an entry point can't take a sampler or texture"));
 }
 
 
@@ -736,18 +660,12 @@ RC_TEST_STEP(check, entry_points, fix)
         RC_STR("an integer passed between stages needs @interpolate(flat)"));
     RC_CHECK(errors("@fragment fn fs(@location(0) x: f32, @location(0) y: f32) {}\n", &fix->a),
         ==, RC_STR("this location is taken already"));
-    RC_CHECK(errors("@fragment fn fs(x: f32) {}\n", &fix->a), ==,
-        RC_STR("this needs @location or @builtin"));
-    RC_CHECK(errors("@fragment fn fs(@builtin(position) x: vec3f) {}\n", &fix->a), ==,
-        RC_STR("this built-in is vec4<f32>, not vec3<f32>"));
-    RC_CHECK(errors("@fragment fn fs(@builtin(vertex_index) x: u32) {}\n", &fix->a), ==,
-        RC_STR("this built-in can't be an input here"));
-    RC_CHECK(errors("@fragment fn fs(@location(0) x: bool) {}\n", &fix->a), ==,
-        RC_STR("a location can't hold bool"));
-    RC_CHECK(errors("@compute @workgroup_size(8) fn main_cs() {}\n", &fix->a), ==,
-        RC_STR("compute shaders aren't supported yet"));
-    RC_CHECK(errors("fn g(@location(0) x: f32) {}\n", &fix->a), ==,
-        RC_STR("@location can't go here"));
+    RC_CHECK(errors("@fragment fn fs(x: f32) {}\n", &fix->a), ==, RC_STR("this needs @location or @builtin"));
+    RC_CHECK(errors("@fragment fn fs(@builtin(position) x: vec3f) {}\n", &fix->a), ==, RC_STR("this built-in is vec4<f32>, not vec3<f32>"));
+    RC_CHECK(errors("@fragment fn fs(@builtin(vertex_index) x: u32) {}\n", &fix->a), ==, RC_STR("this built-in can't be an input here"));
+    RC_CHECK(errors("@fragment fn fs(@location(0) x: bool) {}\n", &fix->a), ==, RC_STR("a location can't hold bool"));
+    RC_CHECK(errors("@compute @workgroup_size(8) fn main_cs() {}\n", &fix->a), ==, RC_STR("compute shaders aren't supported yet"));
+    RC_CHECK(errors("fn g(@location(0) x: f32) {}\n", &fix->a), ==, RC_STR("@location can't go here"));
 }
 
 
@@ -770,8 +688,7 @@ RC_TEST_STEP(check, abstract_values_settle_through_expressions, fix)
     rc_wgsl_check_result result = check("fn g() -> f32 { return 1 + 2 * 3.0; }\n", &fix->a);
     rc_wgsl_module module = result.module;
     uint32_t body = rc_wgsl_ast_fn_parts(module.ast, last_decl(module)).body;
-    uint32_t ret = rc_view_wgsl_index_get(rc_wgsl_ast_list(module.ast,
-        rc_wgsl_ast_node(module.ast, body).lhs), 0);
+    uint32_t ret = rc_view_wgsl_index_get(rc_wgsl_ast_list(module.ast, rc_wgsl_ast_node(module.ast, body).lhs), 0);
     uint32_t sum = rc_wgsl_ast_node(module.ast, ret).lhs;
     uint32_t product = rc_wgsl_ast_node(module.ast, sum).rhs;
 
@@ -779,8 +696,102 @@ RC_TEST_STEP(check, abstract_values_settle_through_expressions, fix)
     RC_CHECK_FALSE(rc_wgsl_error_is_set(result.error));
     RC_CHECK(rc_wgsl_module_sema(module, sum).type, ==, (uint32_t)RC_WGSL_TYPE_ID_F32);
     RC_CHECK(rc_wgsl_module_sema(module, product).type, ==, (uint32_t)RC_WGSL_TYPE_ID_F32);
-    RC_CHECK(rc_wgsl_module_sema(module, rc_wgsl_ast_node(module.ast, product).lhs).type, ==,
-        (uint32_t)RC_WGSL_TYPE_ID_F32);
-    RC_CHECK(rc_wgsl_module_sema(module, rc_wgsl_ast_node(module.ast, sum).lhs).type, ==,
-        (uint32_t)RC_WGSL_TYPE_ID_F32);
+    RC_CHECK(rc_wgsl_module_sema(module, rc_wgsl_ast_node(module.ast, product).lhs).type, ==, (uint32_t)RC_WGSL_TYPE_ID_F32);
+    RC_CHECK(rc_wgsl_module_sema(module, rc_wgsl_ast_node(module.ast, sum).lhs).type, ==, (uint32_t)RC_WGSL_TYPE_ID_F32);
+}
+
+
+RC_TEST_STEP(check, attribute_limits, fix)
+{
+    RC_CHECK(errors("@group(4) @binding(0) var tex: texture_2d<f32>;\n", &fix->a), ==, RC_STR("this must be from 0 to 3"));
+    RC_CHECK(errors("@group(0) @binding(1000) var tex: texture_2d<f32>;\n", &fix->a), ==, RC_STR("this must be from 0 to 999"));
+    RC_CHECK(errors("@fragment fn fs(@location(16) x: f32) {}\n", &fix->a), ==, RC_STR("this must be from 0 to 15"));
+    RC_CHECK(errors("struct T { @align(3) a: f32 }\n", &fix->a), ==, RC_STR("@align must be a power of 2"));
+    RC_CHECK(errors("struct T { @align(8) @size(16) a: f32 }\n", &fix->a), ==, RC_STR(""));
+    RC_CHECK(errors("struct T { @size(4) @size(8) a: f32 }\n", &fix->a), ==, RC_STR("@size is here already"));
+    RC_CHECK(errors("@group(0) @binding(0) var<storage> big: array<vec4f, 268435457>;\n", &fix->a), ==, RC_STR("this buffer is too large"));
+}
+
+
+RC_TEST_STEP(check, types_nest_only_so_deep, fix)
+{
+    rc_mstr structs = rc_mstr_make(2048, &fix->a);
+    rc_mstr arrays = rc_mstr_make(512, &fix->a);
+
+    rc_mstr_append(&structs, RC_STR("struct S0 { a: f32 }\n"), &fix->a);
+    for (uint32_t i = 1; i < 40; i++) {
+        rc_mstr_append(&structs, RC_STR("struct S"), &fix->a);
+        rc_mstr_append_u32(&structs, i, &fix->a);
+        rc_mstr_append(&structs, RC_STR(" { a: S"), &fix->a);
+        rc_mstr_append_u32(&structs, i - 1, &fix->a);
+        rc_mstr_append(&structs, RC_STR(" }\n"), &fix->a);
+    }
+    RC_CHECK(errors(structs.data, &fix->a), ==, RC_STR("this struct nests other types too deeply"));
+    rc_mstr_append(&arrays, RC_STR("alias A = "), &fix->a);
+    for (uint32_t i = 0; i < 40; i++) {
+        rc_mstr_append(&arrays, RC_STR("array<"), &fix->a);
+    }
+    rc_mstr_append(&arrays, RC_STR("f32"), &fix->a);
+    for (uint32_t i = 0; i < 40; i++) {
+        rc_mstr_append(&arrays, RC_STR(", 1>"), &fix->a);
+    }
+    rc_mstr_append(&arrays, RC_STR(";\n"), &fix->a);
+    RC_CHECK(errors(arrays.data, &fix->a), ==, RC_STR("this type nests other types too deeply"));
+}
+
+
+RC_TEST_STEP(check, bindings_are_used_once_by_each_entry_point, fix)
+{
+    static const char shared[] = "@group(1) @binding(0) var<uniform> ua: vec4f;\n"
+        "@group(1) @binding(0) var<uniform> ub: vec4f;\n";
+    rc_mstr both = rc_mstr_from_str(rc_str_from_cstr(shared), 512, &fix->a);
+    rc_mstr apart = rc_mstr_from_str(rc_str_from_cstr(shared), 512, &fix->a);
+
+    rc_mstr_append(&both, RC_STR(
+        "fn fetch() -> vec4f { return ub; }\n"
+        "@fragment fn fs() -> @location(0) vec4f { return ua + fetch(); }\n"), &fix->a);
+    RC_CHECK(errors(both.data, &fix->a), ==, RC_STR("'ub' has the @group and @binding of another resource this entry point uses"));
+    rc_mstr_append(&apart, RC_STR(
+        "@fragment fn fs() -> @location(0) vec4f { return ua; }\n"
+        "@fragment fn fs2() -> @location(0) vec4f { return ub; }\n"), &fix->a);
+    RC_CHECK(errors(apart.data, &fix->a), ==, RC_STR(""));
+}
+
+
+RC_TEST_STEP(check, pointers_never_alias, fix)
+{
+    static const char swap[] = "fn swap(a: ptr<function, f32>, b: ptr<function, f32>) { let t = *a; *a = *b; *b = t; }\n";
+    static const char bump[] = "var<private> gv: f32;\n"
+        "fn bump(p: ptr<private, f32>) { *p += 1.0; }\n"
+        "fn peek(p: ptr<private, f32>) -> f32 { *p += 1.0; return gv; }\n"
+        "fn deeper(p: ptr<private, f32>) -> f32 { return peek(p); }\n";
+    rc_mstr same = rc_mstr_from_str(rc_str_from_cstr(swap), 512, &fix->a);
+    rc_mstr apart = rc_mstr_from_str(rc_str_from_cstr(swap), 512, &fix->a);
+    rc_mstr global = rc_mstr_from_str(rc_str_from_cstr(bump), 512, &fix->a);
+    rc_mstr through = rc_mstr_from_str(rc_str_from_cstr(bump), 512, &fix->a);
+    rc_mstr fine = rc_mstr_from_str(rc_str_from_cstr(bump), 512, &fix->a);
+
+    rc_mstr_append(&same, RC_STR("fn caller() { var x = 1.0; let p = &x; swap(&x, p); }\n"), &fix->a);
+    RC_CHECK(errors(same.data, &fix->a), ==, RC_STR("this points at the same memory as another argument, which WGSL forbids"));
+    rc_mstr_append(&apart, RC_STR("fn caller() { var x = 1.0; var y = 2.0; swap(&x, &y); }\n"), &fix->a);
+    RC_CHECK(errors(apart.data, &fix->a), ==, RC_STR(""));
+    rc_mstr_append(&global, RC_STR("fn caller() -> f32 { return peek(&gv); }\n"), &fix->a);
+    RC_CHECK(errors(global.data, &fix->a), ==, RC_STR("the function called uses 'gv' itself, which WGSL forbids with a pointer to it"));
+    rc_mstr_append(&through, RC_STR("fn caller() -> f32 { return deeper(&gv); }\n"), &fix->a);
+    RC_CHECK(errors(through.data, &fix->a), ==, RC_STR("the function called uses 'gv' itself, which WGSL forbids with a pointer to it"));
+    rc_mstr_append(&fine, RC_STR("fn caller() { bump(&gv); }\n"), &fix->a);
+    RC_CHECK(errors(fine.data, &fix->a), ==, RC_STR(""));
+}
+
+
+RC_TEST_STEP(check, every_builtin_is_found_by_its_name, fix)
+{
+    // The predeclared names are found by a binary search, so this catches them out of order too
+    for (uint32_t i = RC_WGSL_BUILTIN_NONE + 1; i <= RC_WGSL_BUILTIN_UNPACK2X16UNORM; i++) {
+        rc_wgsl_predeclared found = rc_wgsl_predeclared_find(rc_wgsl_builtin_name((rc_wgsl_builtin)i));
+
+        RC_CHECK(found.type, ==, RC_WGSL_PREDECLARED_TYPE_FUNCTION);
+        RC_CHECK(found.builtin, ==, i);
+    }
+    (void)fix;
 }

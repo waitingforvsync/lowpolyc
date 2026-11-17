@@ -108,34 +108,54 @@ static void rc_wgsl_check_condition(rc_wgsl_checker *c, uint32_t node, rc_arena 
 }
 
 
-// A var in a function, which lives in function memory.
-static void rc_wgsl_check_local_var(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
+// True if a var's template list names an address space other than function, or names more than
+// the space.
+static bool rc_wgsl_names_other_space(rc_wgsl_checker *c, uint32_t list)
 {
-    rc_wgsl_var_parts parts = rc_wgsl_ast_var_parts(c->ast, node);
-    rc_view_wgsl_index templates = rc_wgsl_ast_list(c->ast, parts.templates);
-    uint32_t type = parts.type != 0 ? rc_wgsl_check_type_expr(c, parts.type, arena) : 0;
+    rc_view_wgsl_index templates = rc_wgsl_ast_list(c->ast, list);
 
-    if (templates.num > 1 || (templates.num == 1 && rc_wgsl_check_enumerant(c,
-        rc_view_wgsl_index_get(templates, 0), RC_WGSL_ENUMERANT_SPACE) != RC_WGSL_SPACE_FUNCTION)) {
-        rc_wgsl_check_fail(c, node, RC_STR("a var in a function lives in function memory"));
+    if (templates.num == 0) {
+        return false;
     }
-    if (parts.initialiser != 0) {
-        rc_wgsl_check_value(c, parts.initialiser, arena);
-        if (type != 0) {
-            rc_wgsl_check_convert(c, parts.initialiser, type, arena);
-        }
-        else {
-            rc_wgsl_check_concretise_default(c, parts.initialiser, arena);
-            type = rc_wgsl_check_sema(c, parts.initialiser).type;
-        }
+
+    if (templates.num > 1) {
+        return true;
     }
+
+    return rc_wgsl_check_enumerant(c, rc_view_wgsl_index_get(templates, 0), RC_WGSL_ENUMERANT_SPACE) != RC_WGSL_SPACE_FUNCTION;
+}
+
+
+// Check a local var's initialiser, if it has one, against its declared type, returning the type
+// the var takes: the declared one, or else the initialiser's.
+static uint32_t rc_wgsl_check_var_initialiser(rc_wgsl_checker *c, uint32_t initialiser, uint32_t type, rc_arena *arena)
+{
+    if (initialiser == 0) {
+        return type;
+    }
+
+    rc_wgsl_check_value(c, initialiser, arena);
+    if (type != 0) {
+        rc_wgsl_check_convert(c, initialiser, type, arena);
+        return type;
+    }
+
+    rc_wgsl_check_concretise_default(c, initialiser, arena);
+    return rc_wgsl_check_sema(c, initialiser).type;
+}
+
+
+// Note type as the local var node's, failing if it has none or a var can't hold it.
+static void rc_wgsl_set_local_var(rc_wgsl_checker *c, uint32_t node, uint32_t type, rc_arena *arena)
+{
     if (rc_wgsl_check_failed(c)) {
         return;
     }
+
     if (type == 0) {
         rc_wgsl_check_fail(c, node, RC_STR("this var needs a type or a value"));
     }
-    else if (!rc_wgsl_type_is_constructible(c->types.view, type)) {
+    else if (!rc_wgsl_type_is_constructible(c->types.infos.view, type)) {
         rc_wgsl_check_fail_type(c, node, RC_STR("a var can't hold "), type, RC_STR(""), arena);
     }
 
@@ -144,6 +164,20 @@ static void rc_wgsl_check_local_var(rc_wgsl_checker *c, uint32_t node, rc_arena 
         .space = RC_WGSL_SPACE_FUNCTION,
         .access = RC_WGSL_ACCESS_READ_WRITE
     });
+}
+
+
+// A var in a function, which lives in function memory.
+static void rc_wgsl_check_local_var(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
+{
+    rc_wgsl_var_parts parts = rc_wgsl_ast_var_parts(c->ast, node);
+    uint32_t declared = parts.type != 0 ? rc_wgsl_check_type_expr(c, parts.type, arena) : 0;
+
+    if (rc_wgsl_names_other_space(c, parts.templates)) {
+        rc_wgsl_check_fail(c, node, RC_STR("a var in a function lives in function memory"));
+    }
+
+    rc_wgsl_set_local_var(c, node, rc_wgsl_check_var_initialiser(c, parts.initialiser, declared, arena), arena);
 }
 
 
@@ -156,6 +190,7 @@ static void rc_wgsl_check_local_decl(rc_wgsl_checker *c, uint32_t node, rc_arena
     else {
         rc_wgsl_check_value_decl(c, node, arena);
     }
+
     rc_wgsl_check_declare_local(c, node, arena);
 }
 
@@ -173,13 +208,13 @@ static bool rc_wgsl_check_return(rc_wgsl_checker *c, uint32_t node, rc_arena *ar
         rc_wgsl_check_fail(c, value, RC_STR("this function returns nothing"));
     }
     else if (value == 0 && type != 0) {
-        rc_wgsl_check_fail_type(c, node, RC_STR("this function must return "), type, RC_STR(""),
-            arena);
+        rc_wgsl_check_fail_type(c, node, RC_STR("this function must return "), type, RC_STR(""), arena);
     }
     else if (value != 0) {
         rc_wgsl_check_value(c, value, arena);
         rc_wgsl_check_convert(c, value, type, arena);
     }
+
     return false;
 }
 
@@ -193,6 +228,7 @@ static bool rc_wgsl_check_break(rc_wgsl_checker *c, uint32_t node)
     else if (c->in_continuing) {
         rc_wgsl_check_fail(c, node, RC_STR("a continuing block leaves its loop by 'break if'"));
     }
+
     c->broke = true;
     return false;
 }
@@ -207,6 +243,7 @@ static bool rc_wgsl_check_continue(rc_wgsl_checker *c, uint32_t node)
     else if (c->in_continuing) {
         rc_wgsl_check_fail(c, node, RC_STR("a continuing block can't continue"));
     }
+
     return false;
 }
 
@@ -214,17 +251,19 @@ static bool rc_wgsl_check_continue(rc_wgsl_checker *c, uint32_t node)
 // Fail for a target that isn't memory, saying what it is if it has a name.
 static void rc_wgsl_fail_not_memory(rc_wgsl_checker *c, uint32_t target, rc_arena *arena)
 {
-    uint32_t decl = rc_wgsl_ast_type(c->ast, target) == RC_WGSL_NODE_TYPE_IDENT
-        ? rc_wgsl_check_sema(c, target).target : 0;
+    uint32_t decl = rc_wgsl_ast_type(c->ast, target) == RC_WGSL_NODE_TYPE_IDENT ? rc_wgsl_check_sema(c, target).target : 0;
     rc_wgsl_node_type node_type = rc_wgsl_ast_type(c->ast, decl);
 
-    if (node_type == RC_WGSL_NODE_TYPE_LET || node_type == RC_WGSL_NODE_TYPE_CONST
-        || node_type == RC_WGSL_NODE_TYPE_PARAM) {
-        rc_wgsl_check_fail_name(c, target, RC_STR("'"),
-            node_type == RC_WGSL_NODE_TYPE_PARAM ? RC_STR("' is a parameter, which can't change")
-                                       : RC_STR("' can't change: make it a var"), arena);
+    if (node_type == RC_WGSL_NODE_TYPE_PARAM) {
+        rc_wgsl_check_fail_name(c, target, RC_STR("'"), RC_STR("' is a parameter, which can't change"), arena);
         return;
     }
+
+    if (node_type == RC_WGSL_NODE_TYPE_LET || node_type == RC_WGSL_NODE_TYPE_CONST) {
+        rc_wgsl_check_fail_name(c, target, RC_STR("'"), RC_STR("' can't change: make it a var"), arena);
+        return;
+    }
+
     rc_wgsl_check_fail(c, target, RC_STR("can only change a var, or part of one"));
 }
 
@@ -237,65 +276,59 @@ static rc_wgsl_sema rc_wgsl_check_target(rc_wgsl_checker *c, uint32_t target, rc
     if (rc_wgsl_check_failed(c)) {
         return sema;
     }
+
     if (!(sema.flags & RC_WGSL_SEMA_REF)) {
         rc_wgsl_fail_not_memory(c, target, arena);
     }
     else if (sema.access == RC_WGSL_ACCESS_READ) {
         rc_wgsl_check_fail(c, target, RC_STR("this is read-only"));
     }
+
     return sema;
 }
 
 
-// The plain operator a compound assignment applies: + for +=.
-static rc_wgsl_token_type rc_wgsl_compound_operator(rc_wgsl_token_type op)
-{
-    switch (op) {
-    case RC_WGSL_TOKEN_TYPE_PLUS_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_PLUS;
-    case RC_WGSL_TOKEN_TYPE_MINUS_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_MINUS;
-    case RC_WGSL_TOKEN_TYPE_STAR_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_STAR;
-    case RC_WGSL_TOKEN_TYPE_SLASH_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_SLASH;
-    case RC_WGSL_TOKEN_TYPE_PERCENT_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_PERCENT;
-    case RC_WGSL_TOKEN_TYPE_AND_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_AND;
-    case RC_WGSL_TOKEN_TYPE_OR_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_OR;
-    case RC_WGSL_TOKEN_TYPE_XOR_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_XOR;
-    case RC_WGSL_TOKEN_TYPE_SHIFT_LEFT_EQUAL:
-        return RC_WGSL_TOKEN_TYPE_SHIFT_LEFT;
-    default:
-        return RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT;
-    }
-}
-
-
 // target op= value, which must give back target's own type.
-static void rc_wgsl_check_compound(rc_wgsl_checker *c, uint32_t node, rc_wgsl_sema target,
-    rc_arena *arena)
+static void rc_wgsl_check_compound(rc_wgsl_checker *c, uint32_t node, rc_wgsl_sema target, rc_arena *arena)
 {
     rc_wgsl_node n = rc_wgsl_ast_node(c->ast, node);
     uint32_t token = n.token;
-    rc_wgsl_token_type op = rc_wgsl_compound_operator(
-        (rc_wgsl_token_type)rc_view_wgsl_token_get(c->ast.tokens, token).type);
+    rc_wgsl_token_type op = rc_wgsl_compound_operator((rc_wgsl_token_type)rc_view_wgsl_token_get(c->ast.tokens, token).type);
     uint32_t value = rc_wgsl_check_sema(c, n.rhs).type;
     uint32_t result = rc_wgsl_check_operation_type(c, op, target.type, value, arena);
     bool shift = op == RC_WGSL_TOKEN_TYPE_SHIFT_LEFT || op == RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT;
-    uint32_t scalar = shift ? RC_WGSL_TYPE_ID_U32
-                            : rc_wgsl_type_scalar_of(c->types.view, target.type);
+    uint32_t scalar = shift ? RC_WGSL_TYPE_ID_U32 : rc_wgsl_type_scalar_of(c->types.infos.view, target.type);
 
     if (result != target.type) {
-        rc_wgsl_check_fail_types(c, node, RC_STR("can't apply this to "), target.type,
-            RC_STR(" with "), value, arena);
+        rc_wgsl_check_fail_types(c, node, RC_STR("can't apply this to "), target.type, RC_STR(" with "), value, arena);
         return;
     }
-    rc_wgsl_check_concretise(c, n.rhs, rc_wgsl_type_with_scalar(&c->types, value, scalar, arena),
-        arena);
+
+    rc_wgsl_check_concretise(c, n.rhs, rc_wgsl_type_with_scalar(&c->types, value, scalar, arena), arena);
+}
+
+
+// An assignment to memory, plain or with an operator.
+static void rc_wgsl_check_store(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
+{
+    rc_wgsl_node n = rc_wgsl_ast_node(c->ast, node);
+    rc_wgsl_token_type op = (rc_wgsl_token_type)rc_view_wgsl_token_get(c->ast.tokens, n.token).type;
+    rc_wgsl_sema target = rc_wgsl_check_target(c, n.lhs, arena);
+
+    rc_wgsl_check_value(c, n.rhs, arena);
+    if (rc_wgsl_check_failed(c)) {
+        return;
+    }
+
+    if (op != RC_WGSL_TOKEN_TYPE_EQUAL) {
+        rc_wgsl_check_compound(c, node, target, arena);
+    }
+    else if (!rc_wgsl_type_is_constructible(c->types.infos.view, target.type)) {
+        rc_wgsl_check_fail_type(c, n.lhs, RC_STR("can't assign to "), target.type, RC_STR(""), arena);
+    }
+    else {
+        rc_wgsl_check_convert(c, n.rhs, target.type, arena);
+    }
 }
 
 
@@ -303,29 +336,14 @@ static void rc_wgsl_check_compound(rc_wgsl_checker *c, uint32_t node, rc_wgsl_se
 static void rc_wgsl_check_assign(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
 {
     rc_wgsl_node n = rc_wgsl_ast_node(c->ast, node);
-    rc_wgsl_token_type op = (rc_wgsl_token_type)rc_view_wgsl_token_get(c->ast.tokens, n.token).type;
-    rc_wgsl_sema target;
 
     if (rc_wgsl_ast_type(c->ast, n.lhs) == RC_WGSL_NODE_TYPE_PHONY) {
         rc_wgsl_check_value(c, n.rhs, arena);
         rc_wgsl_check_concretise_default(c, n.rhs, arena);
         return;
     }
-    target = rc_wgsl_check_target(c, n.lhs, arena);
-    rc_wgsl_check_value(c, n.rhs, arena);
-    if (rc_wgsl_check_failed(c)) {
-        return;
-    }
-    if (op != RC_WGSL_TOKEN_TYPE_EQUAL) {
-        rc_wgsl_check_compound(c, node, target, arena);
-    }
-    else if (!rc_wgsl_type_is_constructible(c->types.view, target.type)) {
-        rc_wgsl_check_fail_type(c, n.lhs, RC_STR("can't assign to "), target.type, RC_STR(""),
-            arena);
-    }
-    else {
-        rc_wgsl_check_convert(c, n.rhs, target.type, arena);
-    }
+
+    rc_wgsl_check_store(c, node, arena);
 }
 
 
@@ -335,10 +353,12 @@ static void rc_wgsl_check_step(rc_wgsl_checker *c, uint32_t node, rc_arena *aren
     uint32_t target = rc_wgsl_ast_node(c->ast, node).lhs;
     rc_wgsl_sema sema = rc_wgsl_check_target(c, target, arena);
 
-    if (!rc_wgsl_check_failed(c) && sema.type != RC_WGSL_TYPE_ID_I32
-        && sema.type != RC_WGSL_TYPE_ID_U32) {
-        rc_wgsl_check_fail_type(c, target, RC_STR("only an i32 or u32 counts up or down, not "),
-            sema.type, RC_STR(""), arena);
+    if (rc_wgsl_check_failed(c)) {
+        return;
+    }
+
+    if (sema.type != RC_WGSL_TYPE_ID_I32 && sema.type != RC_WGSL_TYPE_ID_U32) {
+        rc_wgsl_check_fail_type(c, target, RC_STR("only an i32 or u32 counts up or down, not "), sema.type, RC_STR(""), arena);
     }
 }
 
@@ -351,9 +371,9 @@ static void rc_wgsl_check_call_statement(rc_wgsl_checker *c, uint32_t node, rc_a
     if (rc_wgsl_check_failed(c) || sema.call == RC_WGSL_CALL_FUNCTION) {
         return;
     }
+
     if (sema.call == RC_WGSL_CALL_BUILTIN && sema.type != 0) {
-        rc_wgsl_check_fail_name(c, node, RC_STR("the result of '"), RC_STR("' must be used"),
-            arena);
+        rc_wgsl_check_fail_name(c, node, RC_STR("the result of '"), RC_STR("' must be used"), arena);
     }
     else if (sema.call != RC_WGSL_CALL_BUILTIN) {
         rc_wgsl_check_fail(c, node, RC_STR("a value made here must be used"));
@@ -362,20 +382,29 @@ static void rc_wgsl_check_call_statement(rc_wgsl_checker *c, uint32_t node, rc_a
 
 // ---- compound statements ----
 
+// The then block and the else part of an if, returning whether control can come out of either.
+// The else part is an else-if or a block, each a statement; with none, control carries on.
+static bool rc_wgsl_check_branches(rc_wgsl_checker *c, rc_wgsl_if_parts parts, rc_arena *arena)
+{
+    bool then_falls = rc_wgsl_check_block(c, parts.then, arena);
+    bool other_falls = parts.other == 0 || rc_wgsl_check_statement(c, parts.other, arena);
+
+    return then_falls || other_falls;
+}
+
+
 // An if, its else-ifs and its else.
 static bool rc_wgsl_check_if(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
 {
-    rc_wgsl_if_parts parts = rc_wgsl_ast_if_parts(c->ast, node);
-    bool then_falls;
-    bool other_falls = true;
-
     rc_wgsl_check_condition(c, rc_wgsl_ast_node(c->ast, node).lhs, arena);
-    then_falls = rc_wgsl_check_block(c, parts.then, arena);
-    if (parts.other != 0) {
-        other_falls = rc_wgsl_ast_type(c->ast, parts.other) == RC_WGSL_NODE_TYPE_IF
-            ? rc_wgsl_check_if(c, parts.other, arena) : rc_wgsl_check_block(c, parts.other, arena);
-    }
-    return then_falls || other_falls;
+    return rc_wgsl_check_branches(c, rc_wgsl_ast_if_parts(c->ast, node), arena);
+}
+
+
+// type, or case_type if type converts to it: what a switch's selector and cases settle on so far.
+static uint32_t rc_wgsl_case_common_type(const rc_wgsl_checker *c, uint32_t type, uint32_t case_type)
+{
+    return rc_wgsl_type_converts(c->types.infos.view, type, case_type) ? case_type : type;
 }
 
 
@@ -392,38 +421,33 @@ static uint32_t rc_wgsl_check_switch_type(rc_wgsl_checker *c, uint32_t node, rc_
 
         for (uint32_t j = 0; j < selectors.num && !rc_wgsl_check_failed(c); j++) {
             uint32_t selector = rc_view_wgsl_index_get(selectors, j);
-            uint32_t case_type;
 
             if (rc_wgsl_ast_type(c->ast, selector) == RC_WGSL_NODE_TYPE_DEFAULT) {
                 continue;
             }
-            case_type = rc_wgsl_check_value(c, selector, arena);
-            type = rc_wgsl_type_converts(c->types.view, type, case_type) ? case_type : type;
+
+            type = rc_wgsl_case_common_type(c, type, rc_wgsl_check_value(c, selector, arena));
         }
     }
-    if (!rc_wgsl_check_failed(c) && !rc_wgsl_type_is_integer_scalar(c->types.view, type)) {
-        rc_wgsl_check_fail_type(c, n.lhs, RC_STR("a switch needs an integer, not "), type,
-            RC_STR(""), arena);
+    if (!rc_wgsl_check_failed(c) && !rc_wgsl_type_is_integer_scalar(c->types.infos.view, type)) {
+        rc_wgsl_check_fail_type(c, n.lhs, RC_STR("a switch needs an integer, not "), type, RC_STR(""), arena);
     }
+
     return rc_wgsl_type_concretise(&c->types, type, arena);
 }
 
 
-// Check one case selector of a switch: a constant of type, unique among those before it.
-static void rc_wgsl_check_case_value(rc_wgsl_checker *c, uint32_t selector, uint32_t type,
-    rc_array_wgsl_index *seen, rc_arena *arena)
+// Check that a case selector, converted already, is a constant unlike those seen before it, and
+// add it to them.
+static void rc_wgsl_check_case_unique(rc_wgsl_checker *c, uint32_t selector, rc_array_wgsl_index *seen, rc_arena *arena)
 {
-    rc_wgsl_sema sema;
+    rc_wgsl_sema sema = rc_wgsl_check_sema(c, selector);
 
-    rc_wgsl_check_convert(c, selector, type, arena);
-    sema = rc_wgsl_check_sema(c, selector);
-    if (rc_wgsl_check_failed(c)) {
-        return;
-    }
     if (!(sema.flags & RC_WGSL_SEMA_VALUE)) {
         rc_wgsl_check_fail(c, selector, RC_STR("a case must be known before the shader runs"));
         return;
     }
+
     for (uint32_t i = 0; i < seen->num; i++) {
         if (rc_wgsl_check_sema(c, rc_array_wgsl_index_get(seen, i)).value == sema.value) {
             rc_wgsl_check_fail(c, selector, RC_STR("an earlier case has this value"));
@@ -434,9 +458,20 @@ static void rc_wgsl_check_case_value(rc_wgsl_checker *c, uint32_t selector, uint
 }
 
 
+// Check one case selector of a switch: a constant of type, unique among those before it.
+static void rc_wgsl_check_case_value(rc_wgsl_checker *c, uint32_t selector, uint32_t type, rc_array_wgsl_index *seen, rc_arena *arena)
+{
+    rc_wgsl_check_convert(c, selector, type, arena);
+    if (rc_wgsl_check_failed(c)) {
+        return;
+    }
+
+    rc_wgsl_check_case_unique(c, selector, seen, arena);
+}
+
+
 // Check every case selector of a switch, which needs exactly one default.
-static void rc_wgsl_check_case_values(rc_wgsl_checker *c, uint32_t node, uint32_t type,
-    rc_arena *arena)
+static void rc_wgsl_check_case_values(rc_wgsl_checker *c, uint32_t node, uint32_t type, rc_arena *arena)
 {
     rc_view_wgsl_index clauses = rc_wgsl_ast_list(c->ast, rc_wgsl_ast_node(c->ast, node).rhs);
     rc_array_wgsl_index seen = rc_array_wgsl_index_make(16, arena);
@@ -459,28 +494,32 @@ static void rc_wgsl_check_case_values(rc_wgsl_checker *c, uint32_t node, uint32_
         }
     }
     if (!rc_wgsl_check_failed(c) && defaults != 1) {
-        rc_wgsl_check_fail(c, node, defaults == 0 ? RC_STR("a switch needs a default case")
-                                                  : RC_STR("a switch has only one default case"));
+        rc_wgsl_check_fail(c, node, defaults == 0 ? RC_STR("a switch needs a default case") : RC_STR("a switch has only one default case"));
     }
 }
 
 
-// A switch and its clauses.
-static bool rc_wgsl_check_switch(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
+// The clauses of a switch, which break leaves, returning whether control can come out of it.
+static bool rc_wgsl_check_clauses(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
 {
     rc_view_wgsl_index clauses = rc_wgsl_ast_list(c->ast, rc_wgsl_ast_node(c->ast, node).rhs);
-    uint32_t type = rc_wgsl_check_switch_type(c, node, arena);
-    rc_wgsl_breakable saved;
+    rc_wgsl_breakable saved = rc_wgsl_enter_breakable(c, false);
     bool falls = false;
 
-    rc_wgsl_check_case_values(c, node, type, arena);
-    saved = rc_wgsl_enter_breakable(c, false);
     for (uint32_t i = 0; i < clauses.num && !rc_wgsl_check_failed(c); i++) {
         uint32_t clause = rc_view_wgsl_index_get(clauses, i);
 
         falls = rc_wgsl_check_block(c, rc_wgsl_ast_node(c->ast, clause).rhs, arena) || falls;
     }
     return rc_wgsl_leave_breakable(c, saved, false) || falls;
+}
+
+
+// A switch and its clauses.
+static bool rc_wgsl_check_switch(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
+{
+    rc_wgsl_check_case_values(c, node, rc_wgsl_check_switch_type(c, node, arena), arena);
+    return rc_wgsl_check_clauses(c, node, arena);
 }
 
 
@@ -497,6 +536,7 @@ static bool rc_wgsl_check_continuing(rc_wgsl_checker *c, uint32_t node, rc_arena
     if (n.rhs != 0) {
         rc_wgsl_check_condition(c, n.rhs, arena);
     }
+
     c->in_continuing = in_continuing;
     rc_wgsl_leave_scope(c, scope);
     return n.rhs != 0;
@@ -515,6 +555,7 @@ static bool rc_wgsl_check_loop(rc_wgsl_checker *c, uint32_t node, rc_arena *aren
     if (n.rhs != 0) {
         breaks_if = rc_wgsl_check_continuing(c, n.rhs, arena);
     }
+
     rc_wgsl_leave_scope(c, scope);
     return rc_wgsl_leave_breakable(c, saved, true) || breaks_if;
 }
@@ -538,22 +579,37 @@ static void rc_wgsl_check_for_part(rc_wgsl_checker *c, uint32_t node, rc_arena *
 }
 
 
+// The update, if any, and the block of a for or while loop, which break leaves. Returns whether a
+// break did.
+static bool rc_wgsl_check_loop_body(rc_wgsl_checker *c, uint32_t update, uint32_t block, rc_arena *arena)
+{
+    rc_wgsl_breakable saved = rc_wgsl_enter_breakable(c, true);
+
+    rc_wgsl_check_for_part(c, update, arena);
+    rc_wgsl_check_block(c, block, arena);
+    return rc_wgsl_leave_breakable(c, saved, true);
+}
+
+
+// All of a for loop inside its scope, returning whether a break left the loop.
+static bool rc_wgsl_check_for_scope(rc_wgsl_checker *c, uint32_t node, rc_wgsl_for_parts parts, rc_arena *arena)
+{
+    rc_wgsl_check_for_part(c, parts.init, arena);
+    if (parts.condition != 0) {
+        rc_wgsl_check_condition(c, parts.condition, arena);
+    }
+
+    return rc_wgsl_check_loop_body(c, parts.update, rc_wgsl_ast_node(c->ast, node).rhs, arena);
+}
+
+
 // A for loop, which carries on past whenever its condition can end it.
 static bool rc_wgsl_check_for(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
 {
     rc_wgsl_for_parts parts = rc_wgsl_ast_for_parts(c->ast, node);
     rc_wgsl_scope scope = rc_wgsl_enter_scope(c);
-    rc_wgsl_breakable saved;
-    bool broke;
+    bool broke = rc_wgsl_check_for_scope(c, node, parts, arena);
 
-    rc_wgsl_check_for_part(c, parts.init, arena);
-    if (parts.condition != 0) {
-        rc_wgsl_check_condition(c, parts.condition, arena);
-    }
-    saved = rc_wgsl_enter_breakable(c, true);
-    rc_wgsl_check_for_part(c, parts.update, arena);
-    rc_wgsl_check_block(c, rc_wgsl_ast_node(c->ast, node).rhs, arena);
-    broke = rc_wgsl_leave_breakable(c, saved, true);
     rc_wgsl_leave_scope(c, scope);
     return parts.condition != 0 || broke;
 }
@@ -563,12 +619,9 @@ static bool rc_wgsl_check_for(rc_wgsl_checker *c, uint32_t node, rc_arena *arena
 static bool rc_wgsl_check_while(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
 {
     rc_wgsl_node n = rc_wgsl_ast_node(c->ast, node);
-    rc_wgsl_breakable saved;
 
     rc_wgsl_check_condition(c, n.lhs, arena);
-    saved = rc_wgsl_enter_breakable(c, true);
-    rc_wgsl_check_block(c, n.rhs, arena);
-    rc_wgsl_leave_breakable(c, saved, true);
+    rc_wgsl_check_loop_body(c, 0, n.rhs, arena);
     return true;
 }
 
@@ -624,22 +677,32 @@ static bool rc_wgsl_check_statement(rc_wgsl_checker *c, uint32_t node, rc_arena 
 }
 
 
+// The statements of the function node's body, which must return a value on every path if the
+// function returns one.
+static void rc_wgsl_check_fn_statements(rc_wgsl_checker *c, uint32_t node, uint32_t body, rc_arena *arena)
+{
+    bool falls = rc_wgsl_check_statements(c, rc_wgsl_ast_node(c->ast, body).lhs, arena);
+
+    if (falls && rc_wgsl_check_sema(c, node).type != 0) {
+        rc_wgsl_check_fail(c, node, RC_STR("this function can end without returning a value"));
+    }
+}
+
+
 void rc_wgsl_check_body(rc_wgsl_checker *c, uint32_t node, rc_arena *arena)
 {
     rc_wgsl_fn_parts parts = rc_wgsl_ast_fn_parts(c->ast, node);
     rc_view_wgsl_index params = rc_wgsl_ast_list(c->ast, parts.params);
-    bool falls;
 
     // The parameters share the scope of the body's own declarations
+    c->user = node;
     c->function = node;
     c->scope = 0;
     for (uint32_t i = 0; i < params.num; i++) {
         rc_wgsl_check_declare_local(c, rc_view_wgsl_index_get(params, i), arena);
     }
-    falls = rc_wgsl_check_statements(c, rc_wgsl_ast_node(c->ast, parts.body).lhs, arena);
-    if (falls && rc_wgsl_check_sema(c, node).type != 0) {
-        rc_wgsl_check_fail(c, node, RC_STR("this function can end without returning a value"));
-    }
+    rc_wgsl_check_fn_statements(c, node, parts.body, arena);
+    c->user = 0;
     c->function = 0;
     c->locals.num = 0;
 }

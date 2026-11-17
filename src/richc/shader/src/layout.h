@@ -20,7 +20,8 @@ typedef enum rc_wgsl_layout_rule {
     RC_WGSL_LAYOUT_RULE_STD430
 } rc_wgsl_layout_rule;
 
-// A type's alignment and size in bytes. A runtime-sized array's size is one element's.
+// A type's alignment and size in bytes. A runtime-sized array's size is one element's, and
+// anything too large for 32 bits has size UINT32_MAX.
 typedef struct rc_wgsl_layout {
     uint32_t align;
     uint32_t size;

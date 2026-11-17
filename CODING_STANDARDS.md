@@ -463,9 +463,34 @@ core. Nothing outside the platform backends knows which target it is running on.
 - 4-space indentation, no tabs. Opening brace of a function on its own line;
   other braces on the same line. No cuddled `else` (i.e. Stroustrup style).
 - **Don't omit braces** around `if`/`else` blocks.
-- **Comments wrap at 100 columns**, not 80. Lines of code aim for the same
-  margin, but it is not enforced strictly: a line that reads better slightly
-  long stays long.
+- **Comments wrap at 100 columns**, not 80.
+- **Code lines have a hard limit of 140 characters.** A line that fits stays
+  whole, signatures and calls included; one that doesn't is split at a natural
+  place, such as between arguments.
+- **No big conditions.** An `if` whose condition chains several `&&` and `||`
+  terms is split into early outs, one `if` each, or its condition becomes a
+  small helper with a name that says what it tests. Two simple terms on one
+  line are fine.
+
+  ```c
+  if (type == 0) {
+      return 0;
+  }
+
+  if (!rc_wgsl_is_float_vector(c, type)) {
+      return 0;
+  }
+  ```
+
+- **A split boolean expression ends each line with its `&&` or `||`**, and the
+  next line is indented one level further. Before splitting one, see whether a
+  helper makes it short enough not to need it.
+- **Every local is given its value where it is declared.** Initialisers run in
+  order, so they can do work in turn, as a parser reading tokens does. If an
+  early out has to come before a value can be worked out, move what follows
+  into a small helper taking what it needs, or use a ternary.
+- **A blank line follows an `if` statement**, with its whole else chain, when
+  another statement follows it in the same block.
 - **A table indexed by an enum names each index:**
   `[RC_WGSL_SPACE_FUNCTION] = RC_STR_INIT("function")`, so every value stays
   beside its key and reordering the enum can't misalign the table. Assert the
@@ -486,7 +511,8 @@ core. Nothing outside the platform backends knows which target it is running on.
 - **Prefer designated initialisers** for structs and compound literals.
 - **Split a compound literal one entry per line** when the entries are parallel
   and it reads more clearly (a per-component vector result). Keep trivial ones
-  on one line.
+  on one line. A macro that expands to an initialiser puts each field on a line
+  of its own, the braces on lines of their own.
 
   ```c
   return (rc_vec2i) {

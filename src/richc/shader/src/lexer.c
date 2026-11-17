@@ -13,8 +13,8 @@
 
 // ---- words ----
 
-// A keyword or reserved word, and its token type. Reserved words have no token type, and are
-// refused.
+// A keyword or reserved word, and its token type.
+// Reserved words have no token type, and are refused.
 typedef struct rc_wgsl_word {
     rc_str text;
     uint8_t type;  // rc_wgsl_token_type
@@ -215,6 +215,7 @@ static rc_wgsl_word rc_wgsl_find_word(rc_str w)
     if (i < words.num && rc_str_is_equal(rc_view_wgsl_word_get(words, i).text, w)) {
         return rc_view_wgsl_word_get(words, i);
     }
+
     return (rc_wgsl_word) {0};
 }
 
@@ -227,24 +228,38 @@ static char rc_wgsl_char_at(rc_str source, uint32_t pos)
 }
 
 
+// True for first to last, inclusive.
+static bool rc_wgsl_is_between(char c, char first, char last)
+{
+    return c >= first && c <= last;
+}
+
+
+// c in lower case if it is an ASCII letter. Nothing else turns into a letter.
+static char rc_wgsl_lower(char c)
+{
+    return (char)(c | 0x20);
+}
+
+
 // True for 0 to 9.
 static bool rc_wgsl_is_digit(char c)
 {
-    return c >= '0' && c <= '9';
+    return rc_wgsl_is_between(c, '0', '9');
 }
 
 
 // True for 0 to 9 and a to f in either case.
 static bool rc_wgsl_is_hex_digit(char c)
 {
-    return rc_wgsl_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    return rc_wgsl_is_digit(c) || rc_wgsl_is_between(rc_wgsl_lower(c), 'a', 'f');
 }
 
 
 // True for a character that can start a word: an ASCII letter or an underscore.
 static bool rc_wgsl_is_word_start(char c)
 {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    return rc_wgsl_is_between(rc_wgsl_lower(c), 'a', 'z') || c == '_';
 }
 
 
@@ -260,8 +275,7 @@ static uint32_t rc_wgsl_count_digits(rc_str source, uint32_t pos, bool hex)
 {
     uint32_t end = pos;
 
-    while (hex ? rc_wgsl_is_hex_digit(rc_wgsl_char_at(source, end))
-               : rc_wgsl_is_digit(rc_wgsl_char_at(source, end))) {
+    while (hex ? rc_wgsl_is_hex_digit(rc_wgsl_char_at(source, end)) : rc_wgsl_is_digit(rc_wgsl_char_at(source, end))) {
         end++;
     }
     return end - pos;
@@ -275,12 +289,27 @@ typedef struct rc_wgsl_skip {
     rc_str error;
 } rc_wgsl_skip;
 
+// True for an ASCII blank.
+static bool rc_wgsl_is_ascii_blank(char c)
+{
+    switch (c) {
+    case ' ':
+    case '\t':
+    case '\n':
+    case '\v':
+    case '\f':
+    case '\r':
+        return true;
+    default:
+        return false;
+    }
+}
+
+
 // The length of an ASCII blank at pos, or 0.
 static uint32_t rc_wgsl_ascii_blank_len(rc_str source, uint32_t pos)
 {
-    char c = rc_wgsl_char_at(source, pos);
-
-    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r' ? 1 : 0;
+    return rc_wgsl_is_ascii_blank(rc_wgsl_char_at(source, pos)) ? 1 : 0;
 }
 
 
@@ -293,19 +322,34 @@ static uint32_t rc_wgsl_unicode_blank_len(rc_str source, uint32_t pos)
     if (rc_str_starts_with(rest, RC_STR("\xc2\x85"))) {
         return 2;
     }
-    if (rc_str_starts_with(rest, RC_STR("\xe2\x80"))) {
-        uint8_t last = (uint8_t)rc_wgsl_char_at(source, pos + 2);
 
-        return last == 0x8e || last == 0x8f || last == 0xa8 || last == 0xa9 ? 3 : 0;
+    if (!rc_str_starts_with(rest, RC_STR("\xe2\x80"))) {
+        return 0;
     }
-    return 0;
+
+    switch ((uint8_t)rc_wgsl_char_at(source, pos + 2)) {
+    case 0x8e:
+    case 0x8f:
+    case 0xa8:
+    case 0xa9:
+        return 3;
+    default:
+        return 0;
+    }
+}
+
+
+// True for a character that ends a line.
+static bool rc_wgsl_is_line_break(char c)
+{
+    return c == '\n' || c == '\r';
 }
 
 
 // The position just past the line comment at pos, at its line break.
 static uint32_t rc_wgsl_skip_line_comment(rc_str source, uint32_t pos)
 {
-    while (pos < source.len && source.data[pos] != '\n' && source.data[pos] != '\r') {
+    while (pos < source.len && !rc_wgsl_is_line_break(source.data[pos])) {
         pos++;
     }
     return pos;
@@ -344,8 +388,7 @@ static rc_wgsl_skip rc_wgsl_skip_blank(rc_str source, uint32_t pos)
 {
     while (pos < source.len) {
         rc_str rest = rc_str_drop_first(source, pos);
-        uint32_t blank = rc_wgsl_ascii_blank_len(source, pos)
-            + rc_wgsl_unicode_blank_len(source, pos);
+        uint32_t blank = rc_wgsl_ascii_blank_len(source, pos) + rc_wgsl_unicode_blank_len(source, pos);
 
         if (blank > 0) {
             pos += blank;
@@ -359,6 +402,7 @@ static rc_wgsl_skip rc_wgsl_skip_blank(rc_str source, uint32_t pos)
             if (rc_str_is_valid(comment.error)) {
                 return comment;
             }
+
             pos = comment.pos;
         }
         else {
@@ -395,27 +439,36 @@ static rc_wgsl_scan rc_wgsl_scan_error(uint32_t pos, rc_str error)
 }
 
 
-// The identifier, keyword or underscore at pos.
-static rc_wgsl_scan rc_wgsl_scan_word(rc_str source, uint32_t pos, rc_arena *arena)
+// The bytes in the run of word characters from pos.
+static uint32_t rc_wgsl_count_word_chars(rc_str source, uint32_t pos)
 {
     uint32_t end = pos;
-    rc_str text;
-    rc_wgsl_word word;
 
     while (rc_wgsl_is_word_char(rc_wgsl_char_at(source, end))) {
         end++;
     }
-    text = rc_str_substr(source, pos, end);
+    return end - pos;
+}
+
+
+// The identifier, keyword or underscore at pos.
+static rc_wgsl_scan rc_wgsl_scan_word(rc_str source, uint32_t pos, rc_arena *arena)
+{
+    rc_str text = rc_str_substr(source, pos, pos + rc_wgsl_count_word_chars(source, pos));
+    rc_wgsl_word word = rc_wgsl_find_word(text);
+
     if (rc_str_is_equal(text, RC_STR("_"))) {
         return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_UNDERSCORE, pos, 1);
     }
+
     if (rc_str_starts_with(text, RC_STR("__"))) {
         return rc_wgsl_scan_error(pos, RC_STR("names can't start with two underscores"));
     }
-    word = rc_wgsl_find_word(text);
+
     if (!rc_str_is_valid(word.text)) {
         return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_IDENT, pos, text.len);
     }
+
     if (word.type == RC_WGSL_TOKEN_TYPE_NONE) {
         rc_mstr message = rc_mstr_from_str(RC_STR("'"), 64, arena);
 
@@ -423,6 +476,7 @@ static rc_wgsl_scan rc_wgsl_scan_word(rc_str source, uint32_t pos, rc_arena *are
         rc_mstr_append(&message, RC_STR("' is a reserved word"), arena);
         return rc_wgsl_scan_error(pos, message.view);
     }
+
     return rc_wgsl_scanned((rc_wgsl_token_type)word.type, pos, text.len);
 }
 
@@ -431,17 +485,15 @@ static rc_wgsl_scan rc_wgsl_scan_word(rc_str source, uint32_t pos, rc_arena *are
 // RC_INDEX_NONE if it has no digits.
 static uint32_t rc_wgsl_exponent_len(rc_str source, uint32_t pos, char letter)
 {
-    uint32_t end = pos + 1;
-    uint32_t digits;
+    char sign = rc_wgsl_char_at(source, pos + 1);
+    uint32_t start = pos + 1 + (sign == '+' || sign == '-' ? 1 : 0);
+    uint32_t digits = rc_wgsl_count_digits(source, start, false);
 
-    if ((rc_wgsl_char_at(source, pos) | 0x20) != letter) {
+    if (rc_wgsl_lower(rc_wgsl_char_at(source, pos)) != letter) {
         return 0;
     }
-    if (rc_wgsl_char_at(source, end) == '+' || rc_wgsl_char_at(source, end) == '-') {
-        end++;
-    }
-    digits = rc_wgsl_count_digits(source, end, false);
-    return digits == 0 ? RC_INDEX_NONE : end + digits - pos;
+
+    return digits == 0 ? RC_INDEX_NONE : start + digits - pos;
 }
 
 
@@ -454,25 +506,9 @@ typedef struct rc_wgsl_number_body {
     rc_str error;
 } rc_wgsl_number_body;
 
-// The body of the hex literal at pos, from its 0x: digits, a point and a binary exponent.
-static rc_wgsl_number_body rc_wgsl_hex_body(rc_str source, uint32_t pos)
+// A body that ends at end, then has an exponent of the length rc_wgsl_exponent_len gave.
+static rc_wgsl_number_body rc_wgsl_body_with_exponent(uint32_t end, bool point, uint32_t exponent)
 {
-    uint32_t end = pos + 2;
-    uint32_t digits = rc_wgsl_count_digits(source, end, true);
-    bool point = rc_wgsl_char_at(source, end + digits) == '.';
-    uint32_t exponent;
-
-    end += digits;
-    if (point) {
-        uint32_t fraction = rc_wgsl_count_digits(source, end + 1, true);
-
-        digits += fraction;
-        end += 1 + fraction;
-    }
-    if (digits == 0) {
-        return (rc_wgsl_number_body) {.end = end, .error = RC_STR("this hex number has no digits")};
-    }
-    exponent = rc_wgsl_exponent_len(source, end, 'p');
     if (exponent == RC_INDEX_NONE) {
         return (rc_wgsl_number_body) {.end = end, .error = RC_STR("this exponent has no digits")};
     }
@@ -485,26 +521,44 @@ static rc_wgsl_number_body rc_wgsl_hex_body(rc_str source, uint32_t pos)
 }
 
 
+// The body of the hex literal at pos, from its 0x: digits, a point and a binary exponent.
+static rc_wgsl_number_body rc_wgsl_hex_body(rc_str source, uint32_t pos)
+{
+    uint32_t whole = rc_wgsl_count_digits(source, pos + 2, true);
+    bool point = rc_wgsl_char_at(source, pos + 2 + whole) == '.';
+    uint32_t fraction = point ? rc_wgsl_count_digits(source, pos + 3 + whole, true) : 0;
+    uint32_t end = pos + 2 + whole + (point ? 1 + fraction : 0);
+
+    if (whole + fraction == 0) {
+        return (rc_wgsl_number_body) {.end = end, .error = RC_STR("this hex number has no digits")};
+    }
+
+    return rc_wgsl_body_with_exponent(end, point, rc_wgsl_exponent_len(source, end, 'p'));
+}
+
+
 // The body of the decimal literal at pos: digits, a point and an exponent.
 static rc_wgsl_number_body rc_wgsl_decimal_body(rc_str source, uint32_t pos)
 {
-    uint32_t end = pos + rc_wgsl_count_digits(source, pos, false);
-    bool point = rc_wgsl_char_at(source, end) == '.';
-    uint32_t exponent;
+    uint32_t whole_end = pos + rc_wgsl_count_digits(source, pos, false);
+    bool point = rc_wgsl_char_at(source, whole_end) == '.';
+    uint32_t end = point ? whole_end + 1 + rc_wgsl_count_digits(source, whole_end + 1, false) : whole_end;
 
-    if (point) {
-        end += 1 + rc_wgsl_count_digits(source, end + 1, false);
-    }
-    exponent = rc_wgsl_exponent_len(source, end, 'e');
-    if (exponent == RC_INDEX_NONE) {
-        return (rc_wgsl_number_body) {.end = end, .error = RC_STR("this exponent has no digits")};
-    }
+    return rc_wgsl_body_with_exponent(end, point, rc_wgsl_exponent_len(source, end, 'e'));
+}
 
-    return (rc_wgsl_number_body) {
-        .end = end + exponent,
-        .point = point,
-        .exponent = exponent > 0
-    };
+
+// True if a point or an exponent makes a number's body a float.
+static bool rc_wgsl_body_is_float(rc_wgsl_number_body body)
+{
+    return body.point || body.exponent;
+}
+
+
+// True for the suffixes that make a number a float.
+static bool rc_wgsl_is_float_suffix(char c)
+{
+    return c == 'f' || c == 'h';
 }
 
 
@@ -513,53 +567,63 @@ static rc_wgsl_number_body rc_wgsl_decimal_body(rc_str source, uint32_t pos)
 static char rc_wgsl_number_suffix(rc_str source, rc_wgsl_number_body body, bool hex)
 {
     char c = rc_wgsl_char_at(source, body.end);
-    bool is_float = body.point || body.exponent;
 
-    if ((c == 'i' || c == 'u') && !is_float) {
-        return c;
+    if (c == 'i' || c == 'u') {
+        return rc_wgsl_body_is_float(body) ? 0 : c;
     }
-    if ((c == 'f' || c == 'h') && (!hex || body.exponent)) {
-        return c;
+
+    if (rc_wgsl_is_float_suffix(c)) {
+        return !hex || body.exponent ? c : 0;
     }
+
     return 0;
+}
+
+
+// True for a decimal integer's body that starts with a 0 and goes on. 01f counts too.
+static bool rc_wgsl_has_leading_zero(rc_str source, uint32_t pos, rc_wgsl_number_body body, bool hex)
+{
+    if (hex || rc_wgsl_body_is_float(body)) {
+        return false;
+    }
+
+    return body.end - pos > 1 && rc_wgsl_char_at(source, pos) == '0';
 }
 
 
 // The number literal at pos, which starts with a digit, or with a point and then a digit.
 static rc_wgsl_scan rc_wgsl_scan_number(rc_str source, uint32_t pos)
 {
-    bool hex = rc_wgsl_char_at(source, pos) == '0'
-        && (rc_wgsl_char_at(source, pos + 1) | 0x20) == 'x';
-    rc_wgsl_number_body body = hex ? rc_wgsl_hex_body(source, pos)
-                                   : rc_wgsl_decimal_body(source, pos);
+    bool hex = rc_wgsl_char_at(source, pos) == '0' && rc_wgsl_lower(rc_wgsl_char_at(source, pos + 1)) == 'x';
+    rc_wgsl_number_body body = hex ? rc_wgsl_hex_body(source, pos) : rc_wgsl_decimal_body(source, pos);
     char suffix = rc_wgsl_number_suffix(source, body, hex);
-    bool is_float = body.point || body.exponent || suffix == 'f' || suffix == 'h';
+    bool is_float = rc_wgsl_body_is_float(body) || rc_wgsl_is_float_suffix(suffix);
     uint32_t end = body.end + (suffix != 0 ? 1 : 0);
+    char after = rc_wgsl_char_at(source, end);
 
     if (rc_str_is_valid(body.error)) {
         return rc_wgsl_scan_error(pos, body.error);
     }
 
-    // Decimal integers have no leading zeros, and neither does 01f
-    if (!hex && !body.point && !body.exponent && body.end - pos > 1
-        && rc_wgsl_char_at(source, pos) == '0') {
+    if (rc_wgsl_has_leading_zero(source, pos, body, hex)) {
         return rc_wgsl_scan_error(pos, RC_STR("numbers can't start with 0, apart from 0 itself"));
     }
-    if (rc_wgsl_is_word_char(rc_wgsl_char_at(source, end)) || rc_wgsl_char_at(source, end) == '.') {
+
+    if (rc_wgsl_is_word_char(after) || after == '.') {
         return rc_wgsl_scan_error(pos, RC_STR("this number runs into what follows it"));
     }
-    return rc_wgsl_scanned(is_float ? RC_WGSL_TOKEN_TYPE_FLOAT : RC_WGSL_TOKEN_TYPE_INT, pos,
-        end - pos);
+
+    return rc_wgsl_scanned(is_float ? RC_WGSL_TOKEN_TYPE_FLOAT : RC_WGSL_TOKEN_TYPE_INT, pos, end - pos);
 }
 
 
 // The type of a one-character token that may be followed by '=', and its length.
-static rc_wgsl_scan rc_wgsl_or_equal(rc_str source, uint32_t pos, rc_wgsl_token_type plain,
-    rc_wgsl_token_type with_equal)
+static rc_wgsl_scan rc_wgsl_or_equal(rc_str source, uint32_t pos, rc_wgsl_token_type plain, rc_wgsl_token_type with_equal)
 {
     if (rc_wgsl_char_at(source, pos + 1) == '=') {
         return rc_wgsl_scanned(with_equal, pos, 2);
     }
+
     return rc_wgsl_scanned(plain, pos, 1);
 }
 
@@ -571,6 +635,7 @@ static rc_wgsl_scan rc_wgsl_or_double(rc_str source, uint32_t pos, rc_wgsl_token
     if (rc_wgsl_char_at(source, pos + 1) == rc_wgsl_char_at(source, pos)) {
         return rc_wgsl_scanned(doubled, pos, 2);
     }
+
     return rc_wgsl_or_equal(source, pos, plain, with_equal);
 }
 
@@ -582,8 +647,10 @@ static rc_wgsl_scan rc_wgsl_scan_less(rc_str source, uint32_t pos)
         if (rc_wgsl_char_at(source, pos + 2) == '=') {
             return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_SHIFT_LEFT_EQUAL, pos, 3);
         }
+
         return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_SHIFT_LEFT, pos, 2);
     }
+
     return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_LESS, RC_WGSL_TOKEN_TYPE_LESS_EQUAL);
 }
 
@@ -594,8 +661,8 @@ static rc_wgsl_scan rc_wgsl_scan_minus(rc_str source, uint32_t pos)
     if (rc_wgsl_char_at(source, pos + 1) == '>') {
         return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_ARROW, pos, 2);
     }
-    return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_MINUS, RC_WGSL_TOKEN_TYPE_MINUS_MINUS,
-        RC_WGSL_TOKEN_TYPE_MINUS_EQUAL);
+
+    return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_MINUS, RC_WGSL_TOKEN_TYPE_MINUS_MINUS, RC_WGSL_TOKEN_TYPE_MINUS_EQUAL);
 }
 
 
@@ -604,33 +671,25 @@ static rc_wgsl_scan rc_wgsl_scan_punctuation(rc_str source, uint32_t pos)
 {
     switch (rc_wgsl_char_at(source, pos)) {
     case '&':
-        return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_AND, RC_WGSL_TOKEN_TYPE_AND_AND,
-            RC_WGSL_TOKEN_TYPE_AND_EQUAL);
+        return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_AND, RC_WGSL_TOKEN_TYPE_AND_AND, RC_WGSL_TOKEN_TYPE_AND_EQUAL);
     case '|':
-        return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_OR, RC_WGSL_TOKEN_TYPE_OR_OR,
-            RC_WGSL_TOKEN_TYPE_OR_EQUAL);
+        return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_OR, RC_WGSL_TOKEN_TYPE_OR_OR, RC_WGSL_TOKEN_TYPE_OR_EQUAL);
     case '+':
-        return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_PLUS, RC_WGSL_TOKEN_TYPE_PLUS_PLUS,
-            RC_WGSL_TOKEN_TYPE_PLUS_EQUAL);
+        return rc_wgsl_or_double(source, pos, RC_WGSL_TOKEN_TYPE_PLUS, RC_WGSL_TOKEN_TYPE_PLUS_PLUS, RC_WGSL_TOKEN_TYPE_PLUS_EQUAL);
     case '-':
         return rc_wgsl_scan_minus(source, pos);
     case '<':
         return rc_wgsl_scan_less(source, pos);
     case '!':
-        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_BANG,
-            RC_WGSL_TOKEN_TYPE_BANG_EQUAL);
+        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_BANG, RC_WGSL_TOKEN_TYPE_BANG_EQUAL);
     case '=':
-        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_EQUAL,
-            RC_WGSL_TOKEN_TYPE_EQUAL_EQUAL);
+        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_EQUAL, RC_WGSL_TOKEN_TYPE_EQUAL_EQUAL);
     case '%':
-        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_PERCENT,
-            RC_WGSL_TOKEN_TYPE_PERCENT_EQUAL);
+        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_PERCENT, RC_WGSL_TOKEN_TYPE_PERCENT_EQUAL);
     case '*':
-        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_STAR,
-            RC_WGSL_TOKEN_TYPE_STAR_EQUAL);
+        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_STAR, RC_WGSL_TOKEN_TYPE_STAR_EQUAL);
     case '/':
-        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_SLASH,
-            RC_WGSL_TOKEN_TYPE_SLASH_EQUAL);
+        return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_SLASH, RC_WGSL_TOKEN_TYPE_SLASH_EQUAL);
     case '^':
         return rc_wgsl_or_equal(source, pos, RC_WGSL_TOKEN_TYPE_XOR, RC_WGSL_TOKEN_TYPE_XOR_EQUAL);
     case '>':
@@ -659,26 +718,42 @@ static rc_wgsl_scan rc_wgsl_scan_punctuation(rc_str source, uint32_t pos)
         return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_SEMICOLON, pos, 1);
     case '~':
         return rc_wgsl_scanned(RC_WGSL_TOKEN_TYPE_TILDE, pos, 1);
-    default: break;
+    default:
+        break;
     }
+
     if ((uint8_t)rc_wgsl_char_at(source, pos) >= 0x80) {
         return rc_wgsl_scan_error(pos, RC_STR("names must be ASCII"));
     }
+
     return rc_wgsl_scan_error(pos, RC_STR("this character has no place in WGSL"));
+}
+
+
+// True if a number starts at pos: a digit, or a point and then a digit.
+static bool rc_wgsl_is_number_start(rc_str source, uint32_t pos)
+{
+    char c = rc_wgsl_char_at(source, pos);
+
+    if (c == '.') {
+        return rc_wgsl_is_digit(rc_wgsl_char_at(source, pos + 1));
+    }
+
+    return rc_wgsl_is_digit(c);
 }
 
 
 // The token at pos, which is not blankspace or a comment.
 static rc_wgsl_scan rc_wgsl_scan_token(rc_str source, uint32_t pos, rc_arena *arena)
 {
-    char c = rc_wgsl_char_at(source, pos);
-
-    if (rc_wgsl_is_word_start(c)) {
+    if (rc_wgsl_is_word_start(rc_wgsl_char_at(source, pos))) {
         return rc_wgsl_scan_word(source, pos, arena);
     }
-    if (rc_wgsl_is_digit(c) || (c == '.' && rc_wgsl_is_digit(rc_wgsl_char_at(source, pos + 1)))) {
+
+    if (rc_wgsl_is_number_start(source, pos)) {
         return rc_wgsl_scan_number(source, pos);
     }
+
     return rc_wgsl_scan_punctuation(source, pos);
 }
 
@@ -694,8 +769,8 @@ typedef struct rc_wgsl_candidate {
 #define RC_ARRAY_NAME wgsl_candidate
 #include "richc/array.template.h"
 
-// The state of template list discovery: the candidates still open, innermost last, and the
-// depth of brackets.
+// The state of template list discovery: the candidates still open, innermost last, and the depth
+// of brackets.
 typedef struct rc_wgsl_discovery {
     rc_array_wgsl_candidate pending;
     uint32_t depth;
@@ -704,8 +779,7 @@ typedef struct rc_wgsl_discovery {
 // The type of token i, or END past the last.
 static rc_wgsl_token_type rc_wgsl_type_at(rc_span_wgsl_token tokens, uint32_t i)
 {
-    return i < tokens.num ? (rc_wgsl_token_type)rc_span_wgsl_token_get(tokens, i).type
-                          : RC_WGSL_TOKEN_TYPE_END;
+    return i < tokens.num ? (rc_wgsl_token_type)rc_span_wgsl_token_get(tokens, i).type : RC_WGSL_TOKEN_TYPE_END;
 }
 
 
@@ -715,6 +789,13 @@ static bool rc_wgsl_is_adjacent(rc_span_wgsl_token tokens, uint32_t i)
     rc_wgsl_token a = rc_span_wgsl_token_get(tokens, i);
 
     return i + 1 < tokens.num && a.offset + a.len == rc_span_wgsl_token_get(tokens, i + 1).offset;
+}
+
+
+// True if token i + 1 is of type and starts right where token i ends.
+static bool rc_wgsl_is_adjacent_type(rc_span_wgsl_token tokens, uint32_t i, rc_wgsl_token_type type)
+{
+    return rc_wgsl_type_at(tokens, i + 1) == type && rc_wgsl_is_adjacent(tokens, i);
 }
 
 
@@ -737,8 +818,7 @@ static void rc_wgsl_discovery_reset(rc_wgsl_discovery *d)
 
 // Handle the '>' at i: it closes the innermost candidate if that is at this depth. Returns how many
 // tokens it took, which is 2 for the '>=' operator.
-static uint32_t rc_wgsl_discovery_greater(rc_wgsl_discovery *d, rc_span_wgsl_token tokens,
-    uint32_t i)
+static uint32_t rc_wgsl_discovery_greater(rc_wgsl_discovery *d, rc_span_wgsl_token tokens, uint32_t i)
 {
     if (d->pending.num > 0 && rc_array_wgsl_candidate_last_at(&d->pending)->depth == d->depth) {
         rc_wgsl_candidate open = rc_array_wgsl_candidate_pop(&d->pending);
@@ -747,9 +827,11 @@ static uint32_t rc_wgsl_discovery_greater(rc_wgsl_discovery *d, rc_span_wgsl_tok
         rc_span_wgsl_token_at(tokens, i)->type = RC_WGSL_TOKEN_TYPE_TEMPLATE_END;
         return 1;
     }
-    if (rc_wgsl_type_at(tokens, i + 1) == RC_WGSL_TOKEN_TYPE_EQUAL && rc_wgsl_is_adjacent(tokens, i)) {
+
+    if (rc_wgsl_is_adjacent_type(tokens, i, RC_WGSL_TOKEN_TYPE_EQUAL)) {
         return 2;
     }
+
     return 1;
 }
 
@@ -775,19 +857,24 @@ static bool rc_wgsl_is_assignment(rc_wgsl_token_type type)
 }
 
 
+// True for a word's token: an identifier or a keyword.
+static bool rc_wgsl_is_word_token(rc_wgsl_token_type type)
+{
+    return type == RC_WGSL_TOKEN_TYPE_IDENT || rc_wgsl_token_is_keyword(type);
+}
+
+
 // Handle token i, returning how many tokens it took.
-static uint32_t rc_wgsl_discovery_step(rc_wgsl_discovery *d, rc_span_wgsl_token tokens, uint32_t i,
-    rc_arena *arena)
+static uint32_t rc_wgsl_discovery_step(rc_wgsl_discovery *d, rc_span_wgsl_token tokens, uint32_t i, rc_arena *arena)
 {
     rc_wgsl_token_type type = rc_wgsl_type_at(tokens, i);
 
     // A word followed by '<' may be a template
-    if ((type == RC_WGSL_TOKEN_TYPE_IDENT || rc_wgsl_token_is_keyword(type))
-        && rc_wgsl_type_at(tokens, i + 1) == RC_WGSL_TOKEN_TYPE_LESS) {
-        rc_array_wgsl_candidate_push(&d->pending,
-            (rc_wgsl_candidate) {.index = i + 1, .depth = d->depth}, arena);
+    if (rc_wgsl_is_word_token(type) && rc_wgsl_type_at(tokens, i + 1) == RC_WGSL_TOKEN_TYPE_LESS) {
+        rc_array_wgsl_candidate_push(&d->pending, (rc_wgsl_candidate) {.index = i + 1, .depth = d->depth}, arena);
         return 2;
     }
+
     switch (type) {
     case RC_WGSL_TOKEN_TYPE_GREATER:
         return rc_wgsl_discovery_greater(d, tokens, i);
@@ -813,6 +900,7 @@ static uint32_t rc_wgsl_discovery_step(rc_wgsl_discovery *d, rc_span_wgsl_token 
         if (rc_wgsl_is_assignment(type)) {
             rc_wgsl_discovery_reset(d);
         }
+
         return 1;
     }
 }
@@ -831,33 +919,37 @@ static void rc_wgsl_discover_templates(rc_span_wgsl_token tokens, rc_arena *aren
 
 // ---- joining ----
 
-// The token that the '>' at i makes with any adjacent '>' and '=' after it, and how many tokens it
-// takes.
+// A token that a '>' makes with any adjacent '>' and '=' after it, and how many tokens it takes.
 typedef struct rc_wgsl_joined {
     rc_wgsl_token token;
     uint32_t taken;
 } rc_wgsl_joined;
 
+// The type of a '>' joined with a second '>', an '=', both or neither.
+static rc_wgsl_token_type rc_wgsl_joined_type(bool shift, bool equal)
+{
+    if (shift) {
+        return equal ? RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT_EQUAL : RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT;
+    }
+
+    return equal ? RC_WGSL_TOKEN_TYPE_GREATER_EQUAL : RC_WGSL_TOKEN_TYPE_GREATER;
+}
+
+
+// The '>' at i, joined with any adjacent '>' and '=' after it.
 static rc_wgsl_joined rc_wgsl_join_greater_at(rc_span_wgsl_token tokens, uint32_t i)
 {
-    rc_wgsl_token token = rc_span_wgsl_token_get(tokens, i);
-    uint32_t taken = 1;
-
-    if (rc_wgsl_type_at(tokens, i + 1) == RC_WGSL_TOKEN_TYPE_GREATER
-        && rc_wgsl_is_adjacent(tokens, i)) {
-        token.type = RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT;
-        taken = 2;
-    }
-    if (rc_wgsl_type_at(tokens, i + taken) == RC_WGSL_TOKEN_TYPE_EQUAL
-        && rc_wgsl_is_adjacent(tokens, i + taken - 1)) {
-        token.type = token.type == RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT ? RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT_EQUAL
-                                                              : RC_WGSL_TOKEN_TYPE_GREATER_EQUAL;
-        taken++;
-    }
-    token.len = taken;
+    bool shift = rc_wgsl_is_adjacent_type(tokens, i, RC_WGSL_TOKEN_TYPE_GREATER);
+    uint32_t last = shift ? i + 1 : i;
+    bool equal = rc_wgsl_is_adjacent_type(tokens, last, RC_WGSL_TOKEN_TYPE_EQUAL);
+    uint32_t taken = last - i + (equal ? 2 : 1);
 
     return (rc_wgsl_joined) {
-        .token = token,
+        .token = {
+            .offset = rc_span_wgsl_token_get(tokens, i).offset,
+            .len = taken,
+            .type = (uint8_t)rc_wgsl_joined_type(shift, equal)
+        },
         .taken = taken
     };
 }
@@ -874,6 +966,7 @@ static uint32_t rc_wgsl_join_greaters(rc_span_wgsl_token tokens)
         if (joined.token.type == RC_WGSL_TOKEN_TYPE_GREATER) {
             joined = rc_wgsl_join_greater_at(tokens, i);
         }
+
         rc_span_wgsl_token_set(tokens, out++, joined.token);
         i += joined.taken;
     }
@@ -885,28 +978,24 @@ static uint32_t rc_wgsl_join_greaters(rc_span_wgsl_token tokens)
 // Scan source into tokens, ending with END, before template discovery. Returns the first error.
 static rc_wgsl_error rc_wgsl_scan_all(rc_str source, rc_array_wgsl_token *tokens, rc_arena *arena)
 {
-    uint32_t pos = 0;
+    rc_wgsl_skip skip = rc_wgsl_skip_blank(source, 0);
 
-    while (true) {
-        rc_wgsl_skip skip = rc_wgsl_skip_blank(source, pos);
-        rc_wgsl_scan scan;
+    while (!rc_str_is_valid(skip.error) && skip.pos != source.len) {
+        rc_wgsl_scan scan = rc_wgsl_scan_token(source, skip.pos, arena);
 
-        if (rc_str_is_valid(skip.error)) {
-            return rc_wgsl_error_at(source, skip.pos, skip.error);
-        }
-        pos = skip.pos;
-        if (pos == source.len) {
-            break;
-        }
-        scan = rc_wgsl_scan_token(source, pos, arena);
         if (rc_str_is_valid(scan.error)) {
             return rc_wgsl_error_at(source, scan.token.offset, scan.error);
         }
+
         rc_array_wgsl_token_push(tokens, scan.token, arena);
-        pos += scan.token.len;
+        skip = rc_wgsl_skip_blank(source, skip.pos + scan.token.len);
     }
-    rc_array_wgsl_token_push(tokens,
-        (rc_wgsl_token) {.offset = source.len, .type = RC_WGSL_TOKEN_TYPE_END}, arena);
+
+    if (rc_str_is_valid(skip.error)) {
+        return rc_wgsl_error_at(source, skip.pos, skip.error);
+    }
+
+    rc_array_wgsl_token_push(tokens, (rc_wgsl_token) {.offset = source.len, .type = RC_WGSL_TOKEN_TYPE_END}, arena);
     return (rc_wgsl_error) {0};
 }
 
@@ -919,7 +1008,35 @@ rc_wgsl_lex_result rc_wgsl_lex(rc_str source, rc_arena *arena)
     if (rc_wgsl_error_is_set(error)) {
         return (rc_wgsl_lex_result) {.error = error};
     }
+
     rc_wgsl_discover_templates(tokens.span, arena);
     rc_array_wgsl_token_pop_n(&tokens, tokens.num - rc_wgsl_join_greaters(tokens.span));
     return (rc_wgsl_lex_result) {.tokens = tokens.view};
+}
+
+
+rc_wgsl_token_type rc_wgsl_compound_operator(rc_wgsl_token_type op)
+{
+    switch (op) {
+    case RC_WGSL_TOKEN_TYPE_PLUS_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_PLUS;
+    case RC_WGSL_TOKEN_TYPE_MINUS_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_MINUS;
+    case RC_WGSL_TOKEN_TYPE_STAR_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_STAR;
+    case RC_WGSL_TOKEN_TYPE_SLASH_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_SLASH;
+    case RC_WGSL_TOKEN_TYPE_PERCENT_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_PERCENT;
+    case RC_WGSL_TOKEN_TYPE_AND_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_AND;
+    case RC_WGSL_TOKEN_TYPE_OR_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_OR;
+    case RC_WGSL_TOKEN_TYPE_XOR_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_XOR;
+    case RC_WGSL_TOKEN_TYPE_SHIFT_LEFT_EQUAL:
+        return RC_WGSL_TOKEN_TYPE_SHIFT_LEFT;
+    default:
+        return RC_WGSL_TOKEN_TYPE_SHIFT_RIGHT;
+    }
 }

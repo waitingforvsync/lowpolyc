@@ -130,6 +130,7 @@ static void dump_fn(dumper *d, uint32_t node)
         put(d, RC_STR(" "));
         dump(d, fn.return_type);
     }
+
     put(d, RC_STR(" "));
     dump(d, fn.body);
     put(d, RC_STR(")"));
@@ -145,12 +146,12 @@ static void dump_var(dumper *d, uint32_t node)
 
     for (uint32_t i = 0; i < templates.num; i++) {
         rc_mstr_append(&keyword, i == 0 ? RC_STR("<") : RC_STR(", "), d->arena);
-        rc_mstr_append(&keyword, rc_wgsl_ast_text(d->ast, rc_view_wgsl_index_get(templates, i)),
-            d->arena);
+        rc_mstr_append(&keyword, rc_wgsl_ast_text(d->ast, rc_view_wgsl_index_get(templates, i)), d->arena);
     }
     if (templates.num > 0) {
         rc_mstr_append(&keyword, RC_STR(">"), d->arena);
     }
+
     dump_head(d, keyword.view, var.attributes, node);
     put(d, RC_STR(" "));
     dump(d, var.type);
@@ -161,8 +162,7 @@ static void dump_var(dumper *d, uint32_t node)
 
 
 // A named node with two parts, as (let x T init).
-static void dump_named(dumper *d, rc_str keyword, uint32_t attributes, uint32_t node, uint32_t a,
-    uint32_t b)
+static void dump_named(dumper *d, rc_str keyword, uint32_t attributes, uint32_t node, uint32_t a, uint32_t b)
 {
     dump_head(d, keyword, attributes, node);
     put(d, RC_STR(" "));
@@ -171,6 +171,7 @@ static void dump_named(dumper *d, rc_str keyword, uint32_t attributes, uint32_t 
         put(d, RC_STR(" "));
         dump(d, b);
     }
+
     put(d, RC_STR(")"));
 }
 
@@ -342,10 +343,12 @@ static rc_str parsed(rc_str source, rc_arena *arena)
     if (rc_wgsl_error_is_set(lexed.error)) {
         return lexed.error.message;
     }
+
     result = rc_wgsl_parse(source, lexed.tokens, arena);
     if (rc_wgsl_error_is_set(result.error)) {
         return result.error.message;
     }
+
     d.ast = result.ast;
     d.out = rc_mstr_make(256, arena);
     dump_list(&d, result.ast.decls, RC_STR(" "));
@@ -367,6 +370,7 @@ static rc_str statements(const char *statements, rc_arena *arena)
     if (rc_str_starts_with(tree, RC_STR("(fn f () {"))) {
         return rc_str_drop_last(rc_str_drop_first(tree, 10), 2);
     }
+
     return tree;
 }
 
@@ -385,6 +389,7 @@ static rc_str expression(const char *expression, rc_arena *arena)
     if (rc_str_starts_with(tree, RC_STR("(let x _ "))) {
         return rc_str_drop_last(rc_str_drop_first(tree, 9), 1);
     }
+
     return tree;
 }
 
@@ -405,8 +410,7 @@ RC_TEST_STEP(parser, calls_and_constructors, fix)
     RC_CHECK(expression("f()", &fix->a), ==, RC_STR("(call f)"));
     RC_CHECK(expression("f(a, b,)", &fix->a), ==, RC_STR("(call f a b)"));
     RC_CHECK(expression("vec3<f32>(1.0)", &fix->a), ==, RC_STR("(call vec3<f32> 1.0)"));
-    RC_CHECK(expression("array<vec2f, 2>(a, b)", &fix->a), ==,
-        RC_STR("(call array<vec2f, 2> a b)"));
+    RC_CHECK(expression("array<vec2f, 2>(a, b)", &fix->a), ==, RC_STR("(call array<vec2f, 2> a b)"));
     RC_CHECK(expression("bitcast<u32>(x)", &fix->a), ==, RC_STR("(call bitcast<u32> x)"));
 }
 
@@ -438,8 +442,7 @@ RC_TEST_STEP(parser, precedence, fix)
     RC_CHECK(expression("-a * b", &fix->a), ==, RC_STR("(* (- a) b)"));
     RC_CHECK(expression("a + b < c * d", &fix->a), ==, RC_STR("(< (+ a b) (* c d))"));
     RC_CHECK(expression("a << b == c", &fix->a), ==, RC_STR("(== (<< a b) c)"));
-    RC_CHECK(expression("a < b && c >= d && e", &fix->a), ==,
-        RC_STR("(&& (&& (< a b) (>= c d)) e)"));
+    RC_CHECK(expression("a < b && c >= d && e", &fix->a), ==, RC_STR("(&& (&& (< a b) (>= c d)) e)"));
     RC_CHECK(expression("a || b || c", &fix->a), ==, RC_STR("(|| (|| a b) c)"));
     RC_CHECK(expression("a & b & c", &fix->a), ==, RC_STR("(& (& a b) c)"));
     RC_CHECK(expression("a ^ -b", &fix->a), ==, RC_STR("(^ a (- b))"));
@@ -477,6 +480,9 @@ RC_TEST_STEP(parser, bad_expressions, fix)
 }
 
 
+// The error for nesting or chains too deep to check.
+#define TOO_DEEP "this is nested too deeply, or too long a chain"
+
 RC_TEST_STEP(parser, deep_nesting_is_an_error, fix)
 {
     rc_mstr deep = rc_mstr_make(512, &fix->a);
@@ -484,12 +490,32 @@ RC_TEST_STEP(parser, deep_nesting_is_an_error, fix)
     rc_mstr_append_n(&deep, '(', 200, &fix->a);
     rc_mstr_append_char(&deep, 'a', &fix->a);
     rc_mstr_append_n(&deep, ')', 200, &fix->a);
-    RC_CHECK(expression(deep.data, &fix->a), ==, RC_STR("this is nested too deeply"));
+    RC_CHECK(expression(deep.data, &fix->a), ==, RC_STR(TOO_DEEP));
 
     rc_mstr_reset(&deep);
     rc_mstr_append_n(&deep, '!', 200, &fix->a);
     rc_mstr_append_char(&deep, 'a', &fix->a);
-    RC_CHECK(expression(deep.data, &fix->a), ==, RC_STR("this is nested too deeply"));
+    RC_CHECK(expression(deep.data, &fix->a), ==, RC_STR(TOO_DEEP));
+}
+
+
+RC_TEST_STEP(parser, long_chains_are_an_error, fix)
+{
+    rc_mstr chain = rc_mstr_from_str(RC_STR("a"), 1024, &fix->a);
+    rc_mstr members = rc_mstr_from_str(RC_STR("a"), 1024, &fix->a);
+
+    for (uint32_t i = 0; i < 200; i++) {
+        rc_mstr_append(&chain, RC_STR(" + a"), &fix->a);
+        rc_mstr_append(&members, i % 2 ? RC_STR(".b") : RC_STR("[0]"), &fix->a);
+    }
+    RC_CHECK(expression(chain.data, &fix->a), ==, RC_STR(TOO_DEEP));
+    RC_CHECK(expression(members.data, &fix->a), ==, RC_STR(TOO_DEEP));
+    rc_mstr_append(&members, RC_STR(" = 1;"), &fix->a);
+    RC_CHECK(statements(members.data, &fix->a), ==, RC_STR(TOO_DEEP));
+
+    // Short chains, side by side, are fine however many there are
+    RC_CHECK(expression("(a + a + a) + (a + a + a) + (a.b.c + a[0][1])", &fix->a), ==,
+        RC_STR("(+ (+ (+ (+ a a) a) (+ (+ a a) a)) (+ (. (. a b) c) (index (index a 0) 1)))"));
 }
 
 // ---- statements ----
@@ -498,8 +524,7 @@ RC_TEST_STEP(parser, declarations_in_functions, fix)
 {
     RC_CHECK(statements("var a: f32;", &fix->a), ==, RC_STR("(var a f32 _)"));
     RC_CHECK(statements("var a = 1;", &fix->a), ==, RC_STR("(var a _ 1)"));
-    RC_CHECK(statements("var<function> a: i32 = 2;", &fix->a), ==,
-        RC_STR("(var<function> a i32 2)"));
+    RC_CHECK(statements("var<function> a: i32 = 2;", &fix->a), ==, RC_STR("(var<function> a i32 2)"));
     RC_CHECK(statements("let a: vec2<f32> = b;", &fix->a), ==, RC_STR("(let a vec2<f32> b)"));
     RC_CHECK(statements("const a = 3;", &fix->a), ==, RC_STR("(const a _ 3)"));
     RC_CHECK(statements("let a;", &fix->a), ==, RC_STR("expected '=' and a value"));
@@ -543,8 +568,7 @@ RC_TEST_STEP(parser, ifs, fix)
 {
     RC_CHECK(statements("if a { b = 1; }", &fix->a), ==, RC_STR("(if a {(= b 1)} _)"));
     RC_CHECK(statements("if (a) {} else {}", &fix->a), ==, RC_STR("(if a {} {})"));
-    RC_CHECK(statements("if a {} else if b {} else {}", &fix->a), ==,
-        RC_STR("(if a {} (if b {} {}))"));
+    RC_CHECK(statements("if a {} else if b {} else {}", &fix->a), ==, RC_STR("(if a {} (if b {} {}))"));
     RC_CHECK(statements("if a b = 1;", &fix->a), ==, RC_STR("expected '{'"));
 }
 
@@ -553,57 +577,42 @@ RC_TEST_STEP(parser, switches, fix)
 {
     RC_CHECK(statements("switch x { case 1, 2: {} default: { break; } }", &fix->a), ==,
         RC_STR("(switch x (case (1 2) {}) (case (default) {break}))"));
-    RC_CHECK(statements("switch x { case 1, default, { } }", &fix->a), ==,
-        RC_STR("(switch x (case (1 default) {}))"));
-    RC_CHECK(statements("switch (x) { default {} }", &fix->a), ==,
-        RC_STR("(switch x (case (default) {}))"));
-    RC_CHECK(statements("switch x { a }", &fix->a), ==,
-        RC_STR("expected 'case', 'default' or '}'"));
+    RC_CHECK(statements("switch x { case 1, default, { } }", &fix->a), ==, RC_STR("(switch x (case (1 default) {}))"));
+    RC_CHECK(statements("switch (x) { default {} }", &fix->a), ==, RC_STR("(switch x (case (default) {}))"));
+    RC_CHECK(statements("switch x { a }", &fix->a), ==, RC_STR("expected 'case', 'default' or '}'"));
 }
 
 
 RC_TEST_STEP(parser, loops, fix)
 {
     RC_CHECK(statements("loop { break; }", &fix->a), ==, RC_STR("(loop {break} _)"));
-    RC_CHECK(statements("loop { a++; continuing { b++; } }", &fix->a), ==,
-        RC_STR("(loop {(++ a)} (continuing {(++ b)} _))"));
-    RC_CHECK(statements("loop { continuing { break if a > 3; } }", &fix->a), ==,
-        RC_STR("(loop {} (continuing {} (> a 3)))"));
+    RC_CHECK(statements("loop { a++; continuing { b++; } }", &fix->a), ==, RC_STR("(loop {(++ a)} (continuing {(++ b)} _))"));
+    RC_CHECK(statements("loop { continuing { break if a > 3; } }", &fix->a), ==, RC_STR("(loop {} (continuing {} (> a 3)))"));
     RC_CHECK(statements("while a < 3 { a++; }", &fix->a), ==, RC_STR("(while (< a 3) {(++ a)})"));
-    RC_CHECK(statements("for (var i = 0; i < 4; i++) {}", &fix->a), ==,
-        RC_STR("(for ( (var i _ 0) (< i 4) (++ i)) {})"));
+    RC_CHECK(statements("for (var i = 0; i < 4; i++) {}", &fix->a), ==, RC_STR("(for ( (var i _ 0) (< i 4) (++ i)) {})"));
     RC_CHECK(statements("for (;;) {}", &fix->a), ==, RC_STR("(for ( _ _ _) {})"));
-    RC_CHECK(statements("for (i = 0; ; f()) {}", &fix->a), ==,
-        RC_STR("(for ( (= i 0) _ (call f)) {})"));
+    RC_CHECK(statements("for (i = 0; ; f()) {}", &fix->a), ==, RC_STR("(for ( (= i 0) _ (call f)) {})"));
 }
 
 
 RC_TEST_STEP(parser, loop_mistakes, fix)
 {
-    RC_CHECK(statements("loop { continuing {} a++; }", &fix->a), ==,
-        RC_STR("the continuing block must come last in a loop"));
-    RC_CHECK(statements("continuing {}", &fix->a), ==,
-        RC_STR("a continuing block must come last in a loop"));
+    RC_CHECK(statements("loop { continuing {} a++; }", &fix->a), ==, RC_STR("the continuing block must come last in a loop"));
+    RC_CHECK(statements("continuing {}", &fix->a), ==, RC_STR("a continuing block must come last in a loop"));
     RC_CHECK(statements("loop { continuing { break if a; b++; } }", &fix->a), ==,
         RC_STR("'break if' must be the last statement in a continuing block"));
-    RC_CHECK(statements("loop { continuing { break; } }", &fix->a), ==,
-        RC_STR("a continuing block can't break, except by 'break if'"));
-    RC_CHECK(statements("loop { break if a; }", &fix->a), ==,
-        RC_STR("'break if' can only end a continuing block"));
-    RC_CHECK(statements("for (var i = 0; i < 4; var j = 0) {}", &fix->a), ==,
-        RC_STR("expected an expression"));
+    RC_CHECK(statements("loop { continuing { break; } }", &fix->a), ==, RC_STR("a continuing block can't break, except by 'break if'"));
+    RC_CHECK(statements("loop { break if a; }", &fix->a), ==, RC_STR("'break if' can only end a continuing block"));
+    RC_CHECK(statements("for (var i = 0; i < 4; var j = 0) {}", &fix->a), ==, RC_STR("expected an expression"));
 }
 
 
 RC_TEST_STEP(parser, diagnostics_are_dropped, fix)
 {
-    RC_CHECK(statements("@diagnostic(off, derivative_uniformity) if a {}", &fix->a), ==,
-        RC_STR("(if a {} _)"));
+    RC_CHECK(statements("@diagnostic(off, derivative_uniformity) if a {}", &fix->a), ==, RC_STR("(if a {} _)"));
     RC_CHECK(statements("if a @diagnostic(off, x.y) {}", &fix->a), ==, RC_STR("(if a {} _)"));
-    RC_CHECK(statements("@diagnostic(off, x) a = 1;", &fix->a), ==,
-        RC_STR("attributes can't go on this statement"));
-    RC_CHECK(statements("@must_use {}", &fix->a), ==,
-        RC_STR("only @diagnostic can go on a statement"));
+    RC_CHECK(statements("@diagnostic(off, x) a = 1;", &fix->a), ==, RC_STR("attributes can't go on this statement"));
+    RC_CHECK(statements("@must_use {}", &fix->a), ==, RC_STR("only @diagnostic can go on a statement"));
 }
 
 // ---- declarations ----
@@ -613,22 +622,17 @@ RC_TEST_STEP(parser, structs, fix)
     RC_CHECK(parsed(RC_STR("struct S { a: f32, @align(16) b: vec3<f32>, }"), &fix->a), ==,
         RC_STR("(struct S (field a f32) (field @align(16) b vec3<f32>))"));
     RC_CHECK(parsed(RC_STR("struct S { a: f32 }"), &fix->a), ==, RC_STR("(struct S (field a f32))"));
-    RC_CHECK(parsed(RC_STR("struct S {}"), &fix->a), ==,
-        RC_STR("a struct needs at least one member"));
+    RC_CHECK(parsed(RC_STR("struct S {}"), &fix->a), ==, RC_STR("a struct needs at least one member"));
     RC_CHECK(parsed(RC_STR("struct S { a: f32; }"), &fix->a), ==, RC_STR("expected ',' or '}'"));
-    RC_CHECK(parsed(RC_STR("@align(4) struct S { a: f32 }"), &fix->a), ==,
-        RC_STR("attributes can't go on this declaration"));
+    RC_CHECK(parsed(RC_STR("@align(4) struct S { a: f32 }"), &fix->a), ==, RC_STR("attributes can't go on this declaration"));
 }
 
 
 RC_TEST_STEP(parser, globals, fix)
 {
-    RC_CHECK(parsed(RC_STR("@group(0) @binding(1) var<uniform> u: U;"), &fix->a), ==,
-        RC_STR("(var<uniform> @group(0) @binding(1) u U _)"));
-    RC_CHECK(parsed(RC_STR("var<storage, read_write> s: array<f32>;"), &fix->a), ==,
-        RC_STR("(var<storage, read_write> s array<f32> _)"));
-    RC_CHECK(parsed(RC_STR("var<private> p = 1.0;"), &fix->a), ==,
-        RC_STR("(var<private> p _ 1.0)"));
+    RC_CHECK(parsed(RC_STR("@group(0) @binding(1) var<uniform> u: U;"), &fix->a), ==, RC_STR("(var<uniform> @group(0) @binding(1) u U _)"));
+    RC_CHECK(parsed(RC_STR("var<storage, read_write> s: array<f32>;"), &fix->a), ==, RC_STR("(var<storage, read_write> s array<f32> _)"));
+    RC_CHECK(parsed(RC_STR("var<private> p = 1.0;"), &fix->a), ==, RC_STR("(var<private> p _ 1.0)"));
     RC_CHECK(parsed(RC_STR("const PI = 3.14;"), &fix->a), ==, RC_STR("(const PI _ 3.14)"));
     RC_CHECK(parsed(RC_STR("alias v3 = vec3<f32>;"), &fix->a), ==, RC_STR("(alias v3 vec3<f32>)"));
     RC_CHECK(parsed(RC_STR("const_assert N > 0;"), &fix->a), ==, RC_STR("(const_assert (> N 0))"));
@@ -647,29 +651,24 @@ RC_TEST_STEP(parser, functions, fix)
         "{(return p)})"));
     RC_CHECK(parsed(RC_STR("@compute @workgroup_size(8, 8, 1) fn cs() {}"), &fix->a), ==,
         RC_STR("(fn @compute @workgroup_size(8, 8, 1) cs () {})"));
-    RC_CHECK(parsed(RC_STR("fn f(a) {}"), &fix->a), ==,
-        RC_STR("expected ':' and the parameter's type"));
+    RC_CHECK(parsed(RC_STR("fn f(a) {}"), &fix->a), ==, RC_STR("expected ':' and the parameter's type"));
 }
 
 
 RC_TEST_STEP(parser, refused_declarations, fix)
 {
-    RC_CHECK(parsed(RC_STR("enable f16;"), &fix->a), ==,
-        RC_STR("enable directives aren't supported yet"));
+    RC_CHECK(parsed(RC_STR("enable f16;"), &fix->a), ==, RC_STR("enable directives aren't supported yet"));
     RC_CHECK(parsed(RC_STR("requires readonly_and_readwrite_storage_textures;"), &fix->a), ==,
         RC_STR("requires directives aren't supported yet"));
-    RC_CHECK(parsed(RC_STR("override n: u32;"), &fix->a), ==,
-        RC_STR("override declarations aren't supported yet"));
-    RC_CHECK(parsed(RC_STR("let a = 1;"), &fix->a), ==,
-        RC_STR("'let' only goes in functions: use 'const' here"));
+    RC_CHECK(parsed(RC_STR("override n: u32;"), &fix->a), ==, RC_STR("override declarations aren't supported yet"));
+    RC_CHECK(parsed(RC_STR("let a = 1;"), &fix->a), ==, RC_STR("'let' only goes in functions: use 'const' here"));
     RC_CHECK(parsed(RC_STR("a = 1;"), &fix->a), ==, RC_STR("expected a declaration"));
 }
 
 
 RC_TEST_STEP(parser, diagnostic_directives_are_dropped, fix)
 {
-    RC_CHECK(parsed(RC_STR("diagnostic(off, derivative_uniformity); const a = 1;"), &fix->a), ==,
-        RC_STR("(const a _ 1)"));
+    RC_CHECK(parsed(RC_STR("diagnostic(off, derivative_uniformity); const a = 1;"), &fix->a), ==, RC_STR("(const a _ 1)"));
     RC_CHECK(parsed(RC_STR("diagnostic(off, x) const a = 1;"), &fix->a), ==, RC_STR("expected ';'"));
 }
 

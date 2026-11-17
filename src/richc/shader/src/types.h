@@ -9,12 +9,14 @@
 //
 // The abstract numeric types are WGSL's types for literals with no suffix. They convert to any
 // concrete type that can hold their value, and the checker settles each one on a concrete type
-// before the emitters see it.
+// before the writers see it.
 
 #ifndef RC_SHADER_TYPES_H_
 #define RC_SHADER_TYPES_H_
 
 #include "ast.h"
+#include "richc/hash_index.h"
+#include "richc/shader/shader.h"
 
 typedef struct rc_mstr rc_mstr;
 
@@ -69,17 +71,7 @@ typedef enum rc_wgsl_access {
     RC_WGSL_ACCESS_READ_WRITE
 } rc_wgsl_access;
 
-typedef enum rc_wgsl_dim {
-    RC_WGSL_DIM_NONE = 0,
-    RC_WGSL_DIM_1D,
-    RC_WGSL_DIM_2D,
-    RC_WGSL_DIM_2D_ARRAY,
-    RC_WGSL_DIM_3D,
-    RC_WGSL_DIM_CUBE,
-    RC_WGSL_DIM_CUBE_ARRAY
-} rc_wgsl_dim;
-
-// What a texture holds. A sampled or multisampled texture's element is its sampled type.
+// What a texture holds.
 typedef enum rc_wgsl_texture_class {
     RC_WGSL_TEXTURE_CLASS_NONE = 0,
     RC_WGSL_TEXTURE_CLASS_SAMPLED,
@@ -117,12 +109,13 @@ typedef enum rc_wgsl_format {
 //   STRUCT           decl (the STRUCT node), uncopyable (holding an atomic or a runtime-sized
 //                    array, so it can't be constructed or copied)
 //   ATOMIC           element (i32 or u32)
-//   POINTER          element (the store type), space, access
-//   TEXTURE          element (the sampled type, for sampled and multisampled), dim,
-//                    texture_class
+//   POINTER          store_type, space, access
+//   TEXTURE          sampled_type (for sampled and multisampled), dim, texture_class
 //   STORAGE_TEXTURE  dim, format, access
 typedef struct rc_wgsl_typeinfo {
     uint32_t element;
+    uint32_t store_type;
+    uint32_t sampled_type;
     uint32_t count;
     uint32_t decl;
     uint8_t type;           // rc_wgsl_typeinfo_type
@@ -131,23 +124,36 @@ typedef struct rc_wgsl_typeinfo {
     uint8_t rows;
     uint8_t space;          // rc_wgsl_space
     uint8_t access;         // rc_wgsl_access
-    uint8_t dim;            // rc_wgsl_dim
+    uint8_t dim;            // rc_shader_dimension
     uint8_t texture_class;  // rc_wgsl_texture_class
     uint8_t format;         // rc_wgsl_format
     uint8_t uncopyable;
+    uint8_t depth;          // how deeply other types nest inside: 0 for a scalar, at most 255
 } rc_wgsl_typeinfo;
 
 #define RC_ARRAY_TYPE rc_wgsl_typeinfo
 #define RC_ARRAY_NAME wgsl_typeinfo
 #include "richc/array.template.h"
 
+// The table: the types, and an index finding each one in it.
+typedef struct rc_wgsl_types {
+    rc_array_wgsl_typeinfo infos;
+    rc_hash_index index;
+} rc_wgsl_types;
+
 // ---- the table ----
 
 // A table holding the types at fixed indices.
-rc_array_wgsl_typeinfo rc_wgsl_types_make(rc_arena *arena);
+rc_wgsl_types rc_wgsl_types_make(rc_arena *arena);
+
+// A table holding a copy of the types in view, to add more to.
+rc_wgsl_types rc_wgsl_types_from_view(rc_view_wgsl_typeinfo view, rc_arena *arena);
 
 // The index of type, adding it if it is new.
-uint32_t rc_wgsl_type_intern(rc_array_wgsl_typeinfo *types, rc_wgsl_typeinfo type, rc_arena *arena);
+uint32_t rc_wgsl_type_intern(rc_wgsl_types *types, rc_wgsl_typeinfo type, rc_arena *arena);
+
+// The depth of a type holding element.
+uint8_t rc_wgsl_type_depth_around(rc_view_wgsl_typeinfo types, uint32_t element);
 
 // The type at index id.
 static inline rc_wgsl_typeinfo rc_wgsl_typeinfo_of(rc_view_wgsl_typeinfo types, uint32_t id)
@@ -162,28 +168,23 @@ static inline rc_wgsl_typeinfo_type rc_wgsl_typeinfo_type_of(rc_view_wgsl_typein
 }
 
 // The vector of width elements.
-uint32_t rc_wgsl_type_vector(rc_array_wgsl_typeinfo *types, uint32_t element, uint32_t width,
-    rc_arena *arena);
+uint32_t rc_wgsl_type_vector(rc_wgsl_types *types, uint32_t element, uint32_t width, rc_arena *arena);
 
 // The matrix of columns by rows elements.
-uint32_t rc_wgsl_type_matrix(rc_array_wgsl_typeinfo *types, uint32_t element, uint32_t columns,
-    uint32_t rows, rc_arena *arena);
+uint32_t rc_wgsl_type_matrix(rc_wgsl_types *types, uint32_t element, uint32_t columns, uint32_t rows, rc_arena *arena);
 
 // The array of count elements, or a runtime-sized one if count is 0.
-uint32_t rc_wgsl_type_array(rc_array_wgsl_typeinfo *types, uint32_t element, uint32_t count,
-    rc_arena *arena);
+uint32_t rc_wgsl_type_array(rc_wgsl_types *types, uint32_t element, uint32_t count, rc_arena *arena);
 
-// The pointer to element in space, with access.
-uint32_t rc_wgsl_type_pointer(rc_array_wgsl_typeinfo *types, uint32_t element,
-    rc_wgsl_space space, rc_wgsl_access access, rc_arena *arena);
+// The pointer to store_type in space, with access.
+uint32_t rc_wgsl_type_pointer(rc_wgsl_types *types, uint32_t store_type, rc_wgsl_space space, rc_wgsl_access access, rc_arena *arena);
 
 // The type with the same shape as id (a scalar, vector, matrix, or array of them) but with scalar
 // elements.
-uint32_t rc_wgsl_type_with_scalar(rc_array_wgsl_typeinfo *types, uint32_t id, uint32_t scalar,
-    rc_arena *arena);
+uint32_t rc_wgsl_type_with_scalar(rc_wgsl_types *types, uint32_t id, uint32_t scalar, rc_arena *arena);
 
 // A matrix's column vector.
-uint32_t rc_wgsl_type_column(rc_array_wgsl_typeinfo *types, uint32_t matrix, rc_arena *arena);
+uint32_t rc_wgsl_type_column(rc_wgsl_types *types, uint32_t matrix, rc_arena *arena);
 
 // ---- questions ----
 
@@ -211,6 +212,31 @@ bool rc_wgsl_type_is_scalar_or_vector(rc_view_wgsl_typeinfo types, uint32_t id);
 // A vector's width, or 1 for anything else.
 uint32_t rc_wgsl_type_width_of(rc_view_wgsl_typeinfo types, uint32_t id);
 
+// True if the texture type holds depths, multisampled or not.
+static inline bool rc_wgsl_texture_is_depth(rc_wgsl_typeinfo texture)
+{
+    return texture.texture_class == RC_WGSL_TEXTURE_CLASS_DEPTH || texture.texture_class == RC_WGSL_TEXTURE_CLASS_DEPTH_MULTISAMPLED;
+}
+
+// True if the texture type is multisampled, holding depths or not.
+static inline bool rc_wgsl_texture_is_multisampled(rc_wgsl_typeinfo texture)
+{
+    return texture.texture_class == RC_WGSL_TEXTURE_CLASS_MULTISAMPLED || texture.texture_class == RC_WGSL_TEXTURE_CLASS_DEPTH_MULTISAMPLED;
+}
+
+// The number of coordinates a texture of dim takes, without its layer.
+uint32_t rc_wgsl_dimension_coords(rc_shader_dimension dim);
+
+// True for the dims with layers.
+static inline bool rc_wgsl_dimension_is_arrayed(rc_shader_dimension dim)
+{
+    return dim == RC_SHADER_DIMENSION_2D_ARRAY || dim == RC_SHADER_DIMENSION_CUBE_ARRAY;
+}
+
+// The number of elements an indexable type has: a vector's width, a matrix's columns or an array's
+// count, which is 0 for one sized at run time.
+uint32_t rc_wgsl_type_element_count(rc_view_wgsl_typeinfo types, uint32_t id);
+
 // True if the type is or contains an abstract type.
 bool rc_wgsl_type_is_abstract(rc_view_wgsl_typeinfo types, uint32_t id);
 
@@ -220,14 +246,16 @@ bool rc_wgsl_type_is_constructible(rc_view_wgsl_typeinfo types, uint32_t id);
 
 // The concrete type an abstract one becomes when nothing says otherwise: i32 for AbstractInt and
 // f32 for AbstractFloat, through vectors, matrices and arrays. Concrete types are unchanged.
-uint32_t rc_wgsl_type_concretise(rc_array_wgsl_typeinfo *types, uint32_t id, rc_arena *arena);
+uint32_t rc_wgsl_type_concretise(rc_wgsl_types *types, uint32_t id, rc_arena *arena);
 
 // True if a value of type from can become type to: the same type, or abstract numbers that
 // convert, through vectors, matrices and arrays alike.
 bool rc_wgsl_type_converts(rc_view_wgsl_typeinfo types, uint32_t from, uint32_t to);
 
+// The type a and b both convert to, the more specific of the two, or 0 if there is none.
+uint32_t rc_wgsl_type_common(rc_view_wgsl_typeinfo types, uint32_t a, uint32_t b);
+
 // Append the type's name as WGSL writes it, for errors. Structs are named from the tree.
-void rc_wgsl_type_append_name(rc_mstr *out, rc_view_wgsl_typeinfo types, uint32_t id, rc_wgsl_ast ast,
-    rc_arena *arena);
+void rc_wgsl_type_append_name(rc_mstr *out, rc_view_wgsl_typeinfo types, uint32_t id, rc_wgsl_ast ast, rc_arena *arena);
 
 #endif // RC_SHADER_TYPES_H_

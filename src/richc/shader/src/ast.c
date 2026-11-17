@@ -4,6 +4,8 @@
 
 #include "ast.h"
 
+#include "error.h"
+
 // Push node onto out, unless it is none.
 static void rc_wgsl_push_child(rc_array_wgsl_index *out, uint32_t node, rc_arena *arena)
 {
@@ -14,8 +16,7 @@ static void rc_wgsl_push_child(rc_array_wgsl_index *out, uint32_t node, rc_arena
 
 
 // Push each node of the list onto out.
-static void rc_wgsl_push_list(rc_wgsl_ast ast, rc_array_wgsl_index *out, uint32_t list,
-    rc_arena *arena)
+static void rc_wgsl_push_list(rc_wgsl_ast ast, rc_array_wgsl_index *out, uint32_t list, rc_arena *arena)
 {
     rc_view_wgsl_index items = rc_wgsl_ast_list(ast, list);
 
@@ -26,8 +27,7 @@ static void rc_wgsl_push_list(rc_wgsl_ast ast, rc_array_wgsl_index *out, uint32_
 
 
 // Push the children of the record-holding nodes: FN, VAR, IF and FOR.
-static void rc_wgsl_push_record_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_index *out,
-    rc_arena *arena)
+static void rc_wgsl_push_record_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_index *out, rc_arena *arena)
 {
     rc_wgsl_node n = rc_wgsl_ast_node(ast, node);
 
@@ -55,8 +55,7 @@ static void rc_wgsl_push_record_children(rc_wgsl_ast ast, uint32_t node, rc_arra
 }
 
 
-void rc_wgsl_ast_push_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_index *out,
-    rc_arena *arena)
+void rc_wgsl_ast_push_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_index *out, rc_arena *arena)
 {
     rc_wgsl_node n = rc_wgsl_ast_node(ast, node);
 
@@ -102,4 +101,14 @@ void rc_wgsl_ast_push_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_ind
     default:
         break;
     }
+}
+
+
+rc_wgsl_error rc_wgsl_ast_error(rc_wgsl_ast ast, uint32_t node, rc_str message)
+{
+    uint32_t token = rc_wgsl_ast_node(ast, node).token;
+
+    // Node 0 is no node at all, so an error there would point at nothing in particular
+    RC_ASSERT(node != 0);
+    return rc_wgsl_error_at(ast.source, rc_view_wgsl_token_get(ast.tokens, token).offset, message);
 }

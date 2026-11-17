@@ -239,9 +239,29 @@ static inline rc_wgsl_for_parts rc_wgsl_ast_for_parts(rc_wgsl_ast ast, uint32_t 
     };
 }
 
+// The FIELD nodes of the STRUCT node at index.
+static inline rc_view_wgsl_index rc_wgsl_ast_struct_fields(rc_wgsl_ast ast, uint32_t index)
+{
+    return rc_wgsl_ast_list(ast, rc_wgsl_ast_node(ast, index).lhs);
+}
+
+// The argument nodes of the CALL node at index.
+static inline rc_view_wgsl_index rc_wgsl_ast_call_args(rc_wgsl_ast ast, uint32_t index)
+{
+    return rc_wgsl_ast_list(ast, rc_wgsl_ast_node(ast, index).rhs);
+}
+
+// The PARAM nodes of the FN node at index.
+static inline rc_view_wgsl_index rc_wgsl_ast_params(rc_wgsl_ast ast, uint32_t index)
+{
+    return rc_wgsl_ast_list(ast, rc_wgsl_ast_fn_parts(ast, index).params);
+}
+
+// The error message at node's token.
+rc_wgsl_error rc_wgsl_ast_error(rc_wgsl_ast ast, uint32_t node, rc_str message);
+
 // Push onto out the children of node that are statements or values: a call's arguments, a block's
 // statements, a declaration's initialiser and so on, but not the types written in it.
-void rc_wgsl_ast_push_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_index *out,
-    rc_arena *arena);
+void rc_wgsl_ast_push_children(rc_wgsl_ast ast, uint32_t node, rc_array_wgsl_index *out, rc_arena *arena);
 
 #endif // RC_SHADER_AST_H_

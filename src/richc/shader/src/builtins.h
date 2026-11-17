@@ -125,6 +125,66 @@ typedef enum rc_wgsl_builtin {
     RC_WGSL_BUILTIN_UNPACK2X16UNORM
 } rc_wgsl_builtin;
 
+// The shapes of signature the built-ins share, which the checker checks their arguments by.
+typedef enum rc_wgsl_rule {
+    RC_WGSL_RULE_NONE = 0,
+
+    // (T, ...) -> T for a float scalar or vector T
+    RC_WGSL_RULE_FLOAT,
+
+    // (T, ...) -> T for a numeric scalar or vector T
+    RC_WGSL_RULE_NUMERIC,
+
+    // (T) -> T for a float or signed integer scalar or vector T
+    RC_WGSL_RULE_SIGNED,
+
+    // (T) -> T for an f32 scalar or vector T, in fragment shaders only
+    RC_WGSL_RULE_DERIVATIVE,
+
+    // (T, ...) -> the scalar of T, a float scalar or vector
+    RC_WGSL_RULE_LENGTH,
+
+    // (vecN<T>, vecN<T>) -> T, numeric
+    RC_WGSL_RULE_DOT,
+
+    // (vec3<T>, vec3<T>) -> vec3<T>, float
+    RC_WGSL_RULE_CROSS,
+
+    // (vecN<T>, ...) -> vecN<T>, float
+    RC_WGSL_RULE_FLOAT_VECTOR,
+
+    // (vecN<T>, vecN<T>, T) -> vecN<T>, float
+    RC_WGSL_RULE_REFRACT,
+
+    // (T, T, T) -> T, or (vecN<T>, vecN<T>, T) -> vecN<T>, float
+    RC_WGSL_RULE_MIX,
+
+    // (matNxN<T>) -> T
+    RC_WGSL_RULE_DETERMINANT,
+
+    // (matCxR<T>) -> matRxC<T>
+    RC_WGSL_RULE_TRANSPOSE,
+
+    // (bool or vecN<bool>) -> bool
+    RC_WGSL_RULE_REDUCE,
+
+    // (T, T, bool) -> T, or (vecN<T>, vecN<T>, vecN<bool>) -> vecN<T>
+    RC_WGSL_RULE_SELECT,
+
+    // (vec2<f32>) -> u32, and back
+    RC_WGSL_RULE_PACK,
+    RC_WGSL_RULE_UNPACK,
+
+    // bitcast<T>(e) for 32-bit T and e of the same width
+    RC_WGSL_RULE_BITCAST,
+
+    // (ptr<storage, array<T>>) -> u32
+    RC_WGSL_RULE_ARRAY_LENGTH,
+
+    // Each texture function its own way
+    RC_WGSL_RULE_TEXTURE
+} rc_wgsl_rule;
+
 // One predeclared name. Which fields mean anything depends on its type:
 //
 //   GENERATOR    a type's name: generator, and element (a shorthand's scalar, or 0 when the
@@ -140,17 +200,37 @@ typedef struct rc_wgsl_predeclared {
     uint8_t width;
     uint8_t columns;
     uint8_t rows;
-    uint8_t dim;            // rc_wgsl_dim
+    uint8_t dim;            // rc_shader_dimension
     uint8_t texture_class;  // rc_wgsl_texture_class
     uint8_t enumerant;      // rc_wgsl_enumerant
     uint8_t value;
     uint8_t builtin;        // rc_wgsl_builtin
 } rc_wgsl_predeclared;
 
+// True for the texture functions.
+bool rc_wgsl_builtin_is_texture(rc_wgsl_builtin builtin);
+
+// True for the texture functions that take a sampler.
+bool rc_wgsl_builtin_is_sampled(rc_wgsl_builtin builtin);
+
 // The predeclared name, or one of type NONE if there is no such name.
 rc_wgsl_predeclared rc_wgsl_predeclared_find(rc_str name);
 
+// A built-in function: its name as WGSL writes it, its rule, and how many arguments it takes (for
+// the rules that fix it).
+typedef struct rc_wgsl_builtin_info {
+    rc_str name;
+    uint8_t rule;  // rc_wgsl_rule
+    uint8_t args;
+} rc_wgsl_builtin_info;
+
+// What the built-in function is.
+rc_wgsl_builtin_info rc_wgsl_builtin_info_of(rc_wgsl_builtin builtin);
+
 // The function's name as WGSL writes it, for errors.
-rc_str rc_wgsl_builtin_name(rc_wgsl_builtin builtin);
+static inline rc_str rc_wgsl_builtin_name(rc_wgsl_builtin builtin)
+{
+    return rc_wgsl_builtin_info_of(builtin).name;
+}
 
 #endif // RC_SHADER_BUILTINS_H_

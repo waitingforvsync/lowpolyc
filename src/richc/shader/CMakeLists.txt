@@ -11,6 +11,7 @@ add_library(richc_shader STATIC
     src/check_decl.c
     src/check_entry.c
     src/check_expr.c
+    src/check_graph.c
     src/check_stmt.c
     src/check_type.c
     src/error.c
@@ -25,6 +26,7 @@ add_library(richc_shader STATIC
     src/package_c.c
     src/parser.c
     src/types.c
+    src/writer.c
     include/richc/shader/shader.h
     include/richc/shader/wgsl.h
     src/ast.h
@@ -38,6 +40,7 @@ add_library(richc_shader STATIC
     src/lexer.h
     src/parser.h
     src/types.h
+    src/writer.h
 )
 
 target_include_directories(richc_shader
@@ -78,15 +81,21 @@ endif()
 # Translate WGSL files for target. Each becomes a header holding its shader package, which the
 # target includes by the file's name: basic.wgsl as "shaders/basic.wgsl.h", defining basic_wgsl.
 function(rc_add_shaders target)
+    cmake_parse_arguments(PARSE_ARGV 1 RC_SHADERS "" "" "TARGETS")
     set(directory ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-    foreach(source ${ARGN})
+    set(targets)
+    if(RC_SHADERS_TARGETS)
+        string(REPLACE ";" "," list "${RC_SHADERS_TARGETS}")
+        set(targets --targets ${list})
+    endif()
+    foreach(source ${RC_SHADERS_UNPARSED_ARGUMENTS})
         get_filename_component(path ${source} ABSOLUTE)
         get_filename_component(file ${source} NAME)
         set(header ${directory}/${file}.h)
         add_custom_command(
             OUTPUT ${header}
             COMMAND ${CMAKE_COMMAND} -E make_directory ${directory}
-            COMMAND ${RICHC_SHADER_TOOL} ${path} ${header}
+            COMMAND ${RICHC_SHADER_TOOL} ${targets} ${path} ${header}
             DEPENDS ${path} ${RICHC_SHADER_TOOL_TARGET}
             COMMENT "Translating ${file}"
             VERBATIM)

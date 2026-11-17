@@ -16,36 +16,71 @@
 #define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a).name, (b)) < 0)
 #include "richc/lower_bound.template.h"
 
-// Rows of the table, one macro for each sort of row. A type's element is an rc_wgsl_type_id without its
-// prefix. A depth texture's sampled type is f32 by its very nature, so its class says it.
-#define RC_WGSL_FN_(text, id) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_FUNCTION, \
-        .builtin = RC_WGSL_BUILTIN_##id}
-#define RC_WGSL_UNSUPPORTED_(text) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_UNSUPPORTED}
-#define RC_WGSL_ENUMERANT_(text, set, id) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_ENUMERANT, \
-        .enumerant = RC_WGSL_ENUMERANT_##set, .value = id}
-#define RC_WGSL_GENERIC_(text, id) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
-        .generator = RC_WGSL_GENERATOR_##id}
-#define RC_WGSL_SCALAR_(text, scalar) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
-        .generator = RC_WGSL_GENERATOR_SCALAR, .element = RC_WGSL_TYPE_ID_##scalar}
-#define RC_WGSL_VECTOR_(text, scalar, size) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
-        .generator = RC_WGSL_GENERATOR_VECTOR, .element = RC_WGSL_TYPE_ID_##scalar, .width = size}
-#define RC_WGSL_MATRIX_(text, scalar, c, r) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
-        .generator = RC_WGSL_GENERATOR_MATRIX, .element = RC_WGSL_TYPE_ID_##scalar, \
-        .columns = c, .rows = r}
-#define RC_WGSL_TEXTURE_(text, shape, class) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
-        .generator = RC_WGSL_GENERATOR_TEXTURE, .dim = RC_WGSL_DIM_##shape, \
-        .texture_class = RC_WGSL_TEXTURE_CLASS_##class}
-#define RC_WGSL_STORAGE_TEXTURE_(text, shape) \
-    {.name = RC_STR_INIT(text), .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
-        .generator = RC_WGSL_GENERATOR_STORAGE_TEXTURE, .dim = RC_WGSL_DIM_##shape}
+// Rows of the table, one macro for each sort of row. A type's element is an rc_wgsl_type_id
+// without its prefix. A depth texture's sampled type is f32 by its very nature, so its class says
+// it.
+#define RC_WGSL_FN_(text, id) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_FUNCTION, \
+    .builtin = RC_WGSL_BUILTIN_##id \
+}
+
+#define RC_WGSL_UNSUPPORTED_(text) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_UNSUPPORTED \
+}
+
+#define RC_WGSL_ENUMERANT_(text, set, id) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_ENUMERANT, \
+    .enumerant = RC_WGSL_ENUMERANT_##set, \
+    .value = id \
+}
+
+#define RC_WGSL_GENERIC_(text, id) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
+    .generator = RC_WGSL_GENERATOR_##id \
+}
+
+#define RC_WGSL_SCALAR_(text, scalar) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
+    .generator = RC_WGSL_GENERATOR_SCALAR, \
+    .element = RC_WGSL_TYPE_ID_##scalar \
+}
+
+#define RC_WGSL_VECTOR_(text, scalar, size) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
+    .generator = RC_WGSL_GENERATOR_VECTOR, \
+    .element = RC_WGSL_TYPE_ID_##scalar, \
+    .width = size \
+}
+
+#define RC_WGSL_MATRIX_(text, scalar, c, r) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
+    .generator = RC_WGSL_GENERATOR_MATRIX, \
+    .element = RC_WGSL_TYPE_ID_##scalar, \
+    .columns = c, \
+    .rows = r \
+}
+
+#define RC_WGSL_TEXTURE_(text, shape, class) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
+    .generator = RC_WGSL_GENERATOR_TEXTURE, \
+    .dim = RC_SHADER_DIMENSION_##shape, \
+    .texture_class = RC_WGSL_TEXTURE_CLASS_##class \
+}
+
+#define RC_WGSL_STORAGE_TEXTURE_(text, shape) { \
+    .name = RC_STR_INIT(text), \
+    .type = RC_WGSL_PREDECLARED_TYPE_GENERATOR, \
+    .generator = RC_WGSL_GENERATOR_STORAGE_TEXTURE, \
+    .dim = RC_SHADER_DIMENSION_##shape \
+}
 
 // Every predeclared name, in byte order.
 static const rc_wgsl_predeclared rc_wgsl_predeclared_names[] = {
@@ -274,96 +309,97 @@ rc_wgsl_predeclared rc_wgsl_predeclared_find(rc_str name)
     if (i < names.num && rc_str_is_equal(rc_view_wgsl_predeclared_get(names, i).name, name)) {
         return rc_view_wgsl_predeclared_get(names, i);
     }
+
     return (rc_wgsl_predeclared) {0};
 }
 
 
-rc_str rc_wgsl_builtin_name(rc_wgsl_builtin builtin)
+rc_wgsl_builtin_info rc_wgsl_builtin_info_of(rc_wgsl_builtin builtin)
 {
-    static const rc_str names[] = {
-        [RC_WGSL_BUILTIN_NONE] = RC_STR_INIT(""),
-        [RC_WGSL_BUILTIN_ABS] = RC_STR_INIT("abs"),
-        [RC_WGSL_BUILTIN_ACOS] = RC_STR_INIT("acos"),
-        [RC_WGSL_BUILTIN_ACOSH] = RC_STR_INIT("acosh"),
-        [RC_WGSL_BUILTIN_ALL] = RC_STR_INIT("all"),
-        [RC_WGSL_BUILTIN_ANY] = RC_STR_INIT("any"),
-        [RC_WGSL_BUILTIN_ARRAY_LENGTH] = RC_STR_INIT("arrayLength"),
-        [RC_WGSL_BUILTIN_ASIN] = RC_STR_INIT("asin"),
-        [RC_WGSL_BUILTIN_ASINH] = RC_STR_INIT("asinh"),
-        [RC_WGSL_BUILTIN_ATAN] = RC_STR_INIT("atan"),
-        [RC_WGSL_BUILTIN_ATAN2] = RC_STR_INIT("atan2"),
-        [RC_WGSL_BUILTIN_ATANH] = RC_STR_INIT("atanh"),
-        [RC_WGSL_BUILTIN_BITCAST] = RC_STR_INIT("bitcast"),
-        [RC_WGSL_BUILTIN_CEIL] = RC_STR_INIT("ceil"),
-        [RC_WGSL_BUILTIN_CLAMP] = RC_STR_INIT("clamp"),
-        [RC_WGSL_BUILTIN_COS] = RC_STR_INIT("cos"),
-        [RC_WGSL_BUILTIN_COSH] = RC_STR_INIT("cosh"),
-        [RC_WGSL_BUILTIN_CROSS] = RC_STR_INIT("cross"),
-        [RC_WGSL_BUILTIN_DEGREES] = RC_STR_INIT("degrees"),
-        [RC_WGSL_BUILTIN_DETERMINANT] = RC_STR_INIT("determinant"),
-        [RC_WGSL_BUILTIN_DISTANCE] = RC_STR_INIT("distance"),
-        [RC_WGSL_BUILTIN_DOT] = RC_STR_INIT("dot"),
-        [RC_WGSL_BUILTIN_DPDX] = RC_STR_INIT("dpdx"),
-        [RC_WGSL_BUILTIN_DPDX_COARSE] = RC_STR_INIT("dpdxCoarse"),
-        [RC_WGSL_BUILTIN_DPDX_FINE] = RC_STR_INIT("dpdxFine"),
-        [RC_WGSL_BUILTIN_DPDY] = RC_STR_INIT("dpdy"),
-        [RC_WGSL_BUILTIN_DPDY_COARSE] = RC_STR_INIT("dpdyCoarse"),
-        [RC_WGSL_BUILTIN_DPDY_FINE] = RC_STR_INIT("dpdyFine"),
-        [RC_WGSL_BUILTIN_EXP] = RC_STR_INIT("exp"),
-        [RC_WGSL_BUILTIN_EXP2] = RC_STR_INIT("exp2"),
-        [RC_WGSL_BUILTIN_FACE_FORWARD] = RC_STR_INIT("faceForward"),
-        [RC_WGSL_BUILTIN_FLOOR] = RC_STR_INIT("floor"),
-        [RC_WGSL_BUILTIN_FMA] = RC_STR_INIT("fma"),
-        [RC_WGSL_BUILTIN_FRACT] = RC_STR_INIT("fract"),
-        [RC_WGSL_BUILTIN_FWIDTH] = RC_STR_INIT("fwidth"),
-        [RC_WGSL_BUILTIN_FWIDTH_COARSE] = RC_STR_INIT("fwidthCoarse"),
-        [RC_WGSL_BUILTIN_FWIDTH_FINE] = RC_STR_INIT("fwidthFine"),
-        [RC_WGSL_BUILTIN_INVERSE_SQRT] = RC_STR_INIT("inverseSqrt"),
-        [RC_WGSL_BUILTIN_LENGTH] = RC_STR_INIT("length"),
-        [RC_WGSL_BUILTIN_LOG] = RC_STR_INIT("log"),
-        [RC_WGSL_BUILTIN_LOG2] = RC_STR_INIT("log2"),
-        [RC_WGSL_BUILTIN_MAX] = RC_STR_INIT("max"),
-        [RC_WGSL_BUILTIN_MIN] = RC_STR_INIT("min"),
-        [RC_WGSL_BUILTIN_MIX] = RC_STR_INIT("mix"),
-        [RC_WGSL_BUILTIN_NORMALIZE] = RC_STR_INIT("normalize"),
-        [RC_WGSL_BUILTIN_PACK2X16FLOAT] = RC_STR_INIT("pack2x16float"),
-        [RC_WGSL_BUILTIN_PACK2X16SNORM] = RC_STR_INIT("pack2x16snorm"),
-        [RC_WGSL_BUILTIN_PACK2X16UNORM] = RC_STR_INIT("pack2x16unorm"),
-        [RC_WGSL_BUILTIN_POW] = RC_STR_INIT("pow"),
-        [RC_WGSL_BUILTIN_RADIANS] = RC_STR_INIT("radians"),
-        [RC_WGSL_BUILTIN_REFLECT] = RC_STR_INIT("reflect"),
-        [RC_WGSL_BUILTIN_REFRACT] = RC_STR_INIT("refract"),
-        [RC_WGSL_BUILTIN_ROUND] = RC_STR_INIT("round"),
-        [RC_WGSL_BUILTIN_SATURATE] = RC_STR_INIT("saturate"),
-        [RC_WGSL_BUILTIN_SELECT] = RC_STR_INIT("select"),
-        [RC_WGSL_BUILTIN_SIGN] = RC_STR_INIT("sign"),
-        [RC_WGSL_BUILTIN_SIN] = RC_STR_INIT("sin"),
-        [RC_WGSL_BUILTIN_SINH] = RC_STR_INIT("sinh"),
-        [RC_WGSL_BUILTIN_SMOOTHSTEP] = RC_STR_INIT("smoothstep"),
-        [RC_WGSL_BUILTIN_SQRT] = RC_STR_INIT("sqrt"),
-        [RC_WGSL_BUILTIN_STEP] = RC_STR_INIT("step"),
-        [RC_WGSL_BUILTIN_TAN] = RC_STR_INIT("tan"),
-        [RC_WGSL_BUILTIN_TANH] = RC_STR_INIT("tanh"),
-        [RC_WGSL_BUILTIN_TEXTURE_DIMENSIONS] = RC_STR_INIT("textureDimensions"),
-        [RC_WGSL_BUILTIN_TEXTURE_LOAD] = RC_STR_INIT("textureLoad"),
-        [RC_WGSL_BUILTIN_TEXTURE_NUM_LAYERS] = RC_STR_INIT("textureNumLayers"),
-        [RC_WGSL_BUILTIN_TEXTURE_NUM_LEVELS] = RC_STR_INIT("textureNumLevels"),
-        [RC_WGSL_BUILTIN_TEXTURE_NUM_SAMPLES] = RC_STR_INIT("textureNumSamples"),
-        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE] = RC_STR_INIT("textureSample"),
-        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_BIAS] = RC_STR_INIT("textureSampleBias"),
-        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_COMPARE] = RC_STR_INIT("textureSampleCompare"),
-        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_COMPARE_LEVEL] = RC_STR_INIT("textureSampleCompareLevel"),
-        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_GRAD] = RC_STR_INIT("textureSampleGrad"),
-        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_LEVEL] = RC_STR_INIT("textureSampleLevel"),
-        [RC_WGSL_BUILTIN_TRANSPOSE] = RC_STR_INIT("transpose"),
-        [RC_WGSL_BUILTIN_TRUNC] = RC_STR_INIT("trunc"),
-        [RC_WGSL_BUILTIN_UNPACK2X16FLOAT] = RC_STR_INIT("unpack2x16float"),
-        [RC_WGSL_BUILTIN_UNPACK2X16SNORM] = RC_STR_INIT("unpack2x16snorm"),
-        [RC_WGSL_BUILTIN_UNPACK2X16UNORM] = RC_STR_INIT("unpack2x16unorm")
+    static const rc_wgsl_builtin_info infos[] = {
+        [RC_WGSL_BUILTIN_NONE] = {RC_STR_INIT(""), RC_WGSL_RULE_NONE, 0},
+        [RC_WGSL_BUILTIN_ABS] = {RC_STR_INIT("abs"), RC_WGSL_RULE_NUMERIC, 1},
+        [RC_WGSL_BUILTIN_ACOS] = {RC_STR_INIT("acos"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_ACOSH] = {RC_STR_INIT("acosh"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_ALL] = {RC_STR_INIT("all"), RC_WGSL_RULE_REDUCE, 1},
+        [RC_WGSL_BUILTIN_ANY] = {RC_STR_INIT("any"), RC_WGSL_RULE_REDUCE, 1},
+        [RC_WGSL_BUILTIN_ARRAY_LENGTH] = {RC_STR_INIT("arrayLength"), RC_WGSL_RULE_ARRAY_LENGTH, 1},
+        [RC_WGSL_BUILTIN_ASIN] = {RC_STR_INIT("asin"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_ASINH] = {RC_STR_INIT("asinh"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_ATAN] = {RC_STR_INIT("atan"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_ATAN2] = {RC_STR_INIT("atan2"), RC_WGSL_RULE_FLOAT, 2},
+        [RC_WGSL_BUILTIN_ATANH] = {RC_STR_INIT("atanh"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_BITCAST] = {RC_STR_INIT("bitcast"), RC_WGSL_RULE_BITCAST, 1},
+        [RC_WGSL_BUILTIN_CEIL] = {RC_STR_INIT("ceil"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_CLAMP] = {RC_STR_INIT("clamp"), RC_WGSL_RULE_NUMERIC, 3},
+        [RC_WGSL_BUILTIN_COS] = {RC_STR_INIT("cos"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_COSH] = {RC_STR_INIT("cosh"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_CROSS] = {RC_STR_INIT("cross"), RC_WGSL_RULE_CROSS, 2},
+        [RC_WGSL_BUILTIN_DEGREES] = {RC_STR_INIT("degrees"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_DETERMINANT] = {RC_STR_INIT("determinant"), RC_WGSL_RULE_DETERMINANT, 1},
+        [RC_WGSL_BUILTIN_DISTANCE] = {RC_STR_INIT("distance"), RC_WGSL_RULE_LENGTH, 2},
+        [RC_WGSL_BUILTIN_DOT] = {RC_STR_INIT("dot"), RC_WGSL_RULE_DOT, 2},
+        [RC_WGSL_BUILTIN_DPDX] = {RC_STR_INIT("dpdx"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_DPDX_COARSE] = {RC_STR_INIT("dpdxCoarse"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_DPDX_FINE] = {RC_STR_INIT("dpdxFine"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_DPDY] = {RC_STR_INIT("dpdy"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_DPDY_COARSE] = {RC_STR_INIT("dpdyCoarse"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_DPDY_FINE] = {RC_STR_INIT("dpdyFine"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_EXP] = {RC_STR_INIT("exp"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_EXP2] = {RC_STR_INIT("exp2"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_FACE_FORWARD] = {RC_STR_INIT("faceForward"), RC_WGSL_RULE_FLOAT_VECTOR, 3},
+        [RC_WGSL_BUILTIN_FLOOR] = {RC_STR_INIT("floor"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_FMA] = {RC_STR_INIT("fma"), RC_WGSL_RULE_FLOAT, 3},
+        [RC_WGSL_BUILTIN_FRACT] = {RC_STR_INIT("fract"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_FWIDTH] = {RC_STR_INIT("fwidth"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_FWIDTH_COARSE] = {RC_STR_INIT("fwidthCoarse"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_FWIDTH_FINE] = {RC_STR_INIT("fwidthFine"), RC_WGSL_RULE_DERIVATIVE, 1},
+        [RC_WGSL_BUILTIN_INVERSE_SQRT] = {RC_STR_INIT("inverseSqrt"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_LENGTH] = {RC_STR_INIT("length"), RC_WGSL_RULE_LENGTH, 1},
+        [RC_WGSL_BUILTIN_LOG] = {RC_STR_INIT("log"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_LOG2] = {RC_STR_INIT("log2"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_MAX] = {RC_STR_INIT("max"), RC_WGSL_RULE_NUMERIC, 2},
+        [RC_WGSL_BUILTIN_MIN] = {RC_STR_INIT("min"), RC_WGSL_RULE_NUMERIC, 2},
+        [RC_WGSL_BUILTIN_MIX] = {RC_STR_INIT("mix"), RC_WGSL_RULE_MIX, 3},
+        [RC_WGSL_BUILTIN_NORMALIZE] = {RC_STR_INIT("normalize"), RC_WGSL_RULE_FLOAT_VECTOR, 1},
+        [RC_WGSL_BUILTIN_PACK2X16FLOAT] = {RC_STR_INIT("pack2x16float"), RC_WGSL_RULE_PACK, 1},
+        [RC_WGSL_BUILTIN_PACK2X16SNORM] = {RC_STR_INIT("pack2x16snorm"), RC_WGSL_RULE_PACK, 1},
+        [RC_WGSL_BUILTIN_PACK2X16UNORM] = {RC_STR_INIT("pack2x16unorm"), RC_WGSL_RULE_PACK, 1},
+        [RC_WGSL_BUILTIN_POW] = {RC_STR_INIT("pow"), RC_WGSL_RULE_FLOAT, 2},
+        [RC_WGSL_BUILTIN_RADIANS] = {RC_STR_INIT("radians"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_REFLECT] = {RC_STR_INIT("reflect"), RC_WGSL_RULE_FLOAT_VECTOR, 2},
+        [RC_WGSL_BUILTIN_REFRACT] = {RC_STR_INIT("refract"), RC_WGSL_RULE_REFRACT, 3},
+        [RC_WGSL_BUILTIN_ROUND] = {RC_STR_INIT("round"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_SATURATE] = {RC_STR_INIT("saturate"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_SELECT] = {RC_STR_INIT("select"), RC_WGSL_RULE_SELECT, 3},
+        [RC_WGSL_BUILTIN_SIGN] = {RC_STR_INIT("sign"), RC_WGSL_RULE_SIGNED, 1},
+        [RC_WGSL_BUILTIN_SIN] = {RC_STR_INIT("sin"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_SINH] = {RC_STR_INIT("sinh"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_SMOOTHSTEP] = {RC_STR_INIT("smoothstep"), RC_WGSL_RULE_FLOAT, 3},
+        [RC_WGSL_BUILTIN_SQRT] = {RC_STR_INIT("sqrt"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_STEP] = {RC_STR_INIT("step"), RC_WGSL_RULE_FLOAT, 2},
+        [RC_WGSL_BUILTIN_TAN] = {RC_STR_INIT("tan"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_TANH] = {RC_STR_INIT("tanh"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_TEXTURE_DIMENSIONS] = {RC_STR_INIT("textureDimensions"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_LOAD] = {RC_STR_INIT("textureLoad"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_NUM_LAYERS] = {RC_STR_INIT("textureNumLayers"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_NUM_LEVELS] = {RC_STR_INIT("textureNumLevels"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_NUM_SAMPLES] = {RC_STR_INIT("textureNumSamples"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE] = {RC_STR_INIT("textureSample"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_BIAS] = {RC_STR_INIT("textureSampleBias"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_COMPARE] = {RC_STR_INIT("textureSampleCompare"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_COMPARE_LEVEL] = {RC_STR_INIT("textureSampleCompareLevel"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_GRAD] = {RC_STR_INIT("textureSampleGrad"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TEXTURE_SAMPLE_LEVEL] = {RC_STR_INIT("textureSampleLevel"), RC_WGSL_RULE_TEXTURE, 0},
+        [RC_WGSL_BUILTIN_TRANSPOSE] = {RC_STR_INIT("transpose"), RC_WGSL_RULE_TRANSPOSE, 1},
+        [RC_WGSL_BUILTIN_TRUNC] = {RC_STR_INIT("trunc"), RC_WGSL_RULE_FLOAT, 1},
+        [RC_WGSL_BUILTIN_UNPACK2X16FLOAT] = {RC_STR_INIT("unpack2x16float"), RC_WGSL_RULE_UNPACK, 1},
+        [RC_WGSL_BUILTIN_UNPACK2X16SNORM] = {RC_STR_INIT("unpack2x16snorm"), RC_WGSL_RULE_UNPACK, 1},
+        [RC_WGSL_BUILTIN_UNPACK2X16UNORM] = {RC_STR_INIT("unpack2x16unorm"), RC_WGSL_RULE_UNPACK, 1}
     };
 
-    RC_ASSERT(builtin < RC_COUNT(names));
-    return names[builtin];
+    RC_ASSERT(builtin < RC_COUNT(infos));
+    return infos[builtin];
 }
 
 #undef RC_WGSL_STORAGE_TEXTURE_
@@ -375,3 +411,34 @@ rc_str rc_wgsl_builtin_name(rc_wgsl_builtin builtin)
 #undef RC_WGSL_ENUMERANT_
 #undef RC_WGSL_UNSUPPORTED_
 #undef RC_WGSL_FN_
+
+
+bool rc_wgsl_builtin_is_sampled(rc_wgsl_builtin builtin)
+{
+    switch (builtin) {
+    case RC_WGSL_BUILTIN_TEXTURE_SAMPLE:
+    case RC_WGSL_BUILTIN_TEXTURE_SAMPLE_BIAS:
+    case RC_WGSL_BUILTIN_TEXTURE_SAMPLE_COMPARE:
+    case RC_WGSL_BUILTIN_TEXTURE_SAMPLE_COMPARE_LEVEL:
+    case RC_WGSL_BUILTIN_TEXTURE_SAMPLE_GRAD:
+    case RC_WGSL_BUILTIN_TEXTURE_SAMPLE_LEVEL:
+        return true;
+    default:
+        return false;
+    }
+}
+
+
+bool rc_wgsl_builtin_is_texture(rc_wgsl_builtin builtin)
+{
+    switch (builtin) {
+    case RC_WGSL_BUILTIN_TEXTURE_DIMENSIONS:
+    case RC_WGSL_BUILTIN_TEXTURE_LOAD:
+    case RC_WGSL_BUILTIN_TEXTURE_NUM_LAYERS:
+    case RC_WGSL_BUILTIN_TEXTURE_NUM_LEVELS:
+    case RC_WGSL_BUILTIN_TEXTURE_NUM_SAMPLES:
+        return true;
+    default:
+        return rc_wgsl_builtin_is_sampled(builtin);
+    }
+}

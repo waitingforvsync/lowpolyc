@@ -35,12 +35,14 @@ static rc_str texts(rc_str source, rc_arena *arena)
     if (rc_wgsl_error_is_set(lexed.error)) {
         return lexed.error.message;
     }
+
     for (uint32_t i = 0; i + 1 < lexed.tokens.num; i++) {
         rc_wgsl_token token = rc_view_wgsl_token_get(lexed.tokens, i);
 
         if (i > 0) {
             rc_mstr_append_char(&out, ' ', arena);
         }
+
         if (token.type == RC_WGSL_TOKEN_TYPE_TEMPLATE_START) {
             rc_mstr_append(&out, RC_STR("<T"), arena);
         }
@@ -63,6 +65,7 @@ static rc_wgsl_token_type only_type(rc_str source, rc_arena *arena)
     if (lexed.tokens.num != 2 || rc_view_wgsl_token_get(lexed.tokens, 0).len != source.len) {
         return RC_WGSL_TOKEN_TYPE_NONE;
     }
+
     return (rc_wgsl_token_type)rc_view_wgsl_token_get(lexed.tokens, 0).type;
 }
 
@@ -120,8 +123,7 @@ RC_TEST_STEP(lexer, a_comment_that_never_ends, fix)
 RC_TEST_STEP(lexer, unicode_blankspace, fix)
 {
     // Next line, the two marks, and the line and paragraph separators
-    RC_CHECK(texts(RC_STR("a\xc2\x85" "b\xe2\x80\x8e" "c\xe2\x80\x8f" "d\xe2\x80\xa8" "e\xe2\x80\xa9"),
-        &fix->a), ==, RC_STR("a b c d e"));
+    RC_CHECK(texts(RC_STR("a\xc2\x85" "b\xe2\x80\x8e" "c\xe2\x80\x8f" "d\xe2\x80\xa8" "e\xe2\x80\xa9"), &fix->a), ==, RC_STR("a b c d e"));
 }
 
 // ---- words ----
@@ -160,17 +162,14 @@ RC_TEST_STEP(lexer, every_keyword, fix)
 
 RC_TEST_STEP(lexer, reserved_words, fix)
 {
-    RC_CHECK(error_of(RC_STR("x class"), &fix->a).message, ==,
-        RC_STR("'class' is a reserved word"));
+    RC_CHECK(error_of(RC_STR("x class"), &fix->a).message, ==, RC_STR("'class' is a reserved word"));
     RC_CHECK(error_of(RC_STR("x class"), &fix->a).offset, ==, 2u);
 
     // The first, the last, and some around the underscores
     RC_CHECK(error_of(RC_STR("NULL"), &fix->a).message, ==, RC_STR("'NULL' is a reserved word"));
     RC_CHECK(error_of(RC_STR("yield"), &fix->a).message, ==, RC_STR("'yield' is a reserved word"));
-    RC_CHECK(error_of(RC_STR("const_cast"), &fix->a).message, ==,
-        RC_STR("'const_cast' is a reserved word"));
-    RC_CHECK(error_of(RC_STR("constexpr"), &fix->a).message, ==,
-        RC_STR("'constexpr' is a reserved word"));
+    RC_CHECK(error_of(RC_STR("const_cast"), &fix->a).message, ==, RC_STR("'const_cast' is a reserved word"));
+    RC_CHECK(error_of(RC_STR("constexpr"), &fix->a).message, ==, RC_STR("'constexpr' is a reserved word"));
 
     // Near misses are fine
     RC_CHECK(only_type(RC_STR("classy"), &fix->a), ==, RC_WGSL_TOKEN_TYPE_IDENT);
@@ -180,10 +179,8 @@ RC_TEST_STEP(lexer, reserved_words, fix)
 
 RC_TEST_STEP(lexer, two_underscores, fix)
 {
-    RC_CHECK(error_of(RC_STR("__x"), &fix->a).message, ==,
-        RC_STR("names can't start with two underscores"));
-    RC_CHECK(error_of(RC_STR("__"), &fix->a).message, ==,
-        RC_STR("names can't start with two underscores"));
+    RC_CHECK(error_of(RC_STR("__x"), &fix->a).message, ==, RC_STR("names can't start with two underscores"));
+    RC_CHECK(error_of(RC_STR("__"), &fix->a).message, ==, RC_STR("names can't start with two underscores"));
     RC_CHECK(only_type(RC_STR("x__"), &fix->a), ==, RC_WGSL_TOKEN_TYPE_IDENT);
 }
 
@@ -237,8 +234,7 @@ RC_TEST_STEP(lexer, malformed_numbers, fix)
     RC_CHECK(error_of(RC_STR("00u"), &fix->a).message, ==, leading);
     RC_CHECK(error_of(RC_STR("01f"), &fix->a).message, ==, leading);
     RC_CHECK(error_of(RC_STR("0x"), &fix->a).message, ==, RC_STR("this hex number has no digits"));
-    RC_CHECK(error_of(RC_STR("0x.p1"), &fix->a).message, ==,
-        RC_STR("this hex number has no digits"));
+    RC_CHECK(error_of(RC_STR("0x.p1"), &fix->a).message, ==, RC_STR("this hex number has no digits"));
     RC_CHECK(error_of(RC_STR("1e"), &fix->a).message, ==, RC_STR("this exponent has no digits"));
     RC_CHECK(error_of(RC_STR("1e+"), &fix->a).message, ==, RC_STR("this exponent has no digits"));
     RC_CHECK(error_of(RC_STR("0x1p"), &fix->a).message, ==, RC_STR("this exponent has no digits"));
@@ -354,18 +350,15 @@ RC_TEST_STEP(lexer, lines_end_every_way, fix)
 RC_TEST_STEP(lexer, templates, fix)
 {
     RC_CHECK(texts(RC_STR("vec3<f32>(1.0)"), &fix->a), ==, RC_STR("vec3 <T f32 T> ( 1.0 )"));
-    RC_CHECK(texts(RC_STR("var<private> x: i32;"), &fix->a), ==,
-        RC_STR("var <T private T> x : i32 ;"));
+    RC_CHECK(texts(RC_STR("var<private> x: i32;"), &fix->a), ==, RC_STR("var <T private T> x : i32 ;"));
     RC_CHECK(texts(RC_STR("array<f32, 4>"), &fix->a), ==, RC_STR("array <T f32 , 4 T>"));
 }
 
 
 RC_TEST_STEP(lexer, nested_templates_split_greaters, fix)
 {
-    RC_CHECK(texts(RC_STR("array<vec2<f32>>"), &fix->a), ==,
-        RC_STR("array <T vec2 <T f32 T> T>"));
-    RC_CHECK(texts(RC_STR("ptr<function, array<f32, 4>>"), &fix->a), ==,
-        RC_STR("ptr <T function , array <T f32 , 4 T> T>"));
+    RC_CHECK(texts(RC_STR("array<vec2<f32>>"), &fix->a), ==, RC_STR("array <T vec2 <T f32 T> T>"));
+    RC_CHECK(texts(RC_STR("ptr<function, array<f32, 4>>"), &fix->a), ==, RC_STR("ptr <T function , array <T f32 , 4 T> T>"));
     RC_CHECK(texts(RC_STR("a<b<c<d>>>"), &fix->a), ==, RC_STR("a <T b <T c <T d T> T> T>"));
 }
 
@@ -377,8 +370,7 @@ RC_TEST_STEP(lexer, comparisons_stay_comparisons, fix)
     RC_CHECK(texts(RC_STR("a < b || c > d"), &fix->a), ==, RC_STR("a < b || c > d"));
     RC_CHECK(texts(RC_STR("a < b && c > d"), &fix->a), ==, RC_STR("a < b && c > d"));
     RC_CHECK(texts(RC_STR("(a < b) == (c > d)"), &fix->a), ==, RC_STR("( a < b ) == ( c > d )"));
-    RC_CHECK(texts(RC_STR("x = a < b; y = c > d;"), &fix->a), ==,
-        RC_STR("x = a < b ; y = c > d ;"));
+    RC_CHECK(texts(RC_STR("x = a < b; y = c > d;"), &fix->a), ==, RC_STR("x = a < b ; y = c > d ;"));
     RC_CHECK(texts(RC_STR("a<<b"), &fix->a), ==, RC_STR("a << b"));
     RC_CHECK(texts(RC_STR("a<=b"), &fix->a), ==, RC_STR("a <= b"));
     RC_CHECK(texts(RC_STR("a[b<c]>d"), &fix->a), ==, RC_STR("a [ b < c ] > d"));
@@ -395,10 +387,8 @@ RC_TEST_STEP(lexer, the_spec_s_own_surprises, fix)
 
 RC_TEST_STEP(lexer, templates_close_before_shifts, fix)
 {
-    RC_CHECK(texts(RC_STR("vec2<i32>(x >> 1)"), &fix->a), ==,
-        RC_STR("vec2 <T i32 T> ( x >> 1 )"));
-    RC_CHECK(texts(RC_STR("x >>= vec2<u32>(1)"), &fix->a), ==,
-        RC_STR("x >>= vec2 <T u32 T> ( 1 )"));
+    RC_CHECK(texts(RC_STR("vec2<i32>(x >> 1)"), &fix->a), ==, RC_STR("vec2 <T i32 T> ( x >> 1 )"));
+    RC_CHECK(texts(RC_STR("x >>= vec2<u32>(1)"), &fix->a), ==, RC_STR("x >>= vec2 <T u32 T> ( 1 )"));
 }
 
 

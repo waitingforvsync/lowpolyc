@@ -1,20 +1,9 @@
 // glsl_names.c
 //
-// Names in GLSL. A WGSL name passes through unless GLSL reserves it (a keyword, a type, a built-in
-// function, anything starting gl_ or holding a double underscore) or it starts rc_, which our own
-// names do. Those gain a prefix of rc_u_, which keeps every name distinct: a name that changes
-// starts rc_, and one that doesn't, doesn't.
+// Names in GLSL, which reserves its keywords, types and built-in functions, and anything starting
+// gl_ (rc_writer_append_name).
 
 #include "glsl_writer.h"
-
-#define RC_ARRAY_TYPE rc_str
-#define RC_ARRAY_NAME glsl_word
-#include "richc/array.template.h"
-
-#define RC_LOWER_BOUND_TYPE rc_str
-#define RC_LOWER_BOUND_NAME glsl_word
-#define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-#include "richc/lower_bound.template.h"
 
 // GLSL's keywords, reserved words, types and built-in functions, in byte order.
 static const rc_str rc_glsl_words[] = {
@@ -134,23 +123,9 @@ static const rc_str rc_glsl_words[] = {
     RC_STR_INIT("void"), RC_STR_INIT("volatile"), RC_STR_INIT("while"), RC_STR_INIT("writeonly"),
 };
 
-// True if GLSL keeps name for itself.
-static bool rc_glsl_is_reserved(rc_str name)
-{
-    rc_view_glsl_word words = RC_VIEW(rc_glsl_words);
-    uint32_t i = rc_lower_bound_glsl_word(words, name);
-
-    if (i < words.num && rc_str_is_equal(rc_view_glsl_word_get(words, i), name)) {
-        return true;
-    }
-    return rc_str_starts_with(name, RC_STR("gl_")) || rc_str_contains(name, RC_STR("__"));
-}
-
-
 void rc_glsl_append_name(rc_mstr *out, rc_str name, rc_arena *arena)
 {
-    if (rc_glsl_is_reserved(name) || rc_str_starts_with(name, RC_STR("rc_"))) {
-        rc_mstr_append(out, RC_STR("rc_u_"), arena);
-    }
-    rc_mstr_append(out, name, arena);
+    rc_writer_reserved reserved = {.words = RC_VIEW(rc_glsl_words), .prefix = RC_STR_INIT("gl_")};
+
+    rc_writer_append_name(out, name, reserved, arena);
 }
