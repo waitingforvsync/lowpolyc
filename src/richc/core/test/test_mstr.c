@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #include "richc/arena.h"
-#include "richc/ops.h"
+#include "richc/math/math.h"
 #include "richc/test.h"
 
 // Most tests run against a fresh default arena.

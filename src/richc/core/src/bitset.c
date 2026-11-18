@@ -5,8 +5,8 @@
 #include "richc/bitset.h"
 
 #include "richc/arena.h"
+#include "richc/math/math.h"
 #include "richc/mem.h"
-#include "richc/ops.h"
 
 enum {
     // The bytes in a word, as a uint32_t for size arithmetic

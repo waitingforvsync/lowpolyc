@@ -4,7 +4,7 @@
 
 #include "richc/hash.h"
 
-#include "richc/ops.h"
+#include "richc/math/math.h"
 
 // ---- numbers ----
 

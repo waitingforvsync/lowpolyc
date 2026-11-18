@@ -3,7 +3,7 @@
 // Tests for the hashes.
 
 #include "richc/hash.h"
-#include "richc/ops.h"
+#include "richc/math/math.h"
 
 #include "richc/test.h"
 

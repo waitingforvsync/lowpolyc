@@ -243,6 +243,146 @@ void rc_test_check_str(rc_str actual, const char *op, rc_str expected, const cha
 }
 
 
+// Whether a check of two values that can only be equal or not passes.
+static bool rc_test_equality_passes(const char *op, bool equal, const char *file, int line)
+{
+    if (rc_test_op_is(op, "==")) {
+        return equal;
+    }
+
+    if (rc_test_op_is(op, "!=")) {
+        return !equal;
+    }
+
+    rc_test_unsupported(op, file, line);
+    return false;
+}
+
+
+// True if each of the num floats at actual is within the epsilon of the one at expected.
+static bool rc_test_floats_near(const float *actual, const float *expected, uint32_t num)
+{
+    for (uint32_t i = 0; i < num; i++) {
+        if (!(fabs((double)(actual[i] - expected[i])) < rc_test_epsilon)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+// Whether a check of two float vectors passes, given whether they are equal and whether
+// they are near.
+static bool rc_test_float_vector_passes(const char *op, bool equal, bool near, const char *file, int line)
+{
+    if (rc_test_op_is(op, "~=")) {
+        return near;
+    }
+
+    return rc_test_equality_passes(op, equal, file, line);
+}
+
+
+void rc_test_check_vec2i(rc_vec2i actual, const char *op, rc_vec2i expected, const char *expr, const char *file, int line)
+{
+    if (rc_test_equality_passes(op, rc_vec2i_is_equal(actual, expected), file, line)) {
+        return;
+    }
+
+    printf("[FAIL]\n%s:%d: %s: actual (%d, %d)\n", file, line, expr, (int)actual.x, (int)actual.y);
+    rc_test_fail();
+}
+
+
+void rc_test_check_vec3i(rc_vec3i actual, const char *op, rc_vec3i expected, const char *expr, const char *file, int line)
+{
+    if (rc_test_equality_passes(op, rc_vec3i_is_equal(actual, expected), file, line)) {
+        return;
+    }
+
+    printf("[FAIL]\n%s:%d: %s: actual (%d, %d, %d)\n", file, line, expr, (int)actual.x, (int)actual.y, (int)actual.z);
+    rc_test_fail();
+}
+
+
+void rc_test_check_vec2f(rc_vec2f actual, const char *op, rc_vec2f expected, const char *expr, const char *file, int line)
+{
+    bool near = rc_test_floats_near(rc_vec2f_as_floats(&actual), rc_vec2f_as_floats(&expected), 2);
+
+    if (rc_test_float_vector_passes(op, rc_vec2f_is_equal(actual, expected), near, file, line)) {
+        return;
+    }
+
+    printf("[FAIL]\n%s:%d: %s: actual (%g, %g)\n", file, line, expr, (double)actual.x, (double)actual.y);
+    rc_test_fail();
+}
+
+
+void rc_test_check_vec3f(rc_vec3f actual, const char *op, rc_vec3f expected, const char *expr, const char *file, int line)
+{
+    bool near = rc_test_floats_near(rc_vec3f_as_floats(&actual), rc_vec3f_as_floats(&expected), 3);
+
+    if (rc_test_float_vector_passes(op, rc_vec3f_is_equal(actual, expected), near, file, line)) {
+        return;
+    }
+
+    printf("[FAIL]\n%s:%d: %s: actual (%g, %g, %g)\n", file, line, expr, (double)actual.x, (double)actual.y, (double)actual.z);
+    rc_test_fail();
+}
+
+
+void rc_test_check_vec4f(rc_vec4f actual, const char *op, rc_vec4f expected, const char *expr, const char *file, int line)
+{
+    bool near = rc_test_floats_near(rc_vec4f_as_floats(&actual), rc_vec4f_as_floats(&expected), 4);
+
+    if (rc_test_float_vector_passes(op, rc_vec4f_is_equal(actual, expected), near, file, line)) {
+        return;
+    }
+
+    printf("[FAIL]\n%s:%d: %s: actual (%g, %g, %g, %g)\n", file, line, expr,
+        (double)actual.x, (double)actual.y, (double)actual.z, (double)actual.w);
+    rc_test_fail();
+}
+
+
+// Fractions are exactly ordered, so they take every comparison. rc_rational_compare never
+// overflows, and both it and rc_rational_is_equal assert their operands are valid.
+void rc_test_check_rational(rc_rational actual, const char *op, rc_rational expected, const char *expr, const char *file, int line)
+{
+    bool pass = false;
+
+    if (rc_test_op_is(op, "==")) {
+        pass = rc_rational_is_equal(actual, expected);
+    }
+    else if (rc_test_op_is(op, "!=")) {
+        pass = !rc_rational_is_equal(actual, expected);
+    }
+    else if (rc_test_op_is(op, "<")) {
+        pass = rc_rational_compare(actual, expected) < 0;
+    }
+    else if (rc_test_op_is(op, ">")) {
+        pass = rc_rational_compare(actual, expected) > 0;
+    }
+    else if (rc_test_op_is(op, "<=")) {
+        pass = rc_rational_compare(actual, expected) <= 0;
+    }
+    else if (rc_test_op_is(op, ">=")) {
+        pass = rc_rational_compare(actual, expected) >= 0;
+    }
+    else {
+        rc_test_unsupported(op, file, line);
+    }
+
+    if (pass) {
+        return;
+    }
+
+    printf("[FAIL]\n%s:%d: %s: actual %" PRId64 "/%" PRId64 "\n", file, line, expr, rc_rational_num(actual), rc_rational_denom(actual));
+    rc_test_fail();
+}
+
+
 // True if the test is in a group whose name starts with filter.
 static bool rc_test_matches(const rc_test *t, const char *filter)
 {

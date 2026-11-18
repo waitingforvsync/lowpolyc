@@ -26,6 +26,7 @@ richc.
 - [Genpools and handles](#genpools-and-handles)
 - [lower_bound](#lower_bound)
 - [The hash trie](#the-hash-trie)
+- [Math](#math)
 - [test.h](#testh)
 - [Not ported yet](#not-ported-yet)
 - [Porting Baron](#porting-baron)
@@ -78,6 +79,10 @@ find them.
     passes where it used to fail.
   - An invalid `rc_str` (`{0}`) no longer equals `RC_STR("")`.
   - An arena made outside a test is invalid once the first test has run.
+- **Math:** `component_min` and `component_max` on the float vectors, and so
+  the boxes, compare with `<` rather than calling `fminf` and `fmaxf`. A NaN
+  in the second argument now comes through, where it used to lose to the
+  other.
 
 ## Building
 
@@ -174,15 +179,24 @@ even between different arenas.
     cannot be continued past. clang-cl now takes the clang path.
   - New: `RC_STATIC_ASSERT` and `RC_NORETURN`. It now includes `<float.h>`,
     `<stdalign.h>`, `<stdbool.h>` and `<stddef.h>`.
-- **ops.h:**
-  - Removed, for now:
-    - `rc_min_*` and `rc_max_*` (`i32`, `i64`, `f32`, `f64`)
-    - `rc_sgn_i32` and `rc_sgn_i64`
-    - `rc_gcd_i32` and `rc_gcd_i64`
-    - the `rc_*_overflows_*` checks
-    - `rc_deg_to_rad`
-  - `rc_clz_*`, `rc_ctz_*`, `rc_popcount_u32` and `rc_bitcast_f32/f64` are
-    unchanged.
+- **`ops.h` is now `math/math.h`,** which also holds the scalar float
+  functions (see [Math](#math)). Include `richc/math/math.h` instead.
+- **ops.h's functions:**
+  - Unchanged: `rc_min_*` and `rc_max_*` (`i32`, `i64`, `f32`, `f64`),
+    `rc_sgn_*`, the `rc_*_overflows_*` checks, `rc_clz_*`, `rc_ctz_*`,
+    `rc_popcount_u32` and `rc_bitcast_f32/f64`.
+  - `rc_gcd_i32` and `rc_gcd_i64` work on the magnitudes in unsigned, so
+    `INT32_MIN` with `-1` no longer traps. They assert the answer fits, which
+    rules out `INT32_MIN` with `0` (or itself), where the old ones gave a
+    negative result.
+  - `rc_deg_to_rad` picks `rc_deg_to_rad_f32` or the new `rc_deg_to_rad_f64`
+    by its argument's type, so a `double` argument now gives a `double`.
+  - New: `rc_popcount_u64` and `rc_sub_overflows_u64`, so each family covers
+    both widths.
+  - New: `rc_min`, `rc_max`, `rc_sgn`, `rc_gcd`, `rc_add_overflows`,
+    `rc_sub_overflows`, `rc_mul_overflows`, `rc_clz`, `rc_ctz`, `rc_popcount`
+    and `rc_bitcast`, which pick the suffixed form by the first argument's
+    type.
   - New: `rc_bitcast_u32` and `rc_bitcast_u64`, which go the other way, from
     bits to a float or double.
   - It no longer includes `<stdlib.h>`.
@@ -441,6 +455,28 @@ After:
 #include "richc/hash_trie_foreach.template.h"
 ```
 
+## Math
+
+The headers keep their names under `richc/math/`, and their arrays under
+`richc/math/array/`. Every function not listed below is unchanged.
+
+- **The headers no longer include `<math.h>`.** Code that got `sqrtf` or
+  `floorf` through them must include it itself, or use `richc/math/math.h`.
+- **New in `richc/math/math.h`:** the float functions that are one
+  instruction on every target: `rc_sqrt`, `rc_abs`, `rc_floor`, `rc_ceil`,
+  `rc_trunc`, `rc_round_even`, `rc_copysign` and `rc_is_finite`, each in `_f32`
+  and `_f64` forms, with the unsuffixed name picking one by type.
+- **New in `richc/math/math.h`:** richc's own transcendentals, `rc_sin`,
+  `rc_cos`, `rc_tan`, `rc_asin`, `rc_acos`, `rc_atan`, `rc_atan2`, `rc_exp`,
+  `rc_log`, `rc_log2`, `rc_pow` and `rc_cbrt`, in `_f32` and `_f64` forms.
+  They are ported from musl, so they give the same bits on every target; they
+  can differ from the platform's libm in the last place, so results that used
+  `sinf` and friends may change by an ulp.
+- **More functions are out of line** (same names and behaviour, now in `.c`
+  files): the matrix inverses, `rc_mat33f_mul`, `rc_mat44f_mul`,
+  `rc_mat34f_make_lookat` and `rc_mat44f_make_ortho`.
+- **`rc_quadratic_roots.num_roots` is a `uint32_t`,** not an `int`.
+
 ## test.h
 
 - **Unchanged:** `RC_TEST`, `RC_TEST_STEP`, the group macros, `RC_CHECK`,
@@ -456,8 +492,8 @@ After:
     `rc_test_check_f64`, and a `float` left operand compares as `float`.
   - String checks never trap on an invalid `rc_str`; it only equals another
     invalid one.
-  - The vector and rational cases are gone, with those types. `test.h` no
-    longer brings in `<math.h>`.
+  - The vector and rational cases are unchanged. `test.h` no longer brings in
+    `<math.h>`.
 - **`RC_TEST_STEP_SKIP`** needs the group to define both `INIT` and `DEINIT`.
 - **A skipped test is marked by `.skip = true`** in its `rc_test`, not by a
   `NULL` function.
@@ -476,7 +512,6 @@ After:
 | `template/algorithm/bitset_foreach.h` | visit the set bits (or loop with `first_set` and `next_set`) |
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
 | `richc/zip/inflate.h` | DEFLATE and zlib decompression |
-| `richc/math/` | vectors, matrices, quaternions, rationals, polynomial solvers, and their arrays |
 | number parsing | nothing yet stood in for `strtod` and `strtol` |
 
 To use an old algorithm template before it is ported, copy it and update its

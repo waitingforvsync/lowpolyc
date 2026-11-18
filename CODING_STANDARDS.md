@@ -89,7 +89,7 @@ Minimum compilers: clang 21, gcc 15, MSVC 19.40 (Visual Studio 17.10).
 | `#embed` | Generate a C array at build time |
 | `_BitInt` | Fixed-width `<stdint.h>` types |
 | `unreachable()` from `<stddef.h>` | `RC_UNREACHABLE()` |
-| `<stdckdint.h>`, `<stdbit.h>` | `rc_*_overflows_*`, `rc_clz_*`, `rc_ctz_*`, `rc_popcount_*` in `richc/ops.h` |
+| `<stdckdint.h>`, `<stdbit.h>` | `rc_*_overflows_*`, `rc_clz_*`, `rc_ctz_*`, `rc_popcount_*` in `richc/math/math.h` |
 | Labels before declarations or at the end of a block | Put a statement or `;` after the label |
 | Empty initialiser `= {}` | `= {0}` |
 
@@ -126,7 +126,7 @@ identical.
 
 | Group | Functions | Implementation |
 |-------|-----------|----------------|
-| Instruction-backed | `rc_sqrt`, `rc_abs`, `rc_floor`, `rc_ceil`, `rc_trunc`, `rc_round_even`, `rc_copysign` | `static inline` in the header. One instruction on every target (`sqrtss`, `roundss`, `f32.sqrt`, `f32.floor`, ...). IEEE 754 requires these to be exact or correctly rounded, so hardware results already agree everywhere. |
+| Instruction-backed | `rc_sqrt`, `rc_abs`, `rc_floor`, `rc_ceil`, `rc_trunc`, `rc_round_even`, `rc_copysign` | `static inline` in `richc/math/math.h`. One instruction on every target (`sqrtss`, `roundss`, `f32.sqrt`, `f32.floor`, ...). IEEE 754 requires these to be exact or correctly rounded, so hardware results already agree everywhere. |
 | Simple | `rc_min`, `rc_max`, `rc_fmod`, `rc_round`, ... | `static inline` C, or a `.c` |
 | Transcendental | `rc_sin`, `rc_cos`, `rc_tan`, `rc_asin`, `rc_acos`, `rc_atan`, `rc_atan2`, `rc_exp`, `rc_log`, `rc_log2`, `rc_pow`, `rc_cbrt`, ... | Our own C, **one source file per function and precision** (`math/sin_f32.c`, `math/exp_f64.c`), so a program that never calls `rc_exp_f64` never links its tables. |
 
@@ -219,7 +219,10 @@ exactly.
   functions are tested exhaustively (all 2^32 inputs) against libm in double
   precision, f64 functions on large random and edge-case samples, each against
   a stated maximum ulp error. Identity: exact bit patterns for a set of inputs,
-  recorded once as golden values, checked on every target.
+  recorded once as golden values, checked on every target. The identity tests
+  run with the other tests; the accuracy ones take minutes, so they live in
+  `richc_math_accuracy`, which is built natively but run by hand after changing
+  a function.
 
 ## Platform layer
 

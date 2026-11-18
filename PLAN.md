@@ -90,7 +90,6 @@ richc (`~/dev/richc/src/core`).
 | Feature | First needed for | In the old richc |
 |---------|------------------|------------------|
 | Monotonic time | frame timing, once something animates; a frame cap where presenting does not wait | `time.h` |
-| `vec2i` and friends | window size and mouse position, after milestone 1 | `math/vec2i.h` and the rest of `math/` |
 
 ## Milestone 1: clear the screen
 

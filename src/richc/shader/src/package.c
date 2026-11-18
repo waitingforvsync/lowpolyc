@@ -6,7 +6,7 @@
 
 #include "richc/shader/wgsl.h"
 
-#include "richc/ops.h"
+#include "richc/math/math.h"
 
 #include "glsl.h"
 #include "layout.h"

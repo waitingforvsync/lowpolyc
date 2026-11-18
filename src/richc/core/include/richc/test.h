@@ -13,9 +13,10 @@
 //   RC_TEST_STEP(group, name, fix) { ... }      a test that receives the fixture
 //   RC_TEST_STEP_SKIP(group, name, fix) { ... } a fixtured test, not run
 //
-//   RC_CHECK(a, op, b)   a op b, with op one of == != < > <= >= (and ~= for
-//                        floats, a fixed-epsilon compare; only == != for
-//                        rc_str); a's type picks the check
+//   RC_CHECK(a, op, b)   a op b, with op one of == != < > <= >=; a's type picks the check. Floats
+//                        and float vectors also take ~=, each component within a fixed epsilon.
+//                        rc_str and the vectors take only == and != (and ~=); rc_rational takes all
+//                        but ~=
 //   RC_CHECK_TRUE(a), RC_CHECK_FALSE(a)
 //
 // A failing check prints file:line and the actual value, then abandons the test.
@@ -30,6 +31,8 @@
 #error "richc test: the test framework is native only and cannot be used in a wasm32 build"
 #endif
 
+#include "richc/math/rational.h"
+#include "richc/math/vec4f.h"
 #include "richc/str.h"
 
 // ---- linker-section placement ----
@@ -182,7 +185,13 @@ typedef struct rc_test {
         uint64_t: rc_test_check_u64, \
         float: rc_test_check_f32, \
         double: rc_test_check_f64, \
-        rc_str: rc_test_check_str \
+        rc_str: rc_test_check_str, \
+        rc_vec2i: rc_test_check_vec2i, \
+        rc_vec3i: rc_test_check_vec3i, \
+        rc_vec2f: rc_test_check_vec2f, \
+        rc_vec3f: rc_test_check_vec3f, \
+        rc_vec4f: rc_test_check_vec4f, \
+        rc_rational: rc_test_check_rational \
     )(a, #op, b, #a " " #op " " #b, file, line)
 
 // Check functions behind RC_CHECK, one per operand type.
@@ -192,6 +201,12 @@ void rc_test_check_u64(uint64_t actual, const char *op, uint64_t expected, const
 void rc_test_check_f32(float actual, const char *op, float expected, const char *expr, const char *file, int line);
 void rc_test_check_f64(double actual, const char *op, double expected, const char *expr, const char *file, int line);
 void rc_test_check_str(rc_str actual, const char *op, rc_str expected, const char *expr, const char *file, int line);
+void rc_test_check_vec2i(rc_vec2i actual, const char *op, rc_vec2i expected, const char *expr, const char *file, int line);
+void rc_test_check_vec3i(rc_vec3i actual, const char *op, rc_vec3i expected, const char *expr, const char *file, int line);
+void rc_test_check_vec2f(rc_vec2f actual, const char *op, rc_vec2f expected, const char *expr, const char *file, int line);
+void rc_test_check_vec3f(rc_vec3f actual, const char *op, rc_vec3f expected, const char *expr, const char *file, int line);
+void rc_test_check_vec4f(rc_vec4f actual, const char *op, rc_vec4f expected, const char *expr, const char *file, int line);
+void rc_test_check_rational(rc_rational actual, const char *op, rc_rational expected, const char *expr, const char *file, int line);
 
 // ---- running ----
 

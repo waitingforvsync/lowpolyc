@@ -11,7 +11,7 @@
 
 #include "richc/mstr.h"
 
-#include "richc/ops.h"
+#include "richc/math/math.h"
 
 enum {
     // Enough 32-bit words for the biggest integer part (1024 bits) and the longest fraction (1074
