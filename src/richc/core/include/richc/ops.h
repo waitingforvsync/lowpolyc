@@ -16,64 +16,48 @@
 // The number of zero bits above the highest set bit; 32 for 0.
 static inline uint32_t rc_clz_u32(uint32_t a)
 {
-    if (a == 0) {
-        return 32;
-    }
 #if defined(_MSC_VER) && !defined(__clang__)
     unsigned long index = 0;
 
-    _BitScanReverse(&index, a);
-    return 31u - (uint32_t)index;
+    return _BitScanReverse(&index, a) ? 31u - (uint32_t)index : 32u;
 #else
-    return (uint32_t)__builtin_clz(a);
+    return a == 0 ? 32u : (uint32_t)__builtin_clz(a);
 #endif
 }
 
 // The number of zero bits above the highest set bit; 64 for 0.
 static inline uint32_t rc_clz_u64(uint64_t a)
 {
-    if (a == 0) {
-        return 64;
-    }
 #if defined(_MSC_VER) && !defined(__clang__)
     unsigned long index = 0;
 
-    _BitScanReverse64(&index, a);
-    return 63u - (uint32_t)index;
+    return _BitScanReverse64(&index, a) ? 63u - (uint32_t)index : 64u;
 #else
-    return (uint32_t)__builtin_clzll(a);
+    return a == 0 ? 64u : (uint32_t)__builtin_clzll(a);
 #endif
 }
 
 // The number of zero bits below the lowest set bit; 32 for 0.
 static inline uint32_t rc_ctz_u32(uint32_t a)
 {
-    if (a == 0) {
-        return 32;
-    }
 #if defined(_MSC_VER) && !defined(__clang__)
     unsigned long index = 0;
 
-    _BitScanForward(&index, a);
-    return (uint32_t)index;
+    return _BitScanForward(&index, a) ? (uint32_t)index : 32u;
 #else
-    return (uint32_t)__builtin_ctz(a);
+    return a == 0 ? 32u : (uint32_t)__builtin_ctz(a);
 #endif
 }
 
 // The number of zero bits below the lowest set bit; 64 for 0.
 static inline uint32_t rc_ctz_u64(uint64_t a)
 {
-    if (a == 0) {
-        return 64;
-    }
 #if defined(_MSC_VER) && !defined(__clang__)
     unsigned long index = 0;
 
-    _BitScanForward64(&index, a);
-    return (uint32_t)index;
+    return _BitScanForward64(&index, a) ? (uint32_t)index : 64u;
 #else
-    return (uint32_t)__builtin_ctzll(a);
+    return a == 0 ? 64u : (uint32_t)__builtin_ctzll(a);
 #endif
 }
 

@@ -85,13 +85,13 @@ RC_TEST(hash, combine)
 {
     uint32_t a = rc_hash_u32(1u);
     uint32_t b = rc_hash_u32(2u);
+    uint32_t zero2 = rc_hash_combine(0u, 0u);
+    uint32_t zero3 = rc_hash_combine(zero2, 0u);
 
     RC_CHECK(rc_hash_combine(a, b), ==, rc_hash_combine(a, b));
     RC_CHECK(rc_hash_combine(a, b), !=, rc_hash_combine(b, a));
 
     // Zeros neither stay zero nor repeat, so all-zero keys of different lengths differ
-    uint32_t zero2 = rc_hash_combine(0u, 0u);
-    uint32_t zero3 = rc_hash_combine(zero2, 0u);
     RC_CHECK(zero2, !=, 0u);
     RC_CHECK(zero3, !=, zero2);
 }

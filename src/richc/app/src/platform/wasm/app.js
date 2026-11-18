@@ -4,7 +4,7 @@
 // rc_app_run has already run (it returns at once on wasm). The functions the C side imports are
 // supplied from the module richc.
 
-// Scancodes (richc/app/scancode.h, USB HID usages) by KeyboardEvent.code, which names a key's
+// Scancodes (richc/app/keys.h, USB HID usages) by KeyboardEvent.code, which names a key's
 // position whatever the layout, as scancodes do. The X11 platform has the same table by evdev code.
 const scancodes = (() => {
     const table = {
@@ -44,6 +44,14 @@ const KEY_DOWN = 1;
 const KEY_UP = 2;
 const KEY_REPEAT = 3;
 
+// rc_modifier bits (richc/app/keys.h)
+const MODIFIER_SHIFT = 1;
+const MODIFIER_CTRL = 2;
+const MODIFIER_ALT = 4;
+const MODIFIER_SUPER = 8;
+const MODIFIER_CAPS_LOCK = 16;
+const MODIFIER_NUM_LOCK = 32;
+
 // The editing keys' rc_key values (richc/app/keys.h), by KeyboardEvent.key, which follows num lock
 // as it should: with it off, the keypad's 4 is ArrowLeft
 const editingKeys = {
@@ -52,14 +60,14 @@ const editingKeys = {
     Insert: 0xf727, Delete: 0xf728, Home: 0xf729, End: 0xf72b, PageUp: 0xf72c, PageDown: 0xf72d,
 };
 
-// rc_modifier bits (richc/app/keys.h) of an event
+// The rc_modifier bits of an event
 function modifiersOf(event) {
-    return (event.shiftKey ? 1 : 0)
-        | (event.ctrlKey ? 2 : 0)
-        | (event.altKey ? 4 : 0)
-        | (event.metaKey ? 8 : 0)
-        | (event.getModifierState('CapsLock') ? 16 : 0)
-        | (event.getModifierState('NumLock') ? 32 : 0);
+    return (event.shiftKey ? MODIFIER_SHIFT : 0) |
+        (event.ctrlKey ? MODIFIER_CTRL : 0) |
+        (event.altKey ? MODIFIER_ALT : 0) |
+        (event.metaKey ? MODIFIER_SUPER : 0) |
+        (event.getModifierState('CapsLock') ? MODIFIER_CAPS_LOCK : 0) |
+        (event.getModifierState('NumLock') ? MODIFIER_NUM_LOCK : 0);
 }
 
 // The only code point in text, or undefined if it holds more or fewer.
@@ -77,39 +85,136 @@ function layoutChar(event, layoutMap) {
     if (mapped !== undefined) {
         return onlyCodepoint(mapped) ?? 0;
     }
+
     if (event.altKey || event.getModifierState('AltGraph')) {
         return 0;
     }
+
+    return unshiftedChar(event);
+}
+
+// The character KeyboardEvent.key holds, with shift undone if it was a letter's, or 0.
+function unshiftedChar(event) {
     const codepoint = onlyCodepoint(event.key);
     if (codepoint === undefined) {
         return 0;
     }
+
     if (!event.shiftKey) {
         return codepoint;
     }
+
     const lower = event.key.toLowerCase();
     return lower !== event.key ? onlyCodepoint(lower) ?? 0 : 0;
 }
 
+// True if ctrl or meta make the key press a hotkey rather than typing. AltGr can show up as
+// ctrl+alt, and then it is typing.
+function isHotkey(event) {
+    return (event.ctrlKey || event.metaKey) && !event.getModifierState('AltGraph');
+}
+
+// True for a control character, which is never typed text.
+function isControl(codepoint) {
+    return codepoint < 0x20 || (codepoint >= 0x7f && codepoint < 0xa0);
+}
+
 // What a key press types, for a char event: an editing key's rc_key, a character, or undefined.
-// KeyboardEvent.key holds the character after the layout and dead keys. Ctrl and meta with a
-// character key make a hotkey, not typing, except where AltGr shows up as ctrl+alt.
+// KeyboardEvent.key holds the character after the layout and dead keys.
 function typed(event) {
     const editing = editingKeys[event.key];
     if (editing !== undefined) {
         return editing;
     }
+
     if (event.isComposing) {
         return undefined;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.getModifierState('AltGraph')) {
+
+    if (isHotkey(event)) {
         return undefined;
     }
+
     const codepoint = onlyCodepoint(event.key);
-    if (codepoint === undefined || codepoint < 0x20 || (codepoint >= 0x7f && codepoint < 0xa0)) {
+    if (codepoint === undefined) {
         return undefined;
     }
-    return codepoint;
+
+    return isControl(codepoint) ? undefined : codepoint;
+}
+
+// Keep the keyboard layout map current, where the browser has one: it can change when the page
+// regains focus. Returns a function giving the latest map, or null.
+function watchLayoutMap() {
+    let layoutMap = null;
+    const read = () => {
+        navigator.keyboard?.getLayoutMap?.().then((map) => {
+            layoutMap = map;
+        }, () => {});
+    };
+
+    read();
+    window.addEventListener('focus', read);
+    return () => layoutMap;
+}
+
+// Send the module key and char events: one key down and one key up per press, with key repeats
+// between them, as natively.
+function listenToKeys(exports, currentLayoutMap) {
+    const { rc_wasm_key, rc_wasm_char } = exports;
+
+    // Held keys by code, with the layout character each went down with
+    const held = new Map();
+    let lastModifiers = 0;
+
+    const sendKey = (type, event, char) => {
+        lastModifiers = modifiersOf(event);
+        rc_wasm_key(type, scancodes[event.code] ?? 0, char, lastModifiers);
+    };
+
+    window.addEventListener('keydown', (event) => {
+        if (pageKeys.has(event.code)) {
+            event.preventDefault();
+        }
+
+        const repeat = held.has(event.code);
+        const char = repeat ? held.get(event.code) : layoutChar(event, currentLayoutMap());
+        held.set(event.code, char);
+        sendKey(repeat ? KEY_REPEAT : KEY_DOWN, event, char);
+
+        const codepoint = typed(event);
+        if (codepoint !== undefined) {
+            rc_wasm_char(codepoint, lastModifiers);
+        }
+    });
+
+    window.addEventListener('keyup', (event) => {
+        if (held.has(event.code)) {
+            sendKey(KEY_UP, event, held.get(event.code));
+            held.delete(event.code);
+        }
+    });
+
+    // Keys released while the page cannot see them would otherwise stay down. There is no event to
+    // read the modifiers from, so the locks stay as they were and nothing is held.
+    window.addEventListener('blur', () => {
+        const locks = lastModifiers & (MODIFIER_CAPS_LOCK | MODIFIER_NUM_LOCK);
+        for (const [code, char] of held) {
+            rc_wasm_key(KEY_UP, scancodes[code] ?? 0, char, locks);
+        }
+
+        held.clear();
+    });
+}
+
+// Call the module's frame function on every animation frame.
+function runFrames(rc_wasm_frame) {
+    const frame = () => {
+        rc_wasm_frame();
+        requestAnimationFrame(frame);
+    };
+
+    requestAnimationFrame(frame);
 }
 
 // The app on canvas. Call bind with the instance before the module runs, and run once it has.
@@ -140,65 +245,10 @@ export function createApp(canvas) {
 
         // Start the frames and key events.
         run(instance) {
-            const { rc_wasm_frame, rc_wasm_key, rc_wasm_char } = instance.exports;
-
             fit();
             new ResizeObserver(fit).observe(canvas);
-
-            // The layout map, where the browser has one; it can change when the page regains focus
-            let layoutMap = null;
-            const readLayout = () => {
-                navigator.keyboard?.getLayoutMap?.().then((map) => {
-                    layoutMap = map;
-                }, () => {});
-            };
-            readLayout();
-            window.addEventListener('focus', readLayout);
-
-            // One key down and one key up per press, with key repeats between them, as natively
-            // Held keys by code, with the layout character each went down with
-            const held = new Map();
-            let lastModifiers = 0;
-            const sendKey = (type, event, char) => {
-                lastModifiers = modifiersOf(event);
-                rc_wasm_key(type, scancodes[event.code] ?? 0, char, lastModifiers);
-            };
-            window.addEventListener('keydown', (event) => {
-                if (pageKeys.has(event.code)) {
-                    event.preventDefault();
-                }
-                const repeat = held.has(event.code);
-                const char = repeat ? held.get(event.code) : layoutChar(event, layoutMap);
-                held.set(event.code, char);
-                sendKey(repeat ? KEY_REPEAT : KEY_DOWN, event, char);
-
-                const codepoint = typed(event);
-                if (codepoint !== undefined) {
-                    rc_wasm_char(codepoint, lastModifiers);
-                }
-            });
-            window.addEventListener('keyup', (event) => {
-                if (held.has(event.code)) {
-                    sendKey(KEY_UP, event, held.get(event.code));
-                    held.delete(event.code);
-                }
-            });
-
-            // Keys released while the page cannot see them would otherwise stay down. There is no
-            // event to read the modifiers from, so the locks stay as they were and nothing is held.
-            window.addEventListener('blur', () => {
-                const locks = lastModifiers & (16 | 32);
-                for (const [code, char] of held) {
-                    rc_wasm_key(KEY_UP, scancodes[code] ?? 0, char, locks);
-                }
-                held.clear();
-            });
-
-            const frame = () => {
-                rc_wasm_frame();
-                requestAnimationFrame(frame);
-            };
-            requestAnimationFrame(frame);
+            listenToKeys(instance.exports, watchLayoutMap());
+            runFrames(instance.exports.rc_wasm_frame);
         },
     };
 }

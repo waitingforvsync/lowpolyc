@@ -3,6 +3,7 @@
 // Tests for the hash index and its template.
 
 #include "richc/hash.h"
+
 #include "richc/test.h"
 
 // A position, as in vertex coincidence. It compares with ==, so -0 and +0 match, and
@@ -30,15 +31,16 @@ typedef struct entry {
 #include "richc/array.template.h"
 
 
+// A position's hash, from its three coordinates in turn.
 static uint32_t pt_hash(pt p)
 {
-    uint32_t h = rc_hash_f32(p.x);
+    uint32_t xy = rc_hash_combine(rc_hash_f32(p.x), rc_hash_f32(p.y));
 
-    h = rc_hash_combine(h, rc_hash_f32(p.y));
-    return rc_hash_combine(h, rc_hash_f32(p.z));
+    return rc_hash_combine(xy, rc_hash_f32(p.z));
 }
 
 
+// True if the positions match, -0 and +0 alike.
 static bool pt_is_equal(pt a, pt b)
 {
     return a.x == b.x && a.y == b.y && a.z == b.z;
@@ -127,6 +129,39 @@ static uint32_t next_random(uint32_t *state)
     return *state >> 8;
 }
 
+
+// A table sized for capacity keys, holding hashes[i] at index i.
+static rc_hash_index table_of(const uint32_t *hashes, uint32_t count, uint32_t capacity, rc_arena *arena)
+{
+    rc_hash_index table = rc_hash_index_make(capacity, arena);
+
+    for (uint32_t i = 0; i < count; i++) {
+        rc_hash_index_add(&table, hashes[i], i, arena);
+    }
+    return table;
+}
+
+
+// Add the indices 0 to n - 1 to table, each under the hash of itself.
+static void add_hashed(rc_hash_index *table, uint32_t n, rc_arena *arena)
+{
+    for (uint32_t i = 0; i < n; i++) {
+        rc_hash_index_add(table, rc_hash_u32(i), i, arena);
+    }
+}
+
+
+// How many of the indices 0 to n - 1 are found under the hash of themselves.
+static uint32_t count_hashed_found(rc_hash_index table, uint32_t n)
+{
+    uint32_t found = 0;
+
+    for (uint32_t i = 0; i < n; i++) {
+        found += has_entry(table, rc_hash_u32(i), i);
+    }
+    return found;
+}
+
 // ---- the core: making and sizing ----
 
 RC_TEST(hash_index, zero_is_empty)
@@ -179,9 +214,7 @@ RC_TEST_STEP(hash_index, add_with_room_needs_no_arena, fix)
 {
     rc_hash_index table = rc_hash_index_make(6, &fix->a);
 
-    for (uint32_t i = 0; i < 6; i++) {
-        rc_hash_index_add(&table, rc_hash_u32(i), i, NULL);
-    }
+    add_hashed(&table, 6, NULL);
     RC_CHECK(table.num, ==, 6u);
     RC_CHECK(table.cap, ==, 8u);
 }
@@ -191,13 +224,10 @@ RC_TEST_STEP(hash_index, add_with_room_needs_no_arena, fix)
 RC_TEST_STEP(hash_index, probe_yields_each_match_once, fix)
 {
     // Two entries under 10 and one under 20: a multimap
-    rc_hash_index table = {0};
-
-    rc_hash_index_add(&table, 10, 0, &fix->a);
-    rc_hash_index_add(&table, 20, 1, &fix->a);
-    rc_hash_index_add(&table, 10, 2, &fix->a);
-
+    static const uint32_t hashes[] = {10, 20, 10};
+    rc_hash_index table = table_of(hashes, RC_COUNT(hashes), 0, &fix->a);
     rc_hash_index_probe probe = rc_hash_index_probe_make(table, 10);
+
     RC_CHECK(rc_hash_index_probe_next(table, &probe), ==, 0u);
     RC_CHECK(rc_hash_index_probe_next(table, &probe), ==, 2u);
     RC_CHECK(rc_hash_index_probe_next(table, &probe), ==, RC_INDEX_NONE);
@@ -224,17 +254,10 @@ RC_TEST_STEP(hash_index, grows_and_keeps_entries, fix)
 {
     rc_hash_index table = {0};
 
-    for (uint32_t i = 0; i < 1000; i++) {
-        rc_hash_index_add(&table, rc_hash_u32(i), i, &fix->a);
-    }
+    add_hashed(&table, 1000, &fix->a);
     RC_CHECK(table.num, ==, 1000u);
     RC_CHECK(table.cap, ==, 2048u);
-
-    uint32_t found = 0;
-    for (uint32_t i = 0; i < 1000; i++) {
-        found += has_entry(table, rc_hash_u32(i), i);
-    }
-    RC_CHECK(found, ==, 1000u);
+    RC_CHECK(count_hashed_found(table, 1000), ==, 1000u);
 }
 
 
@@ -243,9 +266,7 @@ RC_TEST_STEP(hash_index, grows_in_place_when_last, fix)
     rc_hash_index table = rc_hash_index_make(6, &fix->a);
     const rc_hash_index_slot_ *before = table.slots_;
 
-    for (uint32_t i = 0; i < 7; i++) {
-        rc_hash_index_add(&table, rc_hash_u32(i), i, &fix->a);
-    }
+    add_hashed(&table, 7, &fix->a);
     RC_CHECK(table.cap, ==, 16u);
     RC_CHECK_TRUE(table.slots_ == before);
 }
@@ -258,16 +279,9 @@ RC_TEST_STEP(hash_index, grows_after_other_allocations, fix)
     const rc_hash_index_slot_ *before = table.slots_;
 
     rc_arena_alloc(&fix->a, 100);
-    for (uint32_t i = 0; i < 7; i++) {
-        rc_hash_index_add(&table, rc_hash_u32(i), i, &fix->a);
-    }
+    add_hashed(&table, 7, &fix->a);
     RC_CHECK_TRUE(table.slots_ != before);
-
-    uint32_t found = 0;
-    for (uint32_t i = 0; i < 7; i++) {
-        found += has_entry(table, rc_hash_u32(i), i);
-    }
-    RC_CHECK(found, ==, 7u);
+    RC_CHECK(count_hashed_found(table, 7), ==, 7u);
 }
 
 
@@ -276,11 +290,8 @@ RC_TEST_STEP(hash_index, growing_rehashes_wrapped_runs, fix)
     // In 8 slots, the hashes all have home 7, so the run wraps to slots 0 to 3. In 16, four have
     // home 15 and wrap again, and 7 stays at home.
     static const uint32_t hashes[] = {15, 31, 47, 63, 7};
-    rc_hash_index table = rc_hash_index_make(6, &fix->a);
+    rc_hash_index table = table_of(hashes, RC_COUNT(hashes), 6, &fix->a);
 
-    for (uint32_t i = 0; i < 5; i++) {
-        rc_hash_index_add(&table, hashes[i], i, &fix->a);
-    }
     rc_hash_index_reserve(&table, 7, &fix->a);
     RC_CHECK(table.cap, ==, 16u);
     for (uint32_t i = 0; i < 5; i++) {
@@ -397,9 +408,7 @@ RC_TEST_STEP(hash_index, reset_keeps_slots, fix)
 {
     rc_hash_index table = {0};
 
-    for (uint32_t i = 0; i < 20; i++) {
-        rc_hash_index_add(&table, rc_hash_u32(i), i, &fix->a);
-    }
+    add_hashed(&table, 20, &fix->a);
     rc_hash_index_reset(&table);
     RC_CHECK(table.num, ==, 0u);
     RC_CHECK(table.cap, ==, 32u);
@@ -455,6 +464,7 @@ RC_TEST_STEP(hash_index, find_or_add_gathers_unique_positions, fix)
         if (i == unique.num) {
             rc_array_pt_push(&unique, corners[c], NULL);
         }
+
         RC_CHECK(i, ==, expected[c]);
     }
     RC_CHECK(unique.num, ==, 4u);
@@ -464,27 +474,46 @@ RC_TEST_STEP(hash_index, find_or_add_gathers_unique_positions, fix)
 }
 
 
+// An index of every key in keys.
+static rc_hash_index u32_index_of(rc_view_u32 keys, rc_arena *arena)
+{
+    rc_hash_index table = {0};
+
+    for (uint32_t i = 0; i < keys.num; i++) {
+        rc_hash_index_u32_add(&table, keys, i, arena);
+    }
+    return table;
+}
+
+
 RC_TEST_STEP(hash_index, add_indexes_existing_data, fix)
 {
     // Indexing an array after the fact, duplicates and all
     static uint32_t keys_data[] = {5, 9, 5, 12};
     rc_view_u32 keys = RC_VIEW(keys_data);
-    rc_hash_index table = {0};
+    rc_hash_index table = u32_index_of(keys, &fix->a);
 
-    for (uint32_t i = 0; i < keys.num; i++) {
-        rc_hash_index_u32_add(&table, keys, i, &fix->a);
-    }
     RC_CHECK(table.num, ==, 4u);
     RC_CHECK(rc_hash_index_u32_find(table, keys, 9), ==, 1u);
     RC_CHECK(rc_hash_index_u32_find(table, keys, 12), ==, 3u);
     RC_CHECK(count_entries(table, rc_hash_u32(5)), ==, 2u);
 
-    // Each remove takes one of the two entries for 5
-    uint32_t first = rc_hash_index_u32_remove(&table, keys, 5);
-    uint32_t second = rc_hash_index_u32_remove(&table, keys, 5);
-    RC_CHECK(first + second, ==, 2u);
+    // Each remove takes one of the two entries for 5, at indices 0 and 2
+    RC_CHECK(rc_hash_index_u32_remove(&table, keys, 5) + rc_hash_index_u32_remove(&table, keys, 5), ==, 2u);
     RC_CHECK(rc_hash_index_u32_remove(&table, keys, 5), ==, RC_INDEX_NONE);
     RC_CHECK(table.num, ==, 2u);
+}
+
+
+// An index of every entry in entries, by key.
+static rc_hash_index entry_index_of(rc_view_entry entries, rc_arena *arena)
+{
+    rc_hash_index table = {0};
+
+    for (uint32_t i = 0; i < entries.num; i++) {
+        rc_hash_index_entry_add(&table, entries, i, arena);
+    }
+    return table;
 }
 
 
@@ -492,15 +521,23 @@ RC_TEST_STEP(hash_index, keys_inside_structs, fix)
 {
     static entry entries_data[] = {{3, 30}, {7, 70}, {11, 110}};
     rc_view_entry entries = RC_VIEW(entries_data);
-    rc_hash_index table = {0};
+    rc_hash_index table = entry_index_of(entries, &fix->a);
+    uint32_t seven = rc_hash_index_entry_find(table, entries, 7);
 
-    for (uint32_t i = 0; i < entries.num; i++) {
-        rc_hash_index_entry_add(&table, entries, i, &fix->a);
-    }
-
-    uint32_t i = rc_hash_index_entry_find(table, entries, 7);
-    RC_CHECK(rc_view_entry_get(entries, i).value, ==, 70);
+    RC_CHECK(rc_view_entry_get(entries, seven).value, ==, 70);
     RC_CHECK_FALSE(rc_hash_index_entry_contains(table, entries, 4));
+}
+
+
+// How many of keys the index finds at their own index.
+static uint32_t count_found_in_place(rc_hash_index table, rc_view_u32 keys)
+{
+    uint32_t found = 0;
+
+    for (uint32_t i = 0; i < keys.num; i++) {
+        found += rc_hash_index_u32_find(table, keys, rc_view_u32_get(keys, i)) == i;
+    }
+    return found;
 }
 
 
@@ -524,22 +561,69 @@ RC_TEST_STEP(hash_index, swap_remove_keeps_data_dense, fix)
             RC_CHECK_TRUE(rc_hash_index_u32_move(&table, keys.view, last, i));
             rc_array_u32_set(&keys, i, rc_array_u32_get(&keys, last));
         }
+
         rc_array_u32_pop(&keys);
     }
     RC_CHECK(keys.num, ==, 37u);
     RC_CHECK(table.num, ==, 37u);
 
     // Every key left is found where it now lives, and the removed ones are gone
-    uint32_t right = 0;
-    for (uint32_t i = 0; i < keys.num; i++) {
-        right += rc_hash_index_u32_find(table, keys.view, rc_array_u32_get(&keys, i)) == i;
-    }
-    RC_CHECK(right, ==, 37u);
+    RC_CHECK(count_found_in_place(table, keys.view), ==, 37u);
     RC_CHECK_FALSE(rc_hash_index_u32_contains(table, keys.view, 0));
     RC_CHECK_FALSE(rc_hash_index_u32_contains(table, keys.view, 12));
 }
 
 // ---- randomised, against a plain search ----
+
+// Add key to keys and the weak index, unless it is there already.
+static void weak_add(rc_hash_index *table, rc_array_u32 *keys, uint32_t key, rc_arena *arena)
+{
+    uint32_t i = rc_hash_index_weak_find_or_add(table, keys->view, key, keys->num, arena);
+
+    if (i == keys->num) {
+        rc_array_u32_push(keys, key, arena);
+    }
+}
+
+
+// Remove key from the weak index, if there, filling its gap in keys with the last key.
+static void weak_swap_remove(rc_hash_index *table, rc_array_u32 *keys, uint32_t key)
+{
+    uint32_t i = rc_hash_index_weak_remove(table, keys->view, key);
+    uint32_t last = keys->num - 1;
+
+    if (i == RC_INDEX_NONE) {
+        return;
+    }
+
+    if (i != last) {
+        rc_hash_index_weak_move(table, keys->view, last, i);
+        rc_array_u32_set(keys, i, rc_array_u32_get(keys, last));
+    }
+
+    rc_array_u32_pop(keys);
+}
+
+
+// How many of the keys below 200 the weak index finds somewhere other than a plain search does,
+// plus one if the counts differ.
+static uint32_t weak_mismatches(rc_hash_index table, rc_view_u32 keys)
+{
+    uint32_t where[200] = {0};
+    uint32_t mismatches = table.num != keys.num;
+
+    for (uint32_t k = 0; k < 200; k++) {
+        where[k] = RC_INDEX_NONE;
+    }
+    for (uint32_t i = 0; i < keys.num; i++) {
+        where[rc_view_u32_get(keys, i)] = i;
+    }
+    for (uint32_t k = 0; k < 200; k++) {
+        mismatches += rc_hash_index_weak_find(table, keys, k) != where[k];
+    }
+    return mismatches;
+}
+
 
 // Random adds and swap-removes of keys below 200 with a weak hash, checking after each change
 // that every key below 200 is found exactly where a plain search of the keys finds it.
@@ -555,39 +639,13 @@ RC_TEST_STEP(hash_index, random_changes_match_a_plain_search, fix)
 
         // Mostly adds early on, mostly removes later, so the table grows and drains
         if (next_random(&state) % 4000 >= step) {
-            uint32_t i = rc_hash_index_weak_find_or_add(&table, keys.view, key, keys.num, &fix->a);
-
-            if (i == keys.num) {
-                rc_array_u32_push(&keys, key, &fix->a);
-            }
+            weak_add(&table, &keys, key, &fix->a);
         }
         else {
-            uint32_t i = rc_hash_index_weak_remove(&table, keys.view, key);
-
-            if (i != RC_INDEX_NONE) {
-                uint32_t last = keys.num - 1;
-
-                if (i != last) {
-                    rc_hash_index_weak_move(&table, keys.view, last, i);
-                    rc_array_u32_set(&keys, i, rc_array_u32_get(&keys, last));
-                }
-                rc_array_u32_pop(&keys);
-            }
+            weak_swap_remove(&table, &keys, key);
         }
 
-        // Where a plain search finds each key
-        uint32_t where[200];
-        for (uint32_t k = 0; k < 200; k++) {
-            where[k] = RC_INDEX_NONE;
-        }
-        for (uint32_t i = 0; i < keys.num; i++) {
-            where[rc_array_u32_get(&keys, i)] = i;
-        }
-
-        mismatches += table.num != keys.num;
-        for (uint32_t k = 0; k < 200; k++) {
-            mismatches += rc_hash_index_weak_find(table, keys.view, k) != where[k];
-        }
+        mismatches += weak_mismatches(table, keys.view);
     }
     RC_CHECK(mismatches, ==, 0u);
 }

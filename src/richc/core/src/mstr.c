@@ -7,24 +7,54 @@
 #include "richc/arena.h"
 #include "richc/mem.h"
 
-// Make room for n more characters and the terminator, growing to the larger of double the capacity,
-// the need, or 8, as rc_array does. Panics (in release too) if the length would wrap: we would skip
-// the growth and write past the end.
-static void rc_mstr_grow(rc_mstr *s, uint32_t n, rc_arena *arena)
+// Make the buffer hold need bytes, growing it to the larger of double the capacity, the need, or 8,
+// as rc_array does.
+static void rc_mstr_reserve_geometric(rc_mstr *s, uint32_t need, rc_arena *arena)
 {
-    RC_PANIC(n < UINT32_MAX - s->len);
+    uint32_t doubled = s->cap > UINT32_MAX / 2 ? UINT32_MAX : s->cap * 2;
+    uint32_t new_cap = need > doubled ? need : doubled;
 
-    uint32_t need = s->len + n + 1;
     if (need <= s->cap) {
         return;
     }
 
-    uint32_t doubled = s->cap > UINT32_MAX / 2 ? UINT32_MAX : s->cap * 2;
-    uint32_t new_cap = need > doubled ? need : doubled;
-    if (new_cap < 8) {
-        new_cap = 8;
+    rc_mstr_reserve(s, new_cap < 8 ? 8 : new_cap, arena);
+}
+
+
+// Make room for n more characters and the terminator. Panics (in release too) if the length would
+// wrap: we would skip the growth and write past the end.
+static void rc_mstr_grow(rc_mstr *s, uint32_t n, rc_arena *arena)
+{
+    RC_PANIC(n < UINT32_MAX - s->len);
+    rc_mstr_reserve_geometric(s, s->len + n + 1, arena);
+}
+
+
+// A new string holding a copy of s, which is valid and leaves room for its terminator.
+static rc_mstr rc_mstr_copy_of(rc_str s, uint32_t minimum_capacity, rc_arena *arena)
+{
+    uint32_t need = s.len + 1;
+    uint32_t cap = need > minimum_capacity ? need : minimum_capacity;
+    char *data = rc_arena_alloc(arena, cap);
+
+    rc_memcpy(data, s.data, s.len);
+    data[s.len] = '\0';
+    return (rc_mstr) {.data = data, .len = s.len, .cap = cap};
+}
+
+
+// Move the text into a buffer of capacity bytes. realloc of NULL allocates, so this also gives an
+// invalid string its first buffer, which then needs its terminator.
+static void rc_mstr_realloc(rc_mstr *s, uint32_t capacity, rc_arena *arena)
+{
+    bool was_invalid = s->data == NULL;
+
+    s->data = rc_arena_realloc(arena, s->data, s->cap, capacity);
+    s->cap = capacity;
+    if (was_invalid) {
+        s->data[0] = '\0';
     }
-    rc_mstr_reserve(s, new_cap, arena);
 }
 
 
@@ -50,12 +80,7 @@ rc_mstr rc_mstr_from_str(rc_str s, uint32_t minimum_capacity, rc_arena *arena)
     }
 
     RC_PANIC(s.len < UINT32_MAX);
-    uint32_t need = s.len + 1;
-    rc_mstr m = rc_mstr_make(need > minimum_capacity ? need : minimum_capacity, arena);
-    rc_memcpy(m.data, s.data, s.len);
-    m.data[s.len] = '\0';
-    m.len = s.len;
-    return m;
+    return rc_mstr_copy_of(s, minimum_capacity, arena);
 }
 
 
@@ -75,6 +100,7 @@ void rc_mstr_release(rc_mstr *s, rc_arena *arena)
     if (s->data) {
         rc_arena_free(arena, s->data, s->cap);
     }
+
     *s = (rc_mstr) {0};
 }
 
@@ -85,16 +111,9 @@ void rc_mstr_reserve(rc_mstr *s, uint32_t capacity, rc_arena *arena)
     if (capacity <= s->cap) {
         return;
     }
-    RC_ASSERT(arena);
 
-    // realloc of NULL allocates, so this also gives an invalid string its first buffer, which then
-    // needs its terminator
-    bool was_invalid = s->data == NULL;
-    s->data = rc_arena_realloc(arena, s->data, s->cap, capacity);
-    s->cap = capacity;
-    if (was_invalid) {
-        s->data[0] = '\0';
-    }
+    RC_ASSERT(arena);
+    rc_mstr_realloc(s, capacity, arena);
 }
 
 
@@ -140,15 +159,15 @@ void rc_mstr_append_n(rc_mstr *s, char c, uint32_t n, rc_arena *arena)
 void rc_mstr_append_u64(rc_mstr *s, uint64_t value, rc_arena *arena)
 {
     // 2^64 - 1 is twenty digits, the widest we can be asked for
-    char buf[20];
-    uint32_t i = sizeof buf;
+    char buf[20] = {0};
+    uint32_t i = RC_COUNT(buf);
 
     // Built back to front, no printf in sight
     do {
         buf[--i] = (char)('0' + value % 10);
         value /= 10;
     } while (value != 0);
-    rc_mstr_append(s, rc_str_from_ptr(buf + i, sizeof buf - i), arena);
+    rc_mstr_append(s, rc_str_from_ptr(buf + i, RC_COUNT(buf) - i), arena);
 }
 
 
@@ -179,7 +198,7 @@ void rc_mstr_append_i32(rc_mstr *s, int32_t value, rc_arena *arena)
 static void rc_mstr_append_hex(rc_mstr *s, uint64_t value, uint32_t digits, rc_arena *arena)
 {
     static const char hex_digit[] = "0123456789ABCDEF";
-    char buf[16];
+    char buf[16] = {0};
 
     for (uint32_t i = 0; i < digits; i++) {
         buf[digits - 1 - i] = hex_digit[(value >> (4 * i)) & 0xF];
@@ -232,6 +251,59 @@ static char *rc_mstr_replace_into(char *dst, const char *src, const char *end, r
 }
 
 
+// The number of non-overlapping matches of find, which is not empty, in text.
+static uint32_t rc_mstr_count_matches(rc_str text, rc_str find)
+{
+    uint32_t count = 0;
+    rc_str rest = text;
+
+    for (uint32_t pos = rc_str_find_first(rest, find); pos != RC_INDEX_NONE; pos = rc_str_find_first(rest, find)) {
+        count++;
+        rest = rc_str_drop_first(rest, pos + find.len);
+    }
+
+    return count;
+}
+
+
+// Write the text, which starts shift bytes into the buffer, back from the start with its count
+// matches of find replaced, ending at new_len.
+static void rc_mstr_rewrite(rc_mstr *s, uint32_t shift, rc_str find, rc_str replacement, uint32_t count, uint32_t new_len)
+{
+    char *text = s->data + shift;
+    char *end = rc_mstr_replace_into(s->data, text, text + s->len, find, replacement, count);
+
+    RC_ASSERT(end == s->data + new_len);
+    *end = '\0';
+    s->len = new_len;
+}
+
+
+// Replace the count matches of find in s with replacement.
+static void rc_mstr_replace_counted(rc_mstr *s, rc_str find, rc_str replacement, uint32_t count, rc_arena *arena)
+{
+    // The new length can outgrow 32 bits, so we work it out in 64
+    uint64_t new_len = (uint64_t)s->len - (uint64_t)count * find.len + (uint64_t)count * replacement.len;
+    uint32_t shift = new_len > s->len ? (uint32_t)(new_len - s->len) : 0;
+
+    if (count == 0) {
+        return;
+    }
+
+    RC_PANIC(new_len < UINT32_MAX);
+
+    // When the string grows, its text first moves up so it ends where the result will. Writing from
+    // the start then closes on the reading by the growth of one match at a time, and catches up
+    // only as the last byte is read.
+    if (shift > 0) {
+        rc_mstr_grow(s, shift, arena);
+        rc_memmove(s->data + shift, s->data, s->len);
+    }
+
+    rc_mstr_rewrite(s, shift, find, replacement, count, (uint32_t)new_len);
+}
+
+
 void rc_mstr_replace(rc_mstr *s, rc_str find, rc_str replacement, rc_arena *arena)
 {
     RC_ASSERT(s);
@@ -241,34 +313,5 @@ void rc_mstr_replace(rc_mstr *s, rc_str find, rc_str replacement, rc_arena *aren
         return;
     }
 
-    // Count the non-overlapping matches
-    uint32_t count = 0;
-    rc_str rest = s->view;
-    for (uint32_t pos = rc_str_find_first(rest, find); pos != RC_INDEX_NONE; pos = rc_str_find_first(rest, find)) {
-        count++;
-        rest = rc_str_drop_first(rest, pos + find.len);
-    }
-    if (count == 0) {
-        return;
-    }
-
-    // The new length can outgrow 32 bits, so we work it out in 64
-    uint64_t new_len = (uint64_t)s->len - (uint64_t)count * find.len + (uint64_t)count * replacement.len;
-    RC_PANIC(new_len < UINT32_MAX);
-
-    // When the string grows, its text first moves up so it ends where the result will. Writing from
-    // the start then closes on the reading by the growth of one match at a time, and catches up
-    // only as the last byte is read.
-    uint32_t shift = 0;
-    if (new_len > s->len) {
-        shift = (uint32_t)new_len - s->len;
-        rc_mstr_grow(s, shift, arena);
-        rc_memmove(s->data + shift, s->data, s->len);
-    }
-
-    char *text = s->data + shift;
-    char *end = rc_mstr_replace_into(s->data, text, text + s->len, find, replacement, count);
-    RC_ASSERT(end == s->data + new_len);
-    *end = '\0';
-    s->len = (uint32_t)new_len;
+    rc_mstr_replace_counted(s, find, replacement, rc_mstr_count_matches(s->view, find), arena);
 }

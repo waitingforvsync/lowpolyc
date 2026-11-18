@@ -82,12 +82,10 @@ static uint32_t rc_hash_scramble(uint32_t k)
 }
 
 
-uint32_t rc_hash_bytes(const void *data, uint32_t len)
+// The 4-byte blocks mixed in turn, from a hash of 0. Each is read a byte at a time, so the bytes
+// need no alignment.
+static uint32_t rc_hash_blocks(const uint8_t *bytes, uint32_t num_blocks)
 {
-    // Murmur3, 32-bit, seed 0: the 4-byte blocks, then the last 1 to 3 bytes, then the length,
-    // and finally the finaliser. The blocks are read a byte at a time, so data needs no alignment.
-    const uint8_t *bytes = data;
-    uint32_t num_blocks = len / 4;
     uint32_t h = 0;
 
     for (uint32_t i = 0; i < num_blocks; i++) {
@@ -98,15 +96,32 @@ uint32_t rc_hash_bytes(const void *data, uint32_t len)
         h = rc_hash_rotl(h, 13);
         h = h * 5 + 0xE6546B64u;
     }
+    return h;
+}
 
-    // A missing tail scrambles to 0, so changes nothing
+
+// The 0 to 3 bytes from start up to len, as a little-endian word. A missing tail is 0, which
+// scrambles to 0, so changes nothing.
+static uint32_t rc_hash_tail(const uint8_t *bytes, uint32_t start, uint32_t len)
+{
     uint32_t tail = 0;
-    for (uint32_t i = num_blocks * 4; i < len; i++) {
+
+    for (uint32_t i = start; i < len; i++) {
         tail |= (uint32_t)bytes[i] << (8 * (i % 4));
     }
-    h ^= rc_hash_scramble(tail);
-    h ^= len;
-    return rc_hash_u32(h);
+    return tail;
+}
+
+
+uint32_t rc_hash_bytes(const void *data, uint32_t len)
+{
+    // Murmur3, 32-bit, seed 0: the 4-byte blocks, then the last 1 to 3 bytes, then the length,
+    // and finally the finaliser
+    const uint8_t *bytes = data;
+    uint32_t num_blocks = len / 4;
+    uint32_t h = rc_hash_blocks(bytes, num_blocks) ^ rc_hash_scramble(rc_hash_tail(bytes, num_blocks * 4, len));
+
+    return rc_hash_u32(h ^ len);
 }
 
 

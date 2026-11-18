@@ -25,11 +25,13 @@ static bool rc_fs_widen(rc_str path, wchar_t name[RC_FS_MAX_PATH])
         if (path.len >= RC_FS_MAX_PATH) {
             return false;
         }
+
         len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data, (int)path.len, name, RC_FS_MAX_PATH - 1);
         if (len == 0) {
             return false;
         }
     }
+
     name[len] = L'\0';
     return true;
 }
@@ -65,34 +67,99 @@ static bool rc_fs_is_directory(const wchar_t *name)
 }
 
 
+// True if name is a file, not a directory.
+static bool rc_fs_is_file(const wchar_t *name)
+{
+    DWORD attributes = GetFileAttributesW(name);
+
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+
+// The rc_file_error for a failed open of name. Opening a directory is refused as access denied; we
+// call it not found, as POSIX does.
+static rc_file_error rc_fs_open_error(const wchar_t *name)
+{
+    rc_file_error error = rc_fs_error_from_last();
+
+    if (error == RC_FILE_ERROR_ACCESS_DENIED && rc_fs_is_directory(name)) {
+        return RC_FILE_ERROR_NOT_FOUND;
+    }
+
+    return error;
+}
+
+
+// The file just opened from name, if it opened, with its size.
+static rc_fs_open_result rc_fs_open_result_of(HANDLE file, const wchar_t *name)
+{
+    LARGE_INTEGER size = {0};
+
+    if (file == INVALID_HANDLE_VALUE) {
+        return (rc_fs_open_result) {.error = (uint8_t)rc_fs_open_error(name)};
+    }
+
+    if (!GetFileSizeEx(file, &size)) {
+        CloseHandle(file);
+        return (rc_fs_open_result) {.error = RC_FILE_ERROR_IO};
+    }
+
+    return (rc_fs_open_result) {
+        .handle = (uintptr_t)file,
+        .size = (uint64_t)size.QuadPart
+    };
+}
+
+
+// Write all size bytes at data to file. As with reads, a write may take less than offered.
+static rc_file_error rc_fs_write_all(HANDLE file, const void *data, uint32_t size)
+{
+    const uint8_t *at = data;
+
+    while (size > 0) {
+        DWORD put = 0;
+
+        if (!WriteFile(file, at, size, &put, NULL) || put == 0) {
+            return RC_FILE_ERROR_IO;
+        }
+
+        at += put;
+        size -= put;
+    }
+
+    return RC_FILE_ERROR_NONE;
+}
+
+
+// Write size bytes to the file just created, if it was, and close it.
+static rc_file_error rc_fs_write_opened(HANDLE file, const void *data, uint32_t size)
+{
+    if (file == INVALID_HANDLE_VALUE) {
+        return rc_fs_error_from_last();
+    }
+
+    if (rc_fs_write_all(file, data, size) != RC_FILE_ERROR_NONE) {
+        CloseHandle(file);
+        return RC_FILE_ERROR_IO;
+    }
+
+    if (!CloseHandle(file)) {
+        return RC_FILE_ERROR_IO;
+    }
+
+    return RC_FILE_ERROR_NONE;
+}
+
+
 rc_fs_open_result rc_fs_open(rc_str path)
 {
-    wchar_t name[RC_FS_MAX_PATH];
+    wchar_t name[RC_FS_MAX_PATH] = {0};
 
     if (!rc_fs_widen(path, name)) {
         return (rc_fs_open_result) {.error = RC_FILE_ERROR_BAD_NAME};
     }
 
-    // Opening a directory is refused as access denied; we call it not found, as POSIX does
-    HANDLE file = CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) {
-        rc_file_error error = rc_fs_error_from_last();
-
-        if (error == RC_FILE_ERROR_ACCESS_DENIED && rc_fs_is_directory(name)) {
-            error = RC_FILE_ERROR_NOT_FOUND;
-        }
-        return (rc_fs_open_result) {.error = (uint8_t)error};
-    }
-
-    LARGE_INTEGER size;
-    if (!GetFileSizeEx(file, &size)) {
-        CloseHandle(file);
-        return (rc_fs_open_result) {.error = RC_FILE_ERROR_IO};
-    }
-    return (rc_fs_open_result) {
-        .handle = (uintptr_t)file,
-        .size = (uint64_t)size.QuadPart
-    };
+    return rc_fs_open_result_of(CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL), name);
 }
 
 
@@ -107,9 +174,11 @@ rc_file_error rc_fs_read(uintptr_t handle, void *dst, uint32_t size)
         if (!ReadFile((HANDLE)handle, at, size, &got, NULL) || got == 0) {
             return RC_FILE_ERROR_IO;
         }
+
         at += got;
         size -= got;
     }
+
     return RC_FILE_ERROR_NONE;
 }
 
@@ -122,59 +191,39 @@ void rc_fs_close(uintptr_t handle)
 
 rc_file_error rc_fs_write(rc_str path, const void *data, uint32_t size)
 {
-    wchar_t name[RC_FS_MAX_PATH];
+    wchar_t name[RC_FS_MAX_PATH] = {0};
 
     if (!rc_fs_widen(path, name)) {
         return RC_FILE_ERROR_BAD_NAME;
     }
 
-    HANDLE file = CreateFileW(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) {
-        return rc_fs_error_from_last();
-    }
-
-    // As with reads, a write may take less than offered
-    const uint8_t *at = data;
-    while (size > 0) {
-        DWORD put = 0;
-
-        if (!WriteFile(file, at, size, &put, NULL) || put == 0) {
-            CloseHandle(file);
-            return RC_FILE_ERROR_IO;
-        }
-        at += put;
-        size -= put;
-    }
-
-    if (!CloseHandle(file)) {
-        return RC_FILE_ERROR_IO;
-    }
-    return RC_FILE_ERROR_NONE;
+    return rc_fs_write_opened(CreateFileW(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL), data, size);
 }
 
 
 rc_file_error rc_fs_delete(rc_str path)
 {
-    wchar_t name[RC_FS_MAX_PATH];
+    wchar_t name[RC_FS_MAX_PATH] = {0};
 
     if (!rc_fs_widen(path, name)) {
         return RC_FILE_ERROR_BAD_NAME;
     }
+
     if (!DeleteFileW(name)) {
         return rc_fs_error_from_last();
     }
+
     return RC_FILE_ERROR_NONE;
 }
 
 
 bool rc_fs_exists(rc_str path)
 {
-    wchar_t name[RC_FS_MAX_PATH];
+    wchar_t name[RC_FS_MAX_PATH] = {0};
 
     if (!rc_fs_widen(path, name)) {
         return false;
     }
 
-    DWORD attributes = GetFileAttributesW(name);
-    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    return rc_fs_is_file(name);
 }

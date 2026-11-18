@@ -59,17 +59,14 @@
 // read before its callback, so the callback's changes to values cannot upset the walk.
 static inline void RC_HASH_TRIE_FOREACH_NAME(RC_HASH_TRIE_FOREACH_TRIE trie, RC_HASH_TRIE_FOREACH_PARAMS_)
 {
-    if (trie.root_ == 0) {
-        return;
-    }
+    // An empty trie has no root block waiting
+    uint32_t waiting[RC_HASH_TRIE_FOREACH_WALK_MAX_] = {trie.root_ - 1};
+    uint32_t num_waiting = trie.root_ != 0 ? 1u : 0u;
 
-    uint32_t waiting[RC_HASH_TRIE_FOREACH_WALK_MAX_];
-    uint32_t num_waiting = 1;
-    waiting[0] = trie.root_ - 1;
     while (num_waiting > 0) {
-        num_waiting--;
+        uint32_t block = waiting[num_waiting - 1];
 
-        uint32_t block = waiting[num_waiting];
+        num_waiting--;
         for (uint32_t slot = 0; slot < RC_HASH_TRIE_FOREACH_WIDTH_; slot++) {
             const RC_HASH_TRIE_FOREACH_NODE_ *node = &RC_HASH_TRIE_FOREACH_AT_(pool, block)->nodes[slot];
             uint32_t child = node->child_;
@@ -77,11 +74,13 @@ static inline void RC_HASH_TRIE_FOREACH_NAME(RC_HASH_TRIE_FOREACH_TRIE trie, RC_
             if (child == RC_HASH_TRIE_EMPTY_) {
                 continue;
             }
+
             if (child >= RC_HASH_TRIE_BLOCK_LINK_) {
                 RC_ASSERT(num_waiting < RC_HASH_TRIE_FOREACH_WALK_MAX_);
                 waiting[num_waiting] = child - RC_HASH_TRIE_BLOCK_LINK_;
                 num_waiting++;
             }
+
             RC_HASH_TRIE_FOREACH_CALL_(block * RC_HASH_TRIE_FOREACH_WIDTH_ + slot);
         }
     }

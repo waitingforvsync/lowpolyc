@@ -51,12 +51,27 @@ RC_TEST_GROUP_DEINIT(array, fix)
 }
 
 
-// Push 0, 1, ..., n - 1.
-static void push_count(rc_array_i32 *a, uint32_t n, rc_arena *arena)
+// An array grown by pushing the n values in turn.
+static rc_array_i32 pushed(const int32_t *values, uint32_t n, rc_arena *arena)
 {
+    rc_array_i32 a = {0};
+
     for (uint32_t i = 0; i < n; i++) {
-        rc_array_i32_push(a, (int32_t)i, arena);
+        rc_array_i32_push(&a, values[i], arena);
     }
+    return a;
+}
+
+
+// An array grown by pushing 0, 1, ..., n - 1.
+static rc_array_i32 counted(uint32_t n, rc_arena *arena)
+{
+    rc_array_i32 a = {0};
+
+    for (uint32_t i = 0; i < n; i++) {
+        rc_array_i32_push(&a, (int32_t)i, arena);
+    }
+    return a;
 }
 
 
@@ -66,6 +81,7 @@ static bool view_is(rc_view_i32 v, const int32_t *expect, uint32_t n)
     if (v.num != n) {
         return false;
     }
+
     for (uint32_t i = 0; i < n; i++) {
         if (rc_view_i32_get(v, i) != expect[i]) {
             return false;
@@ -182,10 +198,8 @@ RC_TEST(array, make_copy_empty)
 
 RC_TEST_STEP(array, get_set_at, fix)
 {
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {10, 20}, 2, &fix->a);
 
-    rc_array_i32_push(&a, 10, &fix->a);
-    rc_array_i32_push(&a, 20, &fix->a);
     RC_CHECK(rc_array_i32_get(&a, 0), ==, 10);
     rc_array_i32_set(&a, 0, 99);
     RC_CHECK(rc_array_i32_get(&a, 0), ==, 99);
@@ -210,15 +224,12 @@ RC_TEST_STEP(array, last_at, fix)
 RC_TEST_STEP(array, rc_at, fix)
 {
     // The convenience macro, as an lvalue on arrays, spans and views alike
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {11, 22}, 2, &fix->a);
+    rc_span_i32 s = a.span;
 
-    rc_array_i32_push(&a, 11, &fix->a);
-    rc_array_i32_push(&a, 22, &fix->a);
     RC_CHECK(RC_AT(a, 0), ==, 11);
     RC_AT(a, 1) = 33;
     RC_CHECK(rc_array_i32_get(&a, 1), ==, 33);
-
-    rc_span_i32 s = a.span;
     RC_AT(s, 0) = 44;
     RC_CHECK(RC_AT(a.view, 0), ==, 44);
 }
@@ -276,6 +287,7 @@ RC_TEST_STEP(array, push_growth, fix)
         if (a.cap != cap) {
             grows++;
         }
+
         if (i == 0) {
             RC_CHECK(a.cap, ==, 8u);
         }
@@ -289,11 +301,9 @@ RC_TEST_STEP(array, push_growth, fix)
 
 RC_TEST_STEP(array, push_n, fix)
 {
-    rc_array_i32 a = {0};
-
-    rc_array_i32_push(&a, 1, &fix->a);
-
+    rc_array_i32 a = pushed((int32_t[]) {1}, 1, &fix->a);
     uint32_t first = rc_array_i32_push_n(&a, 3, &fix->a);
+
     RC_CHECK(first, ==, 1u);
     RC_CHECK(a.num, ==, 4u);
     for (uint32_t i = first; i < a.num; i++) {
@@ -306,11 +316,9 @@ RC_TEST_STEP(array, push_n, fix)
 
 RC_TEST_STEP(array, push_n_zero, fix)
 {
-    rc_array_i32 a = {0};
-
-    rc_array_i32_push(&a, 5, &fix->a);
-
+    rc_array_i32 a = pushed((int32_t[]) {5}, 1, &fix->a);
     uint32_t first = rc_array_i32_push_n_zero(&a, 2, &fix->a);
+
     RC_CHECK(first, ==, 1u);
     RC_CHECK(a.num, ==, 3u);
     RC_CHECK(rc_array_i32_get(&a, 0), ==, 5);
@@ -321,9 +329,8 @@ RC_TEST_STEP(array, push_n_zero, fix)
 
 RC_TEST_STEP(array, push_n_none, fix)
 {
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(2, &fix->a);
 
-    push_count(&a, 2, &fix->a);
     RC_CHECK(rc_array_i32_push_n(&a, 0, NULL), ==, 2u);
     RC_CHECK(rc_array_i32_push_n_zero(&a, 0, NULL), ==, 2u);
     RC_CHECK(a.num, ==, 2u);
@@ -332,10 +339,8 @@ RC_TEST_STEP(array, push_n_none, fix)
 
 RC_TEST_STEP(array, pop, fix)
 {
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {10, 20}, 2, &fix->a);
 
-    rc_array_i32_push(&a, 10, &fix->a);
-    rc_array_i32_push(&a, 20, &fix->a);
     RC_CHECK(rc_array_i32_pop(&a), ==, 20);
     RC_CHECK(a.num, ==, 1u);
     RC_CHECK(rc_array_i32_pop(&a), ==, 10);
@@ -345,9 +350,8 @@ RC_TEST_STEP(array, pop, fix)
 
 RC_TEST_STEP(array, pop_n, fix)
 {
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(5, &fix->a);
 
-    push_count(&a, 5, &fix->a);
     rc_array_i32_pop_n(&a, 2);
     RC_CHECK(a.num, ==, 3u);
     RC_CHECK(rc_array_i32_get(&a, 2), ==, 2);
@@ -363,9 +367,8 @@ RC_TEST_STEP(array, append, fix)
     int32_t more[] = {2, 3, 4};
     int32_t expect[] = {1, 2, 3, 4};
     rc_view_i32 v = RC_VIEW(more);
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {1}, 1, &fix->a);
 
-    rc_array_i32_push(&a, 1, &fix->a);
     RC_CHECK(rc_array_i32_append(&a, v, &fix->a), ==, 1u);
     RC_CHECK_TRUE(view_is(a.view, expect, 4));
 }
@@ -378,7 +381,7 @@ RC_TEST_STEP(array, append_empty, fix)
 
     RC_CHECK(rc_array_i32_append(&a, (rc_view_i32) {0}, NULL), ==, 0u);
     RC_CHECK_FALSE(rc_array_i32_is_valid(&a));
-    push_count(&a, 3, &fix->a);
+    rc_array_i32_append(&a, counted(3, &fix->a).view, &fix->a);
     RC_CHECK(rc_array_i32_append(&a, (rc_view_i32) {0}, NULL), ==, 3u);
     RC_CHECK(a.num, ==, 3u);
 }
@@ -388,10 +391,8 @@ RC_TEST_STEP(array, append_other_array, fix)
 {
     int32_t expect[] = {9, 8};
     rc_array_i32 a = {0};
-    rc_array_i32 b = {0};
+    rc_array_i32 b = pushed((int32_t[]) {9, 8}, 2, &fix->a);
 
-    rc_array_i32_push(&b, 9, &fix->a);
-    rc_array_i32_push(&b, 8, &fix->a);
     rc_array_i32_append(&a, b.view, &fix->a);
     RC_CHECK_TRUE(view_is(a.view, expect, 2));
 }
@@ -416,9 +417,7 @@ RC_TEST_STEP(array, reserve, fix)
 RC_TEST_STEP(array, reserve_keeps_elements, fix)
 {
     int32_t expect[] = {0, 1, 2};
-    rc_array_i32 a = {0};
-
-    push_count(&a, 3, &fix->a);
+    rc_array_i32 a = counted(3, &fix->a);
 
     // Another allocation after it means the buffer has to move to grow
     rc_arena_alloc(&fix->a, 16);
@@ -429,11 +428,9 @@ RC_TEST_STEP(array, reserve_keeps_elements, fix)
 
 RC_TEST_STEP(array, resize_grow, fix)
 {
-    rc_array_i32 a = {0};
-
-    rc_array_i32_push(&a, 7, &fix->a);
-
+    rc_array_i32 a = pushed((int32_t[]) {7}, 1, &fix->a);
     rc_span_i32 s = rc_array_i32_resize(&a, 4, &fix->a);
+
     RC_CHECK(a.num, ==, 4u);
     RC_CHECK(a.cap, ==, 8u);
     RC_CHECK(s.num, ==, 4u);
@@ -457,10 +454,10 @@ RC_TEST_STEP(array, resize_exact_capacity, fix)
 RC_TEST_STEP(array, resize_shrink, fix)
 {
     rc_array_i32 a = {0};
-
-    rc_array_i32_resize(&a, 5, &fix->a);
-
+    rc_span_i32 grown = rc_array_i32_resize(&a, 5, &fix->a);
     rc_span_i32 s = rc_array_i32_resize(&a, 2, NULL);
+
+    RC_CHECK(grown.num, ==, 5u);
     RC_CHECK(a.num, ==, 2u);
     RC_CHECK(a.cap, ==, 5u);
     RC_CHECK(s.num, ==, 2u);
@@ -470,11 +467,9 @@ RC_TEST_STEP(array, resize_shrink, fix)
 RC_TEST_STEP(array, resize_zero_grow, fix)
 {
     int32_t expect[] = {7, 0, 0, 0};
-    rc_array_i32 a = {0};
-
-    rc_array_i32_push(&a, 7, &fix->a);
-
+    rc_array_i32 a = pushed((int32_t[]) {7}, 1, &fix->a);
     rc_span_i32 s = rc_array_i32_resize_zero(&a, 4, &fix->a);
+
     RC_CHECK_TRUE(view_is(s.view, expect, 4));
     RC_CHECK_TRUE(view_is(a.view, expect, 4));
 }
@@ -484,19 +479,13 @@ RC_TEST_STEP(array, resize_zero_shrink_and_regrow, fix)
 {
     int32_t one[] = {1};
     int32_t regrown[] = {1, 0, 0};
-    rc_array_i32 a = {0};
-
-    rc_array_i32_push(&a, 1, &fix->a);
-    rc_array_i32_push(&a, 2, &fix->a);
-    rc_array_i32_push(&a, 3, &fix->a);
+    rc_array_i32 a = pushed((int32_t[]) {1, 2, 3}, 3, &fix->a);
 
     // Shrinking is the same as resize
-    rc_span_i32 s = rc_array_i32_resize_zero(&a, 1, NULL);
-    RC_CHECK_TRUE(view_is(s.view, one, 1));
+    RC_CHECK_TRUE(view_is(rc_array_i32_resize_zero(&a, 1, NULL).view, one, 1));
 
     // Growing back within capacity zeroes the stale 2 and 3
-    s = rc_array_i32_resize_zero(&a, 3, NULL);
-    RC_CHECK_TRUE(view_is(s.view, regrown, 3));
+    RC_CHECK_TRUE(view_is(rc_array_i32_resize_zero(&a, 3, NULL).view, regrown, 3));
 }
 
 
@@ -504,12 +493,11 @@ RC_TEST_STEP(array, resize_zero_same_size_and_empty, fix)
 {
     int32_t five[] = {5};
     int32_t zeros[] = {0, 0, 0};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed(five, 1, &fix->a);
     rc_array_i32 e = {0};
     rc_array_i32 z = {0};
 
     // The same size has no new elements to zero
-    rc_array_i32_push(&a, 5, &fix->a);
     RC_CHECK_TRUE(view_is(rc_array_i32_resize_zero(&a, 1, NULL).view, five, 1));
 
     // Growing the zero value zeroes everything
@@ -523,11 +511,9 @@ RC_TEST_STEP(array, resize_zero_same_size_and_empty, fix)
 
 RC_TEST_STEP(array, reset, fix)
 {
-    rc_array_i32 a = {0};
-
-    push_count(&a, 2, &fix->a);
-
+    rc_array_i32 a = counted(2, &fix->a);
     uint32_t cap = a.cap;
+
     rc_array_i32_reset(&a);
     RC_CHECK(a.num, ==, 0u);
     RC_CHECK(a.cap, ==, cap);
@@ -536,9 +522,8 @@ RC_TEST_STEP(array, reset, fix)
 
 RC_TEST_STEP(array, release, fix)
 {
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(2, &fix->a);
 
-    push_count(&a, 2, &fix->a);
     rc_array_i32_release(&a, &fix->a);
     RC_CHECK(a.num, ==, 0u);
     RC_CHECK(a.cap, ==, 0u);
@@ -554,9 +539,8 @@ RC_TEST_STEP(array, release_reclaims_last, fix)
 {
     // As the arena's last allocation, the buffer goes straight back
     rc_arena_mark before = rc_arena_save(&fix->a);
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(100, &fix->a);
 
-    push_count(&a, 100, &fix->a);
     rc_array_i32_release(&a, &fix->a);
     RC_CHECK(rc_arena_save(&fix->a).top, ==, before.top);
 }
@@ -568,10 +552,8 @@ RC_TEST_STEP(array, insert, fix)
 {
     int32_t middle[] = {1, 2, 3};
     int32_t ends[] = {0, 1, 2, 3, 4};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {1, 3}, 2, &fix->a);
 
-    rc_array_i32_push(&a, 1, &fix->a);
-    rc_array_i32_push(&a, 3, &fix->a);
     rc_array_i32_insert(&a, 1, 2, &fix->a);
     RC_CHECK_TRUE(view_is(a.view, middle, 3));
     rc_array_i32_insert(&a, 3, 4, &fix->a);
@@ -593,10 +575,8 @@ RC_TEST_STEP(array, insert_into_empty, fix)
 RC_TEST_STEP(array, insert_n, fix)
 {
     int32_t expect[] = {1, 2, 3, 4};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {1, 4}, 2, &fix->a);
 
-    rc_array_i32_push(&a, 1, &fix->a);
-    rc_array_i32_push(&a, 4, &fix->a);
     rc_array_i32_insert_n(&a, 1, 2, &fix->a);
     RC_CHECK(a.num, ==, 4u);
     rc_array_i32_set(&a, 1, 2);
@@ -608,9 +588,8 @@ RC_TEST_STEP(array, insert_n, fix)
 RC_TEST_STEP(array, insert_n_ends, fix)
 {
     int32_t expect[] = {0, 0, 5, 0, 0};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {5}, 1, &fix->a);
 
-    rc_array_i32_push(&a, 5, &fix->a);
     rc_array_i32_insert_n_zero(&a, 0, 2, &fix->a);
     rc_array_i32_insert_n_zero(&a, 3, 2, &fix->a);
     RC_CHECK_TRUE(view_is(a.view, expect, 5));
@@ -620,10 +599,8 @@ RC_TEST_STEP(array, insert_n_ends, fix)
 RC_TEST_STEP(array, insert_n_zero, fix)
 {
     int32_t expect[] = {1, 0, 0, 4};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = pushed((int32_t[]) {1, 4}, 2, &fix->a);
 
-    rc_array_i32_push(&a, 1, &fix->a);
-    rc_array_i32_push(&a, 4, &fix->a);
     rc_array_i32_insert_n_zero(&a, 1, 2, &fix->a);
     RC_CHECK_TRUE(view_is(a.view, expect, 4));
 }
@@ -632,9 +609,8 @@ RC_TEST_STEP(array, insert_n_zero, fix)
 RC_TEST_STEP(array, insert_n_none, fix)
 {
     int32_t expect[] = {0, 1};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(2, &fix->a);
 
-    push_count(&a, 2, &fix->a);
     rc_array_i32_insert_n(&a, 1, 0, NULL);
     rc_array_i32_insert_n_zero(&a, 2, 0, NULL);
     RC_CHECK_TRUE(view_is(a.view, expect, 2));
@@ -645,9 +621,8 @@ RC_TEST_STEP(array, remove, fix)
 {
     int32_t middle[] = {0, 2, 3};
     int32_t ends[] = {2};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(4, &fix->a);
 
-    push_count(&a, 4, &fix->a);
     rc_array_i32_remove(&a, 1);
     RC_CHECK_TRUE(view_is(a.view, middle, 3));
     rc_array_i32_remove(&a, 2);
@@ -662,9 +637,8 @@ RC_TEST_STEP(array, remove_n, fix)
 {
     int32_t middle[] = {0, 3, 4};
     int32_t last[] = {0};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(5, &fix->a);
 
-    push_count(&a, 5, &fix->a);
     rc_array_i32_remove_n(&a, 1, 2);
     RC_CHECK_TRUE(view_is(a.view, middle, 3));
     rc_array_i32_remove_n(&a, 1, 2);
@@ -677,10 +651,9 @@ RC_TEST_STEP(array, remove_n, fix)
 RC_TEST_STEP(array, remove_n_none, fix)
 {
     int32_t expect[] = {0, 1, 2};
-    rc_array_i32 a = {0};
+    rc_array_i32 a = counted(3, &fix->a);
     rc_array_i32 z = {0};
 
-    push_count(&a, 3, &fix->a);
     rc_array_i32_remove_n(&a, 1, 0);
     rc_array_i32_remove_n(&a, 3, 0);
     RC_CHECK_TRUE(view_is(a.view, expect, 3));
@@ -710,11 +683,9 @@ RC_TEST(array, view_span_macros)
 
 RC_TEST_STEP(array, array_to_span_and_view, fix)
 {
-    rc_array_i32 a = {0};
-
-    rc_array_i32_push(&a, 1, &fix->a);
-
+    rc_array_i32 a = pushed((int32_t[]) {1}, 1, &fix->a);
     rc_span_i32 s = a.span;
+
     RC_CHECK(s.num, ==, 1u);
     rc_span_i32_set(s, 0, 77);
     RC_CHECK(rc_array_i32_get(&a, 0), ==, 77);
@@ -764,19 +735,26 @@ RC_TEST(span, make)
 }
 
 
+// A span of n -1s, freed again, so whatever is made next over it starts dirty.
+static rc_span_i32 dirtied_and_freed(uint32_t n, rc_arena *arena)
+{
+    rc_span_i32 dirty = rc_span_i32_make(n, arena);
+
+    for (uint32_t i = 0; i < dirty.num; i++) {
+        rc_span_i32_set(dirty, i, -1);
+    }
+    rc_arena_free(arena, dirty.data, (uint32_t)(dirty.num * sizeof(int32_t)));
+    return dirty;
+}
+
+
 RC_TEST(span, make_zero)
 {
     int32_t zeros[] = {0, 0, 0, 0};
     rc_arena arena = rc_arena_make_default();
-
-    // Dirty the memory first, so the zeroing is seen to happen
-    rc_span_i32 dirty = rc_span_i32_make(4, &arena);
-    for (uint32_t i = 0; i < dirty.num; i++) {
-        rc_span_i32_set(dirty, i, -1);
-    }
-    rc_arena_free(&arena, dirty.data, (uint32_t)(dirty.num * sizeof(int32_t)));
-
+    rc_span_i32 dirty = dirtied_and_freed(4, &arena);
     rc_span_i32 s = rc_span_i32_make_zero(4, &arena);
+
     RC_CHECK_TRUE(s.data == dirty.data);
     RC_CHECK_TRUE(view_is(s.view, zeros, 4));
     rc_arena_release(&arena);
@@ -909,7 +887,7 @@ RC_TEST(span, reverse)
 {
     // Every length up to 33, odd and even, including 0 and 1
     for (uint32_t n = 0; n <= 33; n++) {
-        int32_t a[40];
+        int32_t a[40] = {0};
 
         for (uint32_t i = 0; i < n; i++) {
             a[i] = (int32_t)i;
@@ -955,7 +933,7 @@ RC_TEST(span, rotate_exhaustive)
     // Rotating left by k puts the element from (i + k) % n at i, for every n and k up to 33
     for (uint32_t n = 0; n <= 33; n++) {
         for (uint32_t k = 0; k <= n + 2; k++) {
-            int32_t a[40];
+            int32_t a[40] = {0};
 
             for (uint32_t i = 0; i < n; i++) {
                 a[i] = (int32_t)i;

@@ -11,8 +11,8 @@ import { createPrint } from './richc/print.js';
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
 
-// Streaming compile needs the server to send application/wasm; fall back to
-// compiling from the bytes when it does not.
+// Streaming compile needs the server to send application/wasm; fall back to compiling from the
+// bytes when it does not.
 async function load(url, imports) {
     try {
         return await WebAssembly.instantiateStreaming(fetch(url), imports);
@@ -41,6 +41,7 @@ try {
     if (result !== 0) {
         throw new Error(`start returned ${result}`);
     }
+
     app.run(instance);
 
     if (gl.available) {

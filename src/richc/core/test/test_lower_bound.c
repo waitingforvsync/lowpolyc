@@ -62,6 +62,7 @@ typedef int32_t i32_ctx;
 #define RC_LOWER_BOUND_CTX sign_ctx
 #include "richc/lower_bound.template.h"
 
+
 RC_TEST(lower_bound, empty)
 {
     rc_view_i32 v = {0};

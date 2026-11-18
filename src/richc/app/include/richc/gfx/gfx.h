@@ -84,8 +84,8 @@ typedef enum rc_gfx_load_op {
     RC_GFX_LOAD_OP_LOAD
 } rc_gfx_load_op;
 
-// What a render pass does with an attachment's contents at the end. None, the default, keeps
-// them.
+// What a render pass does with an attachment's contents at the end.
+// None, the default, keeps them.
 typedef enum rc_gfx_store_op {
     RC_GFX_STORE_OP_NONE = 0,
     RC_GFX_STORE_OP_STORE,
@@ -95,6 +95,7 @@ typedef enum rc_gfx_store_op {
 // WebGPU's limit on colour attachments per render pass.
 #define RC_GFX_MAX_COLOR_ATTACHMENTS 8
 
+// One colour attachment of a render pass: the view drawn to, and what happens to its contents.
 typedef struct rc_gfx_color_attachment {
     rc_gfx_texture_view view;
     uint8_t load_op;   // rc_gfx_load_op
@@ -102,6 +103,7 @@ typedef struct rc_gfx_color_attachment {
     rc_gfx_color clear_value;
 } rc_gfx_color_attachment;
 
+// A render pass's colour attachments, the first color_count of color.
 typedef struct rc_gfx_render_pass_desc {
     rc_gfx_color_attachment color[RC_GFX_MAX_COLOR_ATTACHMENTS];
     uint32_t color_count;

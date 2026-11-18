@@ -26,6 +26,10 @@
 #ifndef RC_TEST_H_
 #define RC_TEST_H_
 
+#if defined(__wasm__)
+#error "richc test: the test framework is native only and cannot be used in a wasm32 build"
+#endif
+
 #include "richc/str.h"
 
 // ---- linker-section placement ----
@@ -70,6 +74,7 @@ typedef struct rc_test {
 
 // ---- defining tests ----
 
+// A plain test, registered by a pointer to its descriptor in the test section.
 #define RC_TEST(group, name) \
     static void rc_test_fn_##group##_##name(void); \
     static const rc_test rc_test_desc_##group##_##name = { \
@@ -94,9 +99,11 @@ typedef struct rc_test {
 
 // ---- fixtures ----
 
+// The fixture struct a group's steps share, defined by the braces that follow.
 #define RC_TEST_GROUP_DATA(group) \
     struct rc_test_group_data_##group
 
+// Set the fixture up before each step of the group.
 #define RC_TEST_GROUP_INIT(group, fixture) \
     static void rc_test_init_##group(struct rc_test_group_data_##group *fixture); \
     static void rc_test_init_##group##_wrapper(void *fixture) \
@@ -105,6 +112,7 @@ typedef struct rc_test {
     } \
     static void rc_test_init_##group(struct rc_test_group_data_##group *fixture)
 
+// Tear the fixture down after each step of the group, failed ones too.
 #define RC_TEST_GROUP_DEINIT(group, fixture) \
     static void rc_test_deinit_##group(struct rc_test_group_data_##group *fixture); \
     static void rc_test_deinit_##group##_wrapper(void *fixture) \
@@ -113,6 +121,7 @@ typedef struct rc_test {
     } \
     static void rc_test_deinit_##group(struct rc_test_group_data_##group *fixture)
 
+// A test that receives its group's fixture.
 #define RC_TEST_STEP(group, name, fixture) \
     static void rc_test_fn_##group##_##name(struct rc_test_group_data_##group *); \
     static void rc_test_step_##group##_##name##_wrapper(void *fixture) \
@@ -131,6 +140,7 @@ typedef struct rc_test {
     RC_TEST_SECTION_(RC_TEST_SECTION_NAME_) const rc_test *rc_test_ptr_##group##_##name = &rc_test_desc_##group##_##name; \
     static void rc_test_fn_##group##_##name(struct rc_test_group_data_##group *fixture)
 
+// A fixtured test, registered but reported as skipped.
 #define RC_TEST_STEP_SKIP(group, name, fixture) \
     static void rc_test_fn_##group##_##name(struct rc_test_group_data_##group *); \
     static void rc_test_step_##group##_##name##_wrapper(void *fixture) \
@@ -152,6 +162,7 @@ typedef struct rc_test {
 
 // ---- assertions ----
 
+// Check a op b (or that a is true or false), abandoning the test with the actual value if not.
 #define RC_CHECK(a, op, b)  RC_CHECK_IMPL_(a, op, b, __FILE__, __LINE__)
 #define RC_CHECK_TRUE(a)    RC_CHECK_IMPL_(!!(a), ==, true, __FILE__, __LINE__)
 #define RC_CHECK_FALSE(a)   RC_CHECK_IMPL_(!(a), ==, true, __FILE__, __LINE__)

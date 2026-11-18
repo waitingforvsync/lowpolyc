@@ -51,19 +51,70 @@ static void rc_hash_index_rehash(rc_hash_index_slot_ *slots, uint32_t old_cap, u
 // The slot holding the entry for index under the stored hash, or RC_INDEX_NONE.
 static uint32_t rc_hash_index_slot_of(rc_hash_index table, uint32_t stored, uint32_t index)
 {
+    uint32_t mask = table.cap - 1;
+    uint32_t slot = stored & mask;
+
     if (table.cap == 0) {
         return RC_INDEX_NONE;
     }
 
-    uint32_t mask = table.cap - 1;
-    uint32_t slot = stored & mask;
     while (table.slots_[slot].hash != 0) {
         if (table.slots_[slot].hash == stored && table.slots_[slot].index == index) {
             return slot;
         }
+
         slot = (slot + 1) & mask;
     }
     return RC_INDEX_NONE;
+}
+
+
+// The table moved to new_cap slots. The new slots come zeroed, so empty, and the old ones keep
+// their place at the start until the rehash.
+static rc_hash_index rc_hash_index_grown(rc_hash_index table, uint32_t new_cap, rc_arena *arena)
+{
+    uint32_t old_size = table.cap * (uint32_t)sizeof(rc_hash_index_slot_);
+    uint32_t new_size = new_cap * (uint32_t)sizeof(rc_hash_index_slot_);
+    rc_hash_index_slot_ *slots = (rc_hash_index_slot_ *)rc_arena_realloc_zero(arena, table.slots_, old_size, new_size);
+
+    if (table.num > 0) {
+        rc_hash_index_rehash(slots, table.cap, new_cap);
+    }
+
+    return (rc_hash_index) {
+        .slots_ = slots,
+        .num = table.num,
+        .cap = new_cap
+    };
+}
+
+
+// True if gap lies between home and slot, going round the table, so an entry at slot from home
+// may move back into it.
+static bool rc_hash_index_is_between(uint32_t home, uint32_t gap, uint32_t slot, uint32_t mask)
+{
+    return ((slot - home) & mask) >= ((slot - gap) & mask);
+}
+
+
+// Empty the slot gap, then walk on to the end of its run, closing the gap. An entry moves back into
+// the gap when the gap lies between its home and its slot, and then its old slot is the gap.
+static void rc_hash_index_empty_slot(rc_hash_index table, uint32_t gap)
+{
+    uint32_t mask = table.cap - 1;
+    uint32_t slot = (gap + 1) & mask;
+
+    while (table.slots_[slot].hash != 0) {
+        uint32_t home = table.slots_[slot].hash & mask;
+
+        if (rc_hash_index_is_between(home, gap, slot, mask)) {
+            table.slots_[gap] = table.slots_[slot];
+            gap = slot;
+        }
+
+        slot = (slot + 1) & mask;
+    }
+    table.slots_[gap] = (rc_hash_index_slot_) {0};
 }
 
 
@@ -82,22 +133,9 @@ void rc_hash_index_reserve(rc_hash_index *table, uint32_t num_keys, rc_arena *ar
     if (num_keys <= rc_hash_index_max_num_(table->cap)) {
         return;
     }
+
     RC_ASSERT(arena);
-
-    // The new slots come zeroed, so empty, and the old ones keep their place at the start
-    uint32_t new_cap = rc_hash_index_cap_for(num_keys);
-    uint32_t old_size = table->cap * (uint32_t)sizeof(rc_hash_index_slot_);
-    uint32_t new_size = new_cap * (uint32_t)sizeof(rc_hash_index_slot_);
-    rc_hash_index_slot_ *slots = (rc_hash_index_slot_ *)rc_arena_realloc_zero(arena, table->slots_, old_size, new_size);
-    if (table->num > 0) {
-        rc_hash_index_rehash(slots, table->cap, new_cap);
-    }
-
-    *table = (rc_hash_index) {
-        .slots_ = slots,
-        .num = table->num,
-        .cap = new_cap
-    };
+    *table = rc_hash_index_grown(*table, rc_hash_index_cap_for(num_keys), arena);
 }
 
 
@@ -107,6 +145,7 @@ void rc_hash_index_reset(rc_hash_index *table)
     if (table->slots_) {
         rc_memset(table->slots_, 0, table->cap * (uint32_t)sizeof(rc_hash_index_slot_));
     }
+
     table->num = 0;
 }
 
@@ -117,33 +156,20 @@ void rc_hash_index_release(rc_hash_index *table, rc_arena *arena)
     if (table->slots_) {
         rc_arena_free(arena, table->slots_, table->cap * (uint32_t)sizeof(rc_hash_index_slot_));
     }
+
     *table = (rc_hash_index) {0};
 }
 
 
 bool rc_hash_index_remove(rc_hash_index *table, uint32_t hash, uint32_t index)
 {
-    RC_ASSERT(table);
+    uint32_t slot = rc_hash_index_slot_of(*table, rc_hash_index_stored_(hash), index);
 
-    uint32_t gap = rc_hash_index_slot_of(*table, rc_hash_index_stored_(hash), index);
-    if (gap == RC_INDEX_NONE) {
+    if (slot == RC_INDEX_NONE) {
         return false;
     }
 
-    // Walk on to the end of the run. An entry can move back into the gap when the gap lies between
-    // its home and its slot, and then its old slot is the gap.
-    uint32_t mask = table->cap - 1;
-    uint32_t slot = (gap + 1) & mask;
-    while (table->slots_[slot].hash != 0) {
-        uint32_t home = table->slots_[slot].hash & mask;
-
-        if (((slot - home) & mask) >= ((slot - gap) & mask)) {
-            table->slots_[gap] = table->slots_[slot];
-            gap = slot;
-        }
-        slot = (slot + 1) & mask;
-    }
-    table->slots_[gap] = (rc_hash_index_slot_) {0};
+    rc_hash_index_empty_slot(*table, slot);
     table->num--;
     return true;
 }
@@ -151,12 +177,12 @@ bool rc_hash_index_remove(rc_hash_index *table, uint32_t hash, uint32_t index)
 
 bool rc_hash_index_move(rc_hash_index *table, uint32_t hash, uint32_t from, uint32_t to)
 {
-    RC_ASSERT(table);
-
     uint32_t slot = rc_hash_index_slot_of(*table, rc_hash_index_stored_(hash), from);
+
     if (slot == RC_INDEX_NONE) {
         return false;
     }
+
     table->slots_[slot].index = to;
     return true;
 }

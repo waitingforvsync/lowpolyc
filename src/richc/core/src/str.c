@@ -13,18 +13,65 @@ static char rc_str_ascii_lower(char c)
 }
 
 
+// The length of a null-terminated string, clamped rather than wrapped when too long for 32 bits.
+static uint32_t rc_str_cstr_len(const char *s)
+{
+    uint32_t len = 0;
+
+    while (s[len] != '\0' && len < UINT32_MAX) {
+        len++;
+    }
+
+    return len;
+}
+
+
+// Order two strings whose first min_len bytes compared as order: by those bytes, then by length.
+static int32_t rc_str_order(int32_t order, uint32_t a_len, uint32_t b_len)
+{
+    if (order != 0) {
+        return order;
+    }
+
+    return (a_len > b_len) - (a_len < b_len);
+}
+
+
+// Compare n bytes ignoring ASCII case: negative, zero or positive, like memcmp.
+static int32_t rc_str_memcmp_insensitive(const char *a, const char *b, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++) {
+        // Compared as unsigned bytes, as memcmp would
+        uint8_t ca = (uint8_t)rc_str_ascii_lower(a[i]);
+        uint8_t cb = (uint8_t)rc_str_ascii_lower(b[i]);
+
+        if (ca != cb) {
+            return (int32_t)ca - (int32_t)cb;
+        }
+    }
+
+    return 0;
+}
+
+
+// Copy as much of s as fits into buf, terminated; buf_size is not 0.
+static const char *rc_str_copy_to_cstr(rc_str s, char *buf, uint32_t buf_size)
+{
+    uint32_t copy_len = s.len < buf_size - 1 ? s.len : buf_size - 1;
+
+    rc_memcpy(buf, s.data, copy_len);
+    buf[copy_len] = '\0';
+    return buf;
+}
+
+
 rc_str rc_str_from_cstr(const char *s)
 {
     if (!s) {
         return rc_str_from_ptr(NULL, 0);
     }
 
-    // A string too long for 32 bits is clamped rather than wrapped
-    uint32_t len = 0;
-    while (s[len] != '\0' && len < UINT32_MAX) {
-        len++;
-    }
-    return rc_str_from_ptr(s, len);
+    return rc_str_from_ptr(s, rc_str_cstr_len(s));
 }
 
 
@@ -44,34 +91,21 @@ bool rc_str_is_equal_insensitive(rc_str a, rc_str b)
 
 int32_t rc_str_compare(rc_str a, rc_str b)
 {
+    uint32_t min_len = a.len < b.len ? a.len : b.len;
+
     RC_ASSERT(rc_str_is_valid(a));
     RC_ASSERT(rc_str_is_valid(b));
-
-    uint32_t min_len = a.len < b.len ? a.len : b.len;
-    int32_t r = rc_memcmp(a.data, b.data, min_len);
-    if (r != 0) {
-        return r;
-    }
-    return (a.len > b.len) - (a.len < b.len);
+    return rc_str_order(rc_memcmp(a.data, b.data, min_len), a.len, b.len);
 }
 
 
 int32_t rc_str_compare_insensitive(rc_str a, rc_str b)
 {
+    uint32_t min_len = a.len < b.len ? a.len : b.len;
+
     RC_ASSERT(rc_str_is_valid(a));
     RC_ASSERT(rc_str_is_valid(b));
-
-    uint32_t min_len = a.len < b.len ? a.len : b.len;
-    for (uint32_t i = 0; i < min_len; i++) {
-        // Compared as unsigned bytes, as memcmp would
-        uint8_t ca = (uint8_t)rc_str_ascii_lower(a.data[i]);
-        uint8_t cb = (uint8_t)rc_str_ascii_lower(b.data[i]);
-
-        if (ca != cb) {
-            return (int32_t)ca - (int32_t)cb;
-        }
-    }
-    return (a.len > b.len) - (a.len < b.len);
+    return rc_str_order(rc_str_memcmp_insensitive(a.data, b.data, min_len), a.len, b.len);
 }
 
 
@@ -98,11 +132,13 @@ uint32_t rc_str_find_first(rc_str haystack, rc_str needle)
     if (needle.len > haystack.len) {
         return RC_INDEX_NONE;
     }
+
     for (uint32_t i = 0; i <= haystack.len - needle.len; i++) {
         if (rc_memcmp(haystack.data + i, needle.data, needle.len) == 0) {
             return i;
         }
     }
+
     return RC_INDEX_NONE;
 }
 
@@ -121,6 +157,7 @@ uint32_t rc_str_find_last(rc_str haystack, rc_str needle)
             return i - 1;
         }
     }
+
     return RC_INDEX_NONE;
 }
 
@@ -149,6 +186,7 @@ static rc_str_pair rc_str_split_at(rc_str s, uint32_t pos, rc_str split_by)
     if (pos == RC_INDEX_NONE) {
         return (rc_str_pair) {.first = s, .second = {0}};
     }
+
     return (rc_str_pair) {
         .first = rc_str_first(s, pos),
         .second = rc_str_drop_first(s, pos + split_by.len)
@@ -174,12 +212,10 @@ const char *rc_str_as_cstr(rc_str s, char *buf, uint32_t buf_size)
     if (s.data && s.data[s.len] == '\0') {
         return s.data;
     }
+
     if (!buf || buf_size == 0) {
         return NULL;
     }
 
-    uint32_t copy_len = s.len < buf_size - 1 ? s.len : buf_size - 1;
-    rc_memcpy(buf, s.data, copy_len);
-    buf[copy_len] = '\0';
-    return buf;
+    return rc_str_copy_to_cstr(s, buf, buf_size);
 }

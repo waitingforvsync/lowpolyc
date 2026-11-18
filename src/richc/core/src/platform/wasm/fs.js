@@ -37,6 +37,7 @@ export function createFs() {
                 if (bytes === undefined) {
                     return -FILE_ERROR_NOT_FOUND;
                 }
+
                 const handle = nextHandle++;
                 opened.set(handle, { bytes, at: 0 });
                 return handle;
@@ -49,6 +50,7 @@ export function createFs() {
                 if (end > file.bytes.length) {
                     return FILE_ERROR_IO;
                 }
+
                 bytesAt(dst, size).set(file.bytes.subarray(file.at, end));
                 file.at = end;
                 return FILE_ERROR_NONE;
@@ -73,5 +75,6 @@ export function createFs() {
             memory = instance.exports.memory;
         },
     };
+
     return fs;
 }

@@ -48,8 +48,9 @@ typedef struct rc_page_state {
 static rc_page_state rc_mem;
 static rc_arena_oom_fn *rc_oom_handler;
 
-// ---- private helpers ----
+// ---- pages and chunks ----
 
+// The address of a page.
 static uint8_t *rc_page_ptr(uint32_t page)
 {
     return (uint8_t *)(rc_mem.base + (uintptr_t)page * RC_PAGE);
@@ -67,6 +68,7 @@ static rc_chunk_header *rc_chunk(uint32_t page)
 }
 
 
+// The size of a chunk in bytes, header included.
 static uint32_t rc_chunk_bytes(uint32_t page)
 {
     return rc_chunk(page)->pages * (uint32_t)RC_PAGE;
@@ -87,11 +89,13 @@ static uint32_t rc_pages_for(uint32_t bytes)
 }
 
 
+// Give the handler its say about a failed request of size bytes, then stop.
 RC_NORETURN static void rc_arena_out_of_memory(uint32_t size)
 {
     if (rc_oom_handler) {
         rc_oom_handler(size);
     }
+
     RC_PANIC(false);
 }
 
@@ -99,19 +103,22 @@ RC_NORETURN static void rc_arena_out_of_memory(uint32_t size)
 // Commit count more pages at the end of the heap. Returns the first, or 0 when out of memory.
 static uint32_t rc_pages_grow(uint32_t count)
 {
-    if (count > rc_mem.reserved_pages - rc_mem.used_pages) {
-        return 0;
-    }
-    if (!rc_heap_commit(rc_mem.base, rc_mem.used_pages, count)) {
+    uint32_t page = rc_mem.used_pages;
+
+    if (count > rc_mem.reserved_pages - page) {
         return 0;
     }
 
-    uint32_t page = rc_mem.used_pages;
+    if (!rc_heap_commit(rc_mem.base, page, count)) {
+        return 0;
+    }
+
     rc_mem.used_pages += count;
     return page;
 }
 
 
+// Write a fresh header, linked to nothing, at the start of a chunk of pages pages.
 static void rc_chunk_init(uint32_t page, uint32_t pages)
 {
     *(rc_chunk_header *)rc_page_ptr(page) = (rc_chunk_header) {
@@ -123,6 +130,15 @@ static void rc_chunk_init(uint32_t page, uint32_t pages)
 }
 
 
+// True if need bytes fit in the chunk after its header.
+static bool rc_chunk_fits(uint32_t page, uint32_t need)
+{
+    return need <= rc_chunk_bytes(page) - RC_HEADER;
+}
+
+// ---- the pool ----
+
+// Put one chunk at the front of the pool.
 static void rc_pool_push(uint32_t page)
 {
     rc_chunk(page)->next = rc_mem.pool;
@@ -130,45 +146,92 @@ static void rc_pool_push(uint32_t page)
 }
 
 
-// A chunk of at least pages pages: the best fit from the pool, else fresh from the heap. 0 when out
-// of memory.
-static uint32_t rc_chunk_acquire(uint32_t pages)
+// Put a whole chain of chunks, from page on, into the pool.
+static void rc_pool_push_chain(uint32_t page)
+{
+    while (page) {
+        uint32_t next = rc_chunk(page)->next;
+
+        rc_pool_push(page);
+        page = next;
+    }
+}
+
+
+// True if a chunk of have pages holds pages, and fits them better than the one at best (if any).
+static bool rc_pool_is_better_fit(uint32_t have, uint32_t pages, const uint32_t *best)
+{
+    if (have < pages) {
+        return false;
+    }
+
+    return !best || have < rc_chunk(*best)->pages;
+}
+
+
+// The link to the smallest pooled chunk of at least pages pages, stopping early at an exact match;
+// NULL if none is big enough.
+static uint32_t *rc_pool_best_fit(uint32_t pages)
 {
     uint32_t *best = NULL;
 
-    // Best fit from the pool, stopping early at an exact match
     for (uint32_t *link = &rc_mem.pool; *link; link = &rc_chunk(*link)->next) {
         uint32_t have = rc_chunk(*link)->pages;
-        if (have >= pages && (!best || have < rc_chunk(*best)->pages)) {
+
+        if (rc_pool_is_better_fit(have, pages, best)) {
             best = link;
-            if (have == pages) {
-                break;
-            }
+        }
+
+        if (have == pages) {
+            break;
         }
     }
 
-    if (best) {
-        uint32_t page = *best;
-        *best = rc_chunk(page)->next;
-        rc_chunk(page)->next = 0;
-        return page;
+    return best;
+}
+
+
+// Unlink the best fit for pages from the pool; 0 if none is big enough.
+static uint32_t rc_pool_take(uint32_t pages)
+{
+    uint32_t *best = rc_pool_best_fit(pages);
+    uint32_t page = best ? *best : 0;
+
+    if (!page) {
+        return 0;
     }
 
-    // Otherwise grow the heap
-    uint32_t page = rc_pages_grow(pages);
-    if (page) {
-        rc_chunk_init(page, pages);
-    }
+    *best = rc_chunk(page)->next;
+    rc_chunk(page)->next = 0;
     return page;
 }
 
 
-static bool rc_chunk_fits(uint32_t page, uint32_t need)
+// A new chunk of pages pages at the end of the heap; 0 when out of memory.
+static uint32_t rc_chunk_fresh(uint32_t pages)
 {
-    return need <= rc_chunk_bytes(page) - RC_HEADER;
+    uint32_t page = rc_pages_grow(pages);
+
+    if (page) {
+        rc_chunk_init(page, pages);
+    }
+
+    return page;
 }
 
 
+// A chunk of at least pages pages: the best fit from the pool, else fresh from the heap. 0 when out
+// of memory.
+static uint32_t rc_chunk_acquire(uint32_t pages)
+{
+    uint32_t page = rc_pool_take(pages);
+
+    return page ? page : rc_chunk_fresh(pages);
+}
+
+// ---- making room ----
+
+// Make page the arena's current chunk, empty.
 static void rc_arena_enter_chunk(rc_arena *a, uint32_t page)
 {
     a->chunk = page;
@@ -177,27 +240,26 @@ static void rc_arena_enter_chunk(rc_arena *a, uint32_t page)
 }
 
 
-// Grow the current chunk in place so need more bytes fit after top. Only the newest chunk in the
-// heap can grow, since the pages after it are free.
-static bool rc_arena_extend(rc_arena *a, uint32_t need)
+// The pages to add to a chunk of have pages that needs extra more. Growing by at least the arena's
+// chunk size, while that stays within a maximal chunk, keeps platform calls rare.
+static uint32_t rc_chunk_growth(uint32_t have, uint32_t extra, uint32_t min_pages)
+{
+    if (extra >= min_pages) {
+        return extra;
+    }
+
+    if (have + min_pages > RC_MAX_CHUNK_PAGES) {
+        return extra;
+    }
+
+    return min_pages;
+}
+
+
+// Commit extra pages straight after the current chunk and take them into it.
+static bool rc_arena_extend_by(rc_arena *a, uint32_t extra)
 {
     rc_chunk_header *h = rc_chunk(a->chunk);
-
-    if (a->chunk + h->pages != rc_mem.used_pages) {
-        return false;
-    }
-
-    uint64_t pages = ((uint64_t)a->top + need + RC_PAGE - 1) / RC_PAGE;
-    if (pages > RC_MAX_CHUNK_PAGES) {
-        return false;
-    }
-
-    // Growing by at least the arena's chunk size keeps platform calls rare
-    uint32_t extra = (uint32_t)pages - h->pages;
-    uint32_t min_pages = rc_chunk(a->first)->min_pages;
-    if (extra < min_pages && h->pages + min_pages <= RC_MAX_CHUNK_PAGES) {
-        extra = min_pages;
-    }
 
     if (!rc_pages_grow(extra)) {
         return false;
@@ -206,6 +268,42 @@ static bool rc_arena_extend(rc_arena *a, uint32_t need)
     h->pages += extra;
     a->end = h->pages * (uint32_t)RC_PAGE;
     return true;
+}
+
+
+// Grow the current chunk in place so need more bytes fit after top. Only the newest chunk in the
+// heap can grow, since the pages after it are free.
+static bool rc_arena_extend(rc_arena *a, uint32_t need)
+{
+    rc_chunk_header *h = rc_chunk(a->chunk);
+    uint64_t pages = ((uint64_t)a->top + need + RC_PAGE - 1) / RC_PAGE;
+
+    if (a->chunk + h->pages != rc_mem.used_pages) {
+        return false;
+    }
+
+    if (pages > RC_MAX_CHUNK_PAGES) {
+        return false;
+    }
+
+    return rc_arena_extend_by(a, rc_chunk_growth(h->pages, (uint32_t)pages - h->pages, rc_chunk(a->first)->min_pages));
+}
+
+
+// Link a fresh chunk with room for need bytes in after the current one, and move into it.
+static void rc_arena_add_chunk(rc_arena *a, uint32_t need)
+{
+    uint32_t pages = rc_pages_for(need + RC_HEADER);
+    uint32_t min_pages = rc_chunk(a->first)->min_pages;
+    uint32_t page = rc_chunk_acquire(pages > min_pages ? pages : min_pages);
+
+    if (!page) {
+        rc_arena_out_of_memory(need);
+    }
+
+    rc_chunk(page)->next = rc_chunk(a->chunk)->next;
+    rc_chunk(a->chunk)->next = page;
+    rc_arena_enter_chunk(a, page);
 }
 
 
@@ -230,17 +328,57 @@ static void rc_arena_make_room(rc_arena *a, uint32_t need)
         return;
     }
 
-    // Last resort: a fresh chunk, linked in after the current one
-    uint32_t pages = rc_pages_for(need + RC_HEADER);
-    uint32_t min_pages = rc_chunk(a->first)->min_pages;
-    uint32_t page = rc_chunk_acquire(pages > min_pages ? pages : min_pages);
-    if (!page) {
-        rc_arena_out_of_memory(need);
+    rc_arena_add_chunk(a, need);
+}
+
+
+// True if pad bytes and then need bytes fit after top in the current chunk.
+static bool rc_arena_fits_padded(const rc_arena *a, uint32_t pad, uint32_t need)
+{
+    uint32_t room = a->end - a->top;
+
+    if (pad > room) {
+        return false;
     }
 
-    rc_chunk(page)->next = cur->next;
-    cur->next = page;
-    rc_arena_enter_chunk(a, page);
+    return need <= room - pad;
+}
+
+// ---- allocating ----
+
+// Skip pad bytes, then hand out the next need bytes, which the current chunk has room for.
+static void *rc_arena_take(rc_arena *a, uint32_t pad, uint32_t need)
+{
+    uint8_t *result = rc_page_ptr(a->chunk) + a->top + pad;
+
+    a->top += pad + need;
+    return result;
+}
+
+
+// Hand out need (aligned) bytes, making room for them first if need be.
+static void *rc_arena_bump(rc_arena *a, uint32_t need)
+{
+    if (need > a->end - a->top) {
+        rc_arena_make_room(a, need);
+    }
+
+    return rc_arena_take(a, 0, need);
+}
+
+
+// Hand out need (aligned) bytes at a multiple of align, a power of two above RC_MAX_ALIGN.
+static void *rc_arena_bump_aligned(rc_arena *a, uint32_t need, uint32_t align)
+{
+    uint32_t pad = rc_align_up(a->top, align) - a->top;
+
+    // Chunks start page aligned, so in a fresh one the padding is at most align - RC_HEADER
+    if (!rc_arena_fits_padded(a, pad, need)) {
+        rc_arena_make_room(a, need + align - RC_HEADER);
+        pad = rc_align_up(a->top, align) - a->top;
+    }
+
+    return rc_arena_take(a, pad, need);
 }
 
 
@@ -253,10 +391,98 @@ static uint32_t rc_arena_offset_of(const rc_arena *a, const void *ptr)
     if (p < base + RC_HEADER || p - base > a->top) {
         return RC_INDEX_NONE;
     }
+
     return (uint32_t)(p - base);
 }
 
 
+// True if the allocation at offset, need (aligned) bytes long, is the last in the current chunk.
+static bool rc_arena_is_last(const rc_arena *a, uint32_t offset, uint32_t need)
+{
+    return offset != RC_INDEX_NONE && a->top - offset == need;
+}
+
+
+// Rewind over ptr, need (aligned) bytes long, if it is the last allocation.
+static bool rc_arena_free_last(rc_arena *a, const void *ptr, uint32_t need)
+{
+    uint32_t offset = rc_arena_offset_of(a, ptr);
+
+    if (!rc_arena_is_last(a, offset, need)) {
+        return false;
+    }
+
+    a->top = offset;
+    return true;
+}
+
+// ---- resizing ----
+
+// True if need more bytes fit after top, growing the chunk in place if they don't yet.
+static bool rc_arena_room_in_place(rc_arena *a, uint32_t need)
+{
+    // A by-value copy of this arena may have grown our chunk since we cached its size
+    a->end = rc_chunk_bytes(a->chunk);
+    if (need <= a->end - a->top) {
+        return true;
+    }
+
+    return rc_arena_extend(a, need);
+}
+
+
+// Resize the last allocation, at offset, in place, growing the chunk if need be. False if there is
+// no room to grow.
+static bool rc_arena_resize_last(rc_arena *a, uint32_t offset, uint32_t old_need, uint32_t new_need)
+{
+    uint32_t grow = new_need > old_need ? new_need - old_need : 0;
+
+    if (grow == 0) {
+        a->top = offset + new_need;
+        return true;
+    }
+
+    if (!rc_arena_room_in_place(a, grow)) {
+        return false;
+    }
+
+    a->top += grow;
+    return true;
+}
+
+
+// A new allocation of new_size bytes, starting with the old_size bytes at ptr.
+static void *rc_arena_move(rc_arena *a, const void *ptr, uint32_t old_size, uint32_t new_size)
+{
+    void *result = rc_arena_alloc(a, new_size);
+
+    rc_memcpy(result, ptr, old_size);
+    return result;
+}
+
+
+// Resize ptr, both sizes within the limit: in place when it is the last allocation or shrinking,
+// else by moving it.
+static void *rc_arena_resize(rc_arena *a, void *ptr, uint32_t old_size, uint32_t new_size)
+{
+    uint32_t old_need = rc_align_up(old_size, RC_MAX_ALIGN);
+    uint32_t new_need = rc_align_up(new_size, RC_MAX_ALIGN);
+    uint32_t offset = rc_arena_offset_of(a, ptr);
+
+    if (rc_arena_is_last(a, offset, old_need)) {
+        if (rc_arena_resize_last(a, offset, old_need, new_need)) {
+            return ptr;
+        }
+    }
+    else if (new_need <= old_need) {
+        return ptr;
+    }
+
+    return rc_arena_move(a, ptr, old_size, new_size);
+}
+
+
+// Resize a non-NULL ptr, panicking if the new size is too large.
 static void *rc_arena_realloc_impl(rc_arena *a, void *ptr, uint32_t old_size, uint32_t new_size)
 {
     RC_ASSERT(new_size != 0);
@@ -266,43 +492,14 @@ static void *rc_arena_realloc_impl(rc_arena *a, void *ptr, uint32_t old_size, ui
         rc_arena_out_of_memory(new_size);
     }
 
-    uint32_t old_need = rc_align_up(old_size, RC_MAX_ALIGN);
-    uint32_t new_need = rc_align_up(new_size, RC_MAX_ALIGN);
-    uint32_t offset = rc_arena_offset_of(a, ptr);
-
-    // The last allocation shrinks or grows in place, growing the chunk if need be
-    if (offset != RC_INDEX_NONE && a->top - offset == old_need) {
-        if (new_need <= old_need) {
-            a->top = offset + new_need;
-            return ptr;
-        }
-
-        uint32_t grow = new_need - old_need;
-        a->end = rc_chunk_bytes(a->chunk);
-        if (grow <= a->end - a->top || rc_arena_extend(a, grow)) {
-            a->top += grow;
-            return ptr;
-        }
-    }
-    else if (new_need <= old_need) {
-        return ptr;
-    }
-
-    void *result = rc_arena_alloc(a, new_size);
-    rc_memcpy(result, ptr, old_size);
-    return result;
+    return rc_arena_resize(a, ptr, old_size, new_size);
 }
 
+// ---- setting up ----
 
-// ---- public API ----
-
-bool rc_arena_init(void)
+// Take on a fresh reservation as the page heap; false if the reserve failed.
+static bool rc_arena_adopt_heap(rc_heap heap)
 {
-    if (rc_mem.reserved_pages) {
-        return true;
-    }
-
-    rc_heap heap = rc_heap_reserve();
     if (!heap.limit) {
         return false;
     }
@@ -317,30 +514,11 @@ bool rc_arena_init(void)
 }
 
 
-void rc_arena_deinit(void)
+// An arena on a first chunk of pages pages, which also sets the size it grows by.
+static rc_arena rc_arena_make_pages(uint32_t pages, uint32_t chunk_size)
 {
-    if (rc_mem.reserved_pages) {
-        rc_heap_release(rc_mem.base);
-    }
-    rc_mem = (rc_page_state) {0};
-}
-
-
-rc_arena rc_arena_make(uint32_t chunk_size)
-{
-    if (!chunk_size) {
-        chunk_size = RC_ARENA_DEFAULT_CHUNK;
-    }
-
-    // The page heap sets itself up on first use
-    if (!rc_arena_init()) {
-        rc_arena_out_of_memory(chunk_size);
-    }
-
-    uint32_t pages = rc_pages_for(chunk_size);
-    RC_ASSERT(pages <= RC_MAX_CHUNK_PAGES);
-
     uint32_t first = rc_chunk_acquire(pages);
+
     if (!first) {
         rc_arena_out_of_memory(chunk_size);
     }
@@ -354,17 +532,48 @@ rc_arena rc_arena_make(uint32_t chunk_size)
     };
 }
 
+// ---- public API ----
+
+bool rc_arena_init(void)
+{
+    if (rc_mem.reserved_pages) {
+        return true;
+    }
+
+    return rc_arena_adopt_heap(rc_heap_reserve());
+}
+
+
+void rc_arena_deinit(void)
+{
+    if (rc_mem.reserved_pages) {
+        rc_heap_release(rc_mem.base);
+    }
+
+    rc_mem = (rc_page_state) {0};
+}
+
+
+rc_arena rc_arena_make(uint32_t chunk_size)
+{
+    uint32_t size = chunk_size ? chunk_size : RC_ARENA_DEFAULT_CHUNK;
+    uint32_t pages = rc_pages_for(size);
+
+    // The page heap sets itself up on first use
+    if (!rc_arena_init()) {
+        rc_arena_out_of_memory(size);
+    }
+
+    RC_ASSERT(pages <= RC_MAX_CHUNK_PAGES);
+    return rc_arena_make_pages(pages, size);
+}
+
 
 void rc_arena_release(rc_arena *a)
 {
     RC_ASSERT(a);
 
-    uint32_t page = a->first;
-    while (page) {
-        uint32_t next = rc_chunk(page)->next;
-        rc_pool_push(page);
-        page = next;
-    }
+    rc_pool_push_chain(a->first);
     *a = (rc_arena) {0};
 }
 
@@ -379,14 +588,7 @@ void *rc_arena_alloc(rc_arena *a, uint32_t size)
         rc_arena_out_of_memory(size);
     }
 
-    uint32_t need = rc_align_up(size, RC_MAX_ALIGN);
-    if (need > a->end - a->top) {
-        rc_arena_make_room(a, need);
-    }
-
-    void *result = rc_page_ptr(a->chunk) + a->top;
-    a->top += need;
-    return result;
+    return rc_arena_bump(a, rc_align_up(size, RC_MAX_ALIGN));
 }
 
 
@@ -411,22 +613,12 @@ void *rc_arena_alloc_aligned(rc_arena *a, uint32_t size, uint32_t align)
         return rc_arena_alloc(a, size);
     }
 
-    // Chunks start page aligned, so in a fresh one the padding is at most align - RC_HEADER
-    uint32_t worst_pad = align - RC_HEADER;
-    if (size > RC_MAX_ALLOC - worst_pad) {
+    // The worst padding a fresh chunk needs, align - RC_HEADER, must fit too
+    if (size > RC_MAX_ALLOC - (align - RC_HEADER)) {
         rc_arena_out_of_memory(size);
     }
 
-    uint32_t need = rc_align_up(size, RC_MAX_ALIGN);
-    uint32_t pad = rc_align_up(a->top, align) - a->top;
-    if (pad > a->end - a->top || need > a->end - a->top - pad) {
-        rc_arena_make_room(a, need + worst_pad);
-        pad = rc_align_up(a->top, align) - a->top;
-    }
-
-    void *result = rc_page_ptr(a->chunk) + a->top + pad;
-    a->top += pad + need;
-    return result;
+    return rc_arena_bump_aligned(a, rc_align_up(size, RC_MAX_ALIGN), align);
 }
 
 
@@ -440,13 +632,7 @@ bool rc_arena_free(rc_arena *a, void *ptr, uint32_t size)
         return false;
     }
 
-    uint32_t offset = rc_arena_offset_of(a, ptr);
-    if (offset == RC_INDEX_NONE || a->top - offset != rc_align_up(size, RC_MAX_ALIGN)) {
-        return false;
-    }
-
-    a->top = offset;
-    return true;
+    return rc_arena_free_last(a, ptr, rc_align_up(size, RC_MAX_ALIGN));
 }
 
 
@@ -458,23 +644,21 @@ void *rc_arena_realloc(rc_arena *a, void *ptr, uint32_t old_size, uint32_t new_s
     if (!ptr) {
         return rc_arena_alloc(a, new_size);
     }
+
     return rc_arena_realloc_impl(a, ptr, old_size, new_size);
 }
 
 
 void *rc_arena_realloc_zero(rc_arena *a, void *ptr, uint32_t old_size, uint32_t new_size)
 {
-    RC_ASSERT(a);
-    RC_ASSERT(a->first);
+    uint32_t kept = ptr ? old_size : 0;
+    uint8_t *result = rc_arena_realloc(a, ptr, old_size, new_size);
 
-    if (!ptr) {
-        return rc_arena_alloc_zero(a, new_size);
+    // Everything past what came over from ptr is new, and zeroed
+    if (new_size > kept) {
+        rc_memset(result + kept, 0, new_size - kept);
     }
 
-    uint8_t *result = rc_arena_realloc_impl(a, ptr, old_size, new_size);
-    if (new_size > old_size) {
-        rc_memset(result + old_size, 0, new_size - old_size);
-    }
     return result;
 }
 

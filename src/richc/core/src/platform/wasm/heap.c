@@ -42,18 +42,22 @@ rc_heap rc_heap_reserve(void)
 
 bool rc_heap_commit(uintptr_t base, uint32_t page, uint32_t count)
 {
+    uint32_t end = page + count;
+
     (void)base;
 
     // Something else grew memory, so our pages are no longer contiguous
     RC_PANIC(__builtin_wasm_memory_size(0) == rc_wasm_committed);
 
-    uint32_t end = page + count;
+    // Pages committed before the last release are still there
     if (end <= rc_wasm_committed) {
-        return true;   // committed before the last release
+        return true;
     }
+
     if (__builtin_wasm_memory_grow(0, end - rc_wasm_committed) == SIZE_MAX) {
         return false;
     }
+
     rc_wasm_committed = end;
     return true;
 }

@@ -30,9 +30,10 @@
 #define RC_HANDLE_IS_NONE_ RC_CONCAT(RC_HANDLE_TYPE, _is_none)
 #define RC_HANDLE_IS_EQUAL_ RC_CONCAT(RC_HANDLE_TYPE, _is_equal)
 
+// A handle to a genpool's element.
 typedef struct RC_HANDLE_TYPE {
-    uint32_t index_;  // the slot's index
-    uint32_t gen_;    // the slot's generation when the handle was issued; odd, or 0 for none
+    uint32_t index_;
+    uint32_t gen_;  // the slot's generation when the handle was issued; odd, or 0 for none
 } RC_HANDLE_TYPE;
 
 // True for the none handle. Any other handle may still be stale: only its pool can tell.

@@ -75,11 +75,36 @@ static int32_t value_of(rc_hash_trie_test trie, const rc_hash_trie_test_pool *po
 }
 
 
+// key's value in a trie of colliding keys, or -1 if it is not there.
 static int32_t collide_value_of(rc_hash_trie_collide trie, const rc_hash_trie_collide_pool *pool, uint64_t key)
 {
     uint32_t index = rc_hash_trie_collide_find(trie, pool, key);
 
     return index == RC_INDEX_NONE ? -1 : rc_hash_trie_collide_value_get(pool, index);
+}
+
+
+// A trie on pool holding the keys 1 to count, each its own value.
+static rc_hash_trie_test trie_of_range(uint64_t count, rc_hash_trie_test_pool *pool, rc_arena *arena)
+{
+    rc_hash_trie_test trie = {0};
+
+    for (uint64_t k = 1; k <= count; k++) {
+        rc_hash_trie_test_add(&trie, pool, k, (int32_t)k, arena);
+    }
+    return trie;
+}
+
+
+// A trie of colliding keys on pool holding the keys 1 to count, each its own value.
+static rc_hash_trie_collide collide_trie_of_range(uint64_t count, rc_hash_trie_collide_pool *pool, rc_arena *arena)
+{
+    rc_hash_trie_collide trie = {0};
+
+    for (uint64_t k = 1; k <= count; k++) {
+        rc_hash_trie_collide_add(&trie, pool, k, (int32_t)k, arena);
+    }
+    return trie;
 }
 
 // ---- empty tries ----
@@ -102,8 +127,8 @@ RC_TEST_STEP(hash_trie, first_add_makes_root, fix)
 {
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 42, 420, &fix->a);
+
     RC_CHECK(trie.root_, ==, 1u);
     RC_CHECK(rc_hash_trie_test_value_get(&pool, i), ==, 420);
 }
@@ -113,14 +138,11 @@ RC_TEST_STEP(hash_trie, copies_share_contents, fix)
 {
     // A trie is only its root's index, so a copy sees the same entries
     rc_hash_trie_test_pool pool = {0};
-    rc_hash_trie_test trie = {0};
-
-    rc_hash_trie_test_add(&trie, &pool, 1, 11, &fix->a);
-    rc_hash_trie_test_add(&trie, &pool, 2, 22, &fix->a);
-
+    rc_hash_trie_test trie = trie_of_range(2, &pool, &fix->a);
     rc_hash_trie_test copy = trie;
-    RC_CHECK(value_of(copy, &pool, 1), ==, 11);
-    RC_CHECK(value_of(copy, &pool, 2), ==, 22);
+
+    RC_CHECK(value_of(copy, &pool, 1), ==, 1);
+    RC_CHECK(value_of(copy, &pool, 2), ==, 2);
 
     rc_hash_trie_test_add(&trie, &pool, 3, 33, &fix->a);
     RC_CHECK(value_of(copy, &pool, 3), ==, 33);
@@ -132,9 +154,9 @@ RC_TEST_STEP(hash_trie, add_find, fix)
 {
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 10, 100, &fix->a);
     uint32_t j = rc_hash_trie_test_add(&trie, &pool, 20, 200, &fix->a);
+
     RC_CHECK(i, !=, j);
     RC_CHECK(rc_hash_trie_test_find(trie, &pool, 10), ==, i);
     RC_CHECK(rc_hash_trie_test_find(trie, &pool, 20), ==, j);
@@ -148,8 +170,8 @@ RC_TEST_STEP(hash_trie, add_existing_keeps_value, fix)
 {
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 10, 100, &fix->a);
+
     RC_CHECK(rc_hash_trie_test_add(&trie, &pool, 10, 999, &fix->a), ==, i);
     RC_CHECK(value_of(trie, &pool, 10), ==, 100);
 }
@@ -159,8 +181,8 @@ RC_TEST_STEP(hash_trie, set_adds_or_replaces, fix)
 {
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_set(&trie, &pool, 10, 100, &fix->a);
+
     RC_CHECK(value_of(trie, &pool, 10), ==, 100);
     RC_CHECK(rc_hash_trie_test_set(&trie, &pool, 10, 999, &fix->a), ==, i);
     RC_CHECK(value_of(trie, &pool, 10), ==, 999);
@@ -186,10 +208,10 @@ RC_TEST_STEP(hash_trie, collisions, fix)
     // slot, 0x20 the slot below it, and 0x30 the slot below that.
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 0x10, 1, &fix->a);
     uint32_t j = rc_hash_trie_test_add(&trie, &pool, 0x20, 2, &fix->a);
     uint32_t k = rc_hash_trie_test_add(&trie, &pool, 0x30, 3, &fix->a);
+
     RC_CHECK(i / 4, ==, 0u);
     RC_CHECK(j / 4, !=, i / 4);
     RC_CHECK(k / 4, !=, j / 4);
@@ -205,8 +227,8 @@ RC_TEST_STEP(hash_trie, value_access, fix)
 {
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 5, 50, &fix->a);
+
     rc_hash_trie_test_value_set(&pool, i, 51);
     RC_CHECK(rc_hash_trie_test_value_get(&pool, i), ==, 51);
     *rc_hash_trie_test_value_at(&pool, i) = 52;
@@ -223,9 +245,9 @@ RC_TEST_STEP(hash_trie, key_access, fix)
 {
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 10, 100, &fix->a);
     uint32_t j = rc_hash_trie_test_add(&trie, &pool, 0x1A, 150, &fix->a);
+
     RC_CHECK(rc_hash_trie_test_key_get(&pool, i), ==, (uint64_t)10);
     RC_CHECK(rc_hash_trie_test_key_get(&pool, j), ==, (uint64_t)0x1A);
 
@@ -239,10 +261,10 @@ RC_TEST_STEP(hash_trie, set, fix)
 {
     rc_hash_trie_set_pool pool = {0};
     rc_hash_trie_set set = {0};
-
-    RC_CHECK_FALSE(rc_hash_trie_set_contains(set, &pool, 0x10));
-
+    bool contained_before = rc_hash_trie_set_contains(set, &pool, 0x10);
     uint32_t i = rc_hash_trie_set_add(&set, &pool, 0x10, &fix->a);
+
+    RC_CHECK_FALSE(contained_before);
     rc_hash_trie_set_add(&set, &pool, 0x20, &fix->a);
     rc_hash_trie_set_add(&set, &pool, 0x30, &fix->a);
     RC_CHECK(rc_hash_trie_set_add(&set, &pool, 0x10, &fix->a), ==, i);
@@ -283,8 +305,8 @@ RC_TEST_STEP(hash_trie, remove_with_children, fix)
     // into it
     rc_hash_trie_test_pool pool = {0};
     rc_hash_trie_test trie = {0};
-
     uint32_t i = rc_hash_trie_test_add(&trie, &pool, 0x10, 1, &fix->a);
+
     rc_hash_trie_test_add(&trie, &pool, 0x20, 2, &fix->a);
     rc_hash_trie_test_add(&trie, &pool, 0x30, 3, &fix->a);
     RC_CHECK_TRUE(rc_hash_trie_test_remove(trie, &pool, 0x10));
@@ -317,19 +339,16 @@ RC_TEST_STEP(hash_trie, many, fix)
 {
     // 200 keys make several blocks and move the pool; remove the even ones
     rc_hash_trie_test_pool pool = {0};
-    rc_hash_trie_test trie = {0};
+    rc_hash_trie_test trie = trie_of_range(200, &pool, &fix->a);
 
     for (uint64_t k = 1; k <= 200; k++) {
-        rc_hash_trie_test_add(&trie, &pool, k, (int32_t)(k * 2), &fix->a);
-    }
-    for (uint64_t k = 1; k <= 200; k++) {
-        RC_CHECK(value_of(trie, &pool, k), ==, (int32_t)(k * 2));
+        RC_CHECK(value_of(trie, &pool, k), ==, (int32_t)k);
     }
     for (uint64_t k = 2; k <= 200; k += 2) {
         RC_CHECK_TRUE(rc_hash_trie_test_remove(trie, &pool, k));
     }
     for (uint64_t k = 1; k <= 200; k++) {
-        RC_CHECK(value_of(trie, &pool, k), ==, k % 2 == 0 ? -1 : (int32_t)(k * 2));
+        RC_CHECK(value_of(trie, &pool, k), ==, k % 2 == 0 ? -1 : (int32_t)k);
     }
 }
 
@@ -375,14 +394,10 @@ RC_TEST_STEP(hash_trie, release_frees_every_block, fix)
 {
     // Another trie of the same keys fits in the released blocks, without growing the pool
     rc_hash_trie_test_pool pool = {0};
-    rc_hash_trie_test a = {0};
+    rc_hash_trie_test a = trie_of_range(200, &pool, &fix->a);
+    uint32_t blocks = pool.blocks_.slots_.num;
     rc_hash_trie_test b = {0};
 
-    for (uint64_t k = 1; k <= 200; k++) {
-        rc_hash_trie_test_add(&a, &pool, k, (int32_t)k, &fix->a);
-    }
-
-    uint32_t blocks = pool.blocks_.slots_.num;
     rc_hash_trie_test_release(&a, &pool);
     RC_CHECK(a.root_, ==, 0u);
     for (uint64_t k = 1; k <= 200; k++) {
@@ -403,9 +418,7 @@ RC_TEST_STEP(hash_trie, released_root_becomes_a_child, fix)
     rc_hash_trie_test_add(&a, &pool, 1, 1, &fix->a);
     rc_hash_trie_test_add(&b, &pool, 0x10, 16, &fix->a);
     rc_hash_trie_test_release(&a, &pool);
-
-    uint32_t i = rc_hash_trie_test_add(&b, &pool, 0x20, 32, &fix->a);
-    RC_CHECK(i / 4, ==, 0u);
+    RC_CHECK(rc_hash_trie_test_add(&b, &pool, 0x20, 32, &fix->a) / 4, ==, 0u);
     RC_CHECK(pool.blocks_.slots_.num, ==, 2u);
     RC_CHECK(value_of(b, &pool, 0x10), ==, 16);
     RC_CHECK(value_of(b, &pool, 0x20), ==, 32);
@@ -435,11 +448,8 @@ RC_TEST_STEP(hash_trie, release_leaves_other_tries, fix)
 RC_TEST_STEP(hash_trie, deep_chain, fix)
 {
     rc_hash_trie_collide_pool pool = {0};
-    rc_hash_trie_collide trie = {0};
+    rc_hash_trie_collide trie = collide_trie_of_range(20, &pool, &fix->a);
 
-    for (uint64_t k = 1; k <= 20; k++) {
-        rc_hash_trie_collide_add(&trie, &pool, k, (int32_t)k, &fix->a);
-    }
     for (uint64_t k = 1; k <= 20; k++) {
         RC_CHECK(collide_value_of(trie, &pool, k), ==, (int32_t)k);
     }
@@ -459,16 +469,16 @@ RC_TEST_STEP(hash_trie, long_chain, fix)
 {
     // Long enough that recursing a level per key would risk a small stack
     rc_hash_trie_collide_pool pool = {0};
-    rc_hash_trie_collide trie = {0};
+    rc_hash_trie_collide trie = collide_trie_of_range(2000, &pool, &fix->a);
+    bool removed_first = rc_hash_trie_collide_remove(trie, &pool, 1);
+    bool removed_last = rc_hash_trie_collide_remove(trie, &pool, 2000);
+    uint32_t blocks = pool.blocks_.slots_.num;
 
-    for (uint64_t k = 1; k <= 2000; k++) {
-        rc_hash_trie_collide_add(&trie, &pool, k, (int32_t)k, &fix->a);
-    }
-    RC_CHECK_TRUE(rc_hash_trie_collide_remove(trie, &pool, 1));
-    RC_CHECK_TRUE(rc_hash_trie_collide_remove(trie, &pool, 2000));
+    RC_CHECK_TRUE(removed_first);
+    RC_CHECK_TRUE(removed_last);
     RC_CHECK(collide_value_of(trie, &pool, 1000), ==, 1000);
 
-    uint32_t blocks = pool.blocks_.slots_.num;
+    // The released blocks take the keys again without growing the pool
     rc_hash_trie_collide_release(&trie, &pool);
     for (uint64_t k = 1; k <= 1998; k++) {
         rc_hash_trie_collide_add(&trie, &pool, k, (int32_t)k, &fix->a);
@@ -481,13 +491,9 @@ RC_TEST_STEP(hash_trie, emptied_blocks_are_reused, fix)
 {
     // A chain of n keys takes about n blocks; removing and re-adding them reuses those blocks
     rc_hash_trie_collide_pool pool = {0};
-    rc_hash_trie_collide trie = {0};
-
-    for (uint64_t k = 1; k <= 30; k++) {
-        rc_hash_trie_collide_add(&trie, &pool, k, (int32_t)k, &fix->a);
-    }
-
+    rc_hash_trie_collide trie = collide_trie_of_range(30, &pool, &fix->a);
     uint32_t blocks = pool.blocks_.slots_.num;
+
     for (uint32_t cycle = 0; cycle < 5; cycle++) {
         for (uint64_t k = 1; k <= 30; k++) {
             RC_CHECK_TRUE(rc_hash_trie_collide_remove(trie, &pool, k));

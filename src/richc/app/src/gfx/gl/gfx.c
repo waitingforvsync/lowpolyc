@@ -25,6 +25,7 @@ typedef enum rc_gl_command_type {
     RC_GL_COMMAND_TYPE_END_RENDER_PASS
 } rc_gl_command_type;
 
+// One recorded command, for submit to replay.
 typedef struct rc_gl_command {
     uint32_t type;  // rc_gl_command_type
     union {
@@ -59,6 +60,7 @@ typedef struct rc_gl_encoder {
     bool in_render_pass;
 } rc_gl_encoder;
 
+// A finished encoder's commands, waiting to be submitted.
 typedef struct rc_gl_command_buffer {
     rc_array_gl_command commands;
 } rc_gl_command_buffer;
@@ -85,6 +87,7 @@ typedef struct rc_gl_command_buffer {
 
 // ---- the backend ----
 
+// Everything the backend holds for its one device.
 typedef struct rc_gl_backend {
     // The device, or none. Its queue shares its index and generation.
     rc_gfx_device device;
@@ -140,28 +143,43 @@ static void rc_gl_report_errors(rc_str where)
 
 // ---- device ----
 
-rc_gfx_device rc_gfx_device_make(void)
+// Report that GL has no function called name.
+static void rc_gl_report_missing(const char *name)
 {
-    if (!rc_gfx_device_is_none(the_backend.device)) {
-        rc_print_err(RC_STR("rc_gfx_device_make: the GL backend has one device at a time\n"));
-        return (rc_gfx_device) {0};
+    rc_arena scratch = rc_arena_make_default();
+    rc_mstr message = rc_mstr_from_str(RC_STR("rc_gfx_device_make: GL has no "), 64, &scratch);
+
+    rc_mstr_append(&message, rc_str_from_cstr(name), &scratch);
+    rc_mstr_append_char(&message, '\n', &scratch);
+    rc_print_err(message.view);
+    rc_arena_release(&scratch);
+}
+
+
+// Look up every GL function in context. False, once the first one missing is reported, if any are.
+static bool rc_gl_load_all(const rc_gl_context *context)
+{
+    const char *missing = rc_gl_load(context);
+
+    if (missing) {
+        rc_gl_report_missing(missing);
     }
 
-    // rc_gl_context_make reports its own failures
+    return !missing;
+}
+
+
+// The device, on a new context with every GL function we use; none if that can't be had.
+static rc_gfx_device rc_gl_device_make(void)
+{
     rc_gl_context context = rc_gl_context_make();
+
+    // rc_gl_context_make reports its own failures
     if (!context.context_) {
         return (rc_gfx_device) {0};
     }
 
-    const char *missing = rc_gl_load(&context);
-    if (missing) {
-        rc_arena scratch = rc_arena_make_default();
-        rc_mstr message = rc_mstr_from_str(RC_STR("rc_gfx_device_make: GL has no "), 64, &scratch);
-
-        rc_mstr_append(&message, rc_str_from_cstr(missing), &scratch);
-        rc_mstr_append_char(&message, '\n', &scratch);
-        rc_print_err(message.view);
-        rc_arena_release(&scratch);
+    if (!rc_gl_load_all(&context)) {
         rc_gl_context_release(&context);
         return (rc_gfx_device) {0};
     }
@@ -171,6 +189,17 @@ rc_gfx_device rc_gfx_device_make(void)
     the_backend.context = context;
     the_backend.arena = rc_arena_make_default();
     return the_backend.device;
+}
+
+
+rc_gfx_device rc_gfx_device_make(void)
+{
+    if (!rc_gfx_device_is_none(the_backend.device)) {
+        rc_print_err(RC_STR("rc_gfx_device_make: the GL backend has one device at a time\n"));
+        return (rc_gfx_device) {0};
+    }
+
+    return rc_gl_device_make();
 }
 
 
@@ -194,22 +223,35 @@ rc_gfx_queue rc_gfx_device_queue(rc_gfx_device device)
 
 // ---- surface ----
 
-rc_gfx_surface rc_gfx_surface_make(rc_gfx_device device)
+// Add a surface on window to the pools, with the view of it that render passes draw to.
+static rc_gfx_surface rc_gl_surface_add(rc_gl_window window)
 {
-    RC_ASSERT(rc_gl_device_is_valid(device));
-
-    // rc_gl_window_make reports its own failures
-    rc_gl_window window = rc_gl_window_make(&the_backend.context);
-    if (!window.surface_) {
-        return (rc_gfx_surface) {0};
-    }
-
     rc_gl_backend *b = &the_backend;
     rc_gfx_surface surface = rc_genpool_gl_surface_add(&b->surfaces, (rc_gl_surface) {.window = window}, &b->arena);
     rc_gfx_texture_view view = rc_genpool_gl_texture_view_add(&b->texture_views, (rc_gl_texture_view) {.surface = surface}, &b->arena);
 
     rc_genpool_gl_surface_at(&b->surfaces, surface)->view = view;
     return surface;
+}
+
+
+// The surface on a new window, or none if there is no window (rc_gl_window_make reported why).
+static rc_gfx_surface rc_gl_surface_make(void)
+{
+    rc_gl_window window = rc_gl_window_make(&the_backend.context);
+
+    if (!window.surface_) {
+        return (rc_gfx_surface) {0};
+    }
+
+    return rc_gl_surface_add(window);
+}
+
+
+rc_gfx_surface rc_gfx_surface_make(rc_gfx_device device)
+{
+    RC_ASSERT(rc_gl_device_is_valid(device));
+    return rc_gl_surface_make();
 }
 
 
@@ -240,16 +282,59 @@ void rc_gfx_surface_present(rc_gfx_surface surface)
 
 // ---- recording ----
 
+// An emptied command array to record into, or a new one if none are spare.
+static rc_array_gl_command rc_gl_take_spare_commands(void)
+{
+    if (rc_array_gl_command_list_is_empty(&the_backend.spare_commands)) {
+        return (rc_array_gl_command) {0};
+    }
+
+    return rc_array_gl_command_list_pop(&the_backend.spare_commands);
+}
+
+
+// Add an encoder to the pool, recording into a spare command array if there is one.
+static rc_gfx_command_encoder rc_gl_encoder_add(void)
+{
+    rc_gl_backend *b = &the_backend;
+    rc_gl_encoder encoder = {.commands = rc_gl_take_spare_commands()};
+
+    return rc_genpool_gl_encoder_add(&b->encoders, encoder, &b->arena);
+}
+
+
 rc_gfx_command_encoder rc_gfx_command_encoder_make(rc_gfx_device device)
 {
     RC_ASSERT(rc_gl_device_is_valid(device));
+    return rc_gl_encoder_add();
+}
 
-    rc_gl_backend *b = &the_backend;
-    rc_array_gl_command commands = {0};
-    if (!rc_array_gl_command_list_is_empty(&b->spare_commands)) {
-        commands = rc_array_gl_command_list_pop(&b->spare_commands);
+
+// Record command on encoder e.
+static void rc_gl_record(rc_gl_encoder *e, rc_gl_command command)
+{
+    rc_array_gl_command_push(&e->commands, command, &the_backend.arena);
+}
+
+
+// True if desc has room for its attachments, and each is a live texture view.
+static bool rc_gl_render_pass_desc_is_valid(const rc_gfx_render_pass_desc *desc)
+{
+    if (!desc) {
+        return false;
     }
-    return rc_genpool_gl_encoder_add(&b->encoders, (rc_gl_encoder) {.commands = commands}, &b->arena);
+
+    if (desc->color_count > RC_GFX_MAX_COLOR_ATTACHMENTS) {
+        return false;
+    }
+
+    for (uint32_t i = 0; i < desc->color_count; i++) {
+        if (!rc_genpool_gl_texture_view_is_valid(&the_backend.texture_views, desc->color[i].view)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 
@@ -259,13 +344,8 @@ rc_gfx_render_pass rc_gfx_command_encoder_begin_render_pass(rc_gfx_command_encod
     rc_gl_encoder *e = rc_genpool_gl_encoder_at(&b->encoders, encoder);
 
     RC_ASSERT(!e->in_render_pass);
-    RC_ASSERT(desc && desc->color_count <= RC_GFX_MAX_COLOR_ATTACHMENTS);
-    for (uint32_t i = 0; i < desc->color_count; i++) {
-        RC_ASSERT(rc_genpool_gl_texture_view_is_valid(&b->texture_views, desc->color[i].view));
-    }
-
-    rc_gl_command command = {.type = RC_GL_COMMAND_TYPE_BEGIN_RENDER_PASS, .begin_render_pass = *desc};
-    rc_array_gl_command_push(&e->commands, command, &b->arena);
+    RC_ASSERT(rc_gl_render_pass_desc_is_valid(desc));
+    rc_gl_record(e, (rc_gl_command) {.type = RC_GL_COMMAND_TYPE_BEGIN_RENDER_PASS, .begin_render_pass = *desc});
     e->in_render_pass = true;
 
     // A render pass is its encoder, seen through another type
@@ -280,7 +360,7 @@ void rc_gfx_render_pass_end(rc_gfx_render_pass pass)
     rc_gl_encoder *e = rc_genpool_gl_encoder_at(&b->encoders, encoder);
 
     RC_ASSERT(e->in_render_pass);
-    rc_array_gl_command_push(&e->commands, (rc_gl_command) {.type = RC_GL_COMMAND_TYPE_END_RENDER_PASS}, &b->arena);
+    rc_gl_record(e, (rc_gl_command) {.type = RC_GL_COMMAND_TYPE_END_RENDER_PASS});
     e->in_render_pass = false;
 }
 
@@ -343,7 +423,7 @@ static void rc_gl_replay(rc_view_gl_command commands)
     for (uint32_t i = 0; i < commands.num; i++) {
         const rc_gl_command *command = rc_view_gl_command_at(commands, i);
 
-        switch (command->type) {
+        switch ((rc_gl_command_type)command->type) {
             case RC_GL_COMMAND_TYPE_BEGIN_RENDER_PASS:
                 pass = &command->begin_render_pass;
                 rc_gl_begin_render_pass(pass);
@@ -364,11 +444,10 @@ static void rc_gl_replay(rc_view_gl_command commands)
 
 void rc_gfx_queue_submit(rc_gfx_queue queue, rc_gfx_command_buffer commands)
 {
-    RC_ASSERT(rc_gl_queue_is_valid(queue));
-
     rc_gl_backend *b = &the_backend;
     rc_array_gl_command recorded = rc_genpool_gl_command_buffer_get(&b->command_buffers, commands).commands;
 
+    RC_ASSERT(rc_gl_queue_is_valid(queue));
     rc_genpool_gl_command_buffer_remove(&b->command_buffers, commands);
     rc_gl_replay(recorded.view);
 

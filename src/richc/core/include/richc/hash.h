@@ -19,11 +19,22 @@
 
 // ---- numbers ----
 
+// The Murmur3 finaliser of x.
 uint32_t rc_hash_u32(uint32_t x);
+
+// x's bits, hashed as a uint32_t.
 uint32_t rc_hash_i32(int32_t x);
+
+// splitmix64's finaliser of x, folded to 32 bits.
 uint32_t rc_hash_u64(uint64_t x);
+
+// x's bits, hashed as a uint64_t.
 uint32_t rc_hash_i64(int64_t x);
+
+// x's bits, with -0.0 and +0.0 hashing alike.
 uint32_t rc_hash_f32(float x);
+
+// x's bits, with -0.0 and +0.0 hashing alike.
 uint32_t rc_hash_f64(double x);
 
 // The pointer's address.
@@ -31,7 +42,10 @@ uint32_t rc_hash_ptr(const void *p);
 
 // ---- byte sequences ----
 
+// Murmur3 of len bytes at data, which needs no alignment.
 uint32_t rc_hash_bytes(const void *data, uint32_t len);
+
+// Murmur3 of the string's bytes.
 uint32_t rc_hash_str(rc_str s);
 
 // ---- combining ----

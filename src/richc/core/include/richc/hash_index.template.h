@@ -79,8 +79,7 @@
 // ---- internal ----
 
 // The index of key under hash, or RC_INDEX_NONE.
-static inline uint32_t RC_HASH_INDEX_SEARCH_(rc_hash_index table, RC_HASH_INDEX_DATA_TYPE data, RC_HASH_INDEX_KEY_TYPE key,
-                                             uint32_t hash)
+static inline uint32_t RC_HASH_INDEX_SEARCH_(rc_hash_index table, RC_HASH_INDEX_DATA_TYPE data, RC_HASH_INDEX_KEY_TYPE key, uint32_t hash)
 {
     rc_hash_index_probe probe = rc_hash_index_probe_make(table, hash);
     uint32_t index = rc_hash_index_probe_next(table, &probe);
@@ -112,36 +111,34 @@ static inline bool RC_HASH_INDEX_CONTAINS_(rc_hash_index table, RC_HASH_INDEX_DA
 static inline uint32_t RC_HASH_INDEX_FIND_OR_ADD_(rc_hash_index *table, RC_HASH_INDEX_DATA_TYPE data,
                                                   RC_HASH_INDEX_KEY_TYPE key, uint32_t new_index, rc_arena *arena)
 {
-    RC_ASSERT(table);
-
     uint32_t hash = (uint32_t)RC_HASH_INDEX_HASH(key);
     uint32_t index = RC_HASH_INDEX_SEARCH_(*table, data, key, hash);
+
     if (index != RC_INDEX_NONE) {
         return index;
     }
+
     rc_hash_index_add(table, hash, new_index, arena);
     return new_index;
 }
 
 // Add an entry for the key at an index of data, even if that key already has one.
-static inline void RC_HASH_INDEX_ADD_(rc_hash_index *table, RC_HASH_INDEX_DATA_TYPE data, uint32_t index,
-                                      rc_arena *arena)
+static inline void RC_HASH_INDEX_ADD_(rc_hash_index *table, RC_HASH_INDEX_DATA_TYPE data, uint32_t index, rc_arena *arena)
 {
     rc_hash_index_add(table, (uint32_t)RC_HASH_INDEX_HASH(RC_HASH_INDEX_KEY_AT(data, index)), index, arena);
 }
 
 // Remove key's entry, returning the index it had, or RC_INDEX_NONE if it had none.
 // data is left alone.
-static inline uint32_t RC_HASH_INDEX_REMOVE_(rc_hash_index *table, RC_HASH_INDEX_DATA_TYPE data,
-                                             RC_HASH_INDEX_KEY_TYPE key)
+static inline uint32_t RC_HASH_INDEX_REMOVE_(rc_hash_index *table, RC_HASH_INDEX_DATA_TYPE data, RC_HASH_INDEX_KEY_TYPE key)
 {
-    RC_ASSERT(table);
-
     uint32_t hash = (uint32_t)RC_HASH_INDEX_HASH(key);
     uint32_t index = RC_HASH_INDEX_SEARCH_(*table, data, key, hash);
+
     if (index != RC_INDEX_NONE) {
         rc_hash_index_remove(table, hash, index);
     }
+
     return index;
 }
 

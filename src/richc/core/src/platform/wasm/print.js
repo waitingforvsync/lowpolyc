@@ -27,6 +27,7 @@ export function createPrint() {
                 pending = joined;
                 return;
             }
+
             for (const line of decoder.decode(joined.subarray(0, end)).split('\n')) {
                 log(line);
             }

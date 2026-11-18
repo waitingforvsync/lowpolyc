@@ -117,6 +117,7 @@ static inline void rc_hash_index_add(rc_hash_index *table, uint32_t hash, uint32
     if (table->num >= rc_hash_index_max_num_(table->cap)) {
         rc_hash_index_reserve(table, table->num + 1, arena);
     }
+
     rc_hash_index_place_(table->slots_, table->cap - 1, rc_hash_index_stored_(hash), index);
     table->num++;
 }
@@ -129,6 +130,7 @@ static inline rc_hash_index_probe rc_hash_index_probe_make(rc_hash_index table, 
     if (table.cap == 0) {
         return (rc_hash_index_probe) {0};
     }
+
     return (rc_hash_index_probe) {
         .hash_ = stored,
         .slot_ = stored & (table.cap - 1)

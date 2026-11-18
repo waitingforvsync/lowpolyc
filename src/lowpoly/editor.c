@@ -8,6 +8,7 @@
 #include "richc/app/app.h"
 #include "richc/gfx/gfx.h"
 
+// The editor's state: the GPU objects it draws with, and which colour it clears to.
 typedef struct editor {
     rc_gfx_device device;
     rc_gfx_queue queue;
@@ -24,10 +25,12 @@ static rc_gfx_color editor_clear_colour(const editor *ed)
     if (ed->alt_colour) {
         return (rc_gfx_color) {.r = 0.10f, .g = 0.20f, .b = 0.45f, .a = 1.0f};
     }
+
     return (rc_gfx_color) {.r = 0.12f, .g = 0.12f, .b = 0.12f, .a = 1.0f};
 }
 
 
+// Make the GPU objects, once the window is open.
 static void editor_init(void *user)
 {
     editor *ed = user;
@@ -37,11 +40,13 @@ static void editor_init(void *user)
     if (rc_gfx_device_is_none(ed->device)) {
         return;
     }
+
     ed->queue = rc_gfx_device_queue(ed->device);
     ed->surface = rc_gfx_surface_make(ed->device);
 }
 
 
+// Space swaps the clear colour.
 static void editor_event(void *user, const rc_app_event *event)
 {
     editor *ed = user;
@@ -52,14 +57,9 @@ static void editor_event(void *user, const rc_app_event *event)
 }
 
 
-static void editor_frame(void *user)
+// Clear the window and show it.
+static void editor_draw(const editor *ed)
 {
-    editor *ed = user;
-
-    if (rc_gfx_surface_is_none(ed->surface)) {
-        return;
-    }
-
     rc_gfx_command_encoder encoder = rc_gfx_command_encoder_make(ed->device);
     rc_gfx_render_pass pass = rc_gfx_command_encoder_begin_render_pass(encoder, &(rc_gfx_render_pass_desc) {
         .color = {{
@@ -76,6 +76,20 @@ static void editor_frame(void *user)
 }
 
 
+// Draw a frame, if there is a surface to draw it on.
+static void editor_frame(void *user)
+{
+    editor *ed = user;
+
+    if (rc_gfx_surface_is_none(ed->surface)) {
+        return;
+    }
+
+    editor_draw(ed);
+}
+
+
+// Release the GPU objects, before the window closes.
 static void editor_deinit(void *user)
 {
     editor *ed = user;
@@ -83,6 +97,7 @@ static void editor_deinit(void *user)
     if (!rc_gfx_surface_is_none(ed->surface)) {
         rc_gfx_surface_release(ed->surface);
     }
+
     if (!rc_gfx_device_is_none(ed->device)) {
         rc_gfx_device_release(ed->device);
     }

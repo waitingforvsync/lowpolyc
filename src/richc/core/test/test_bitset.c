@@ -101,7 +101,7 @@ RC_TEST(bitset, make_empty)
 RC_TEST_STEP(bitset, make_copy, fix)
 {
     uint32_t bits[] = {3, 64, 99};
-    rc_bitset a = bitset_with(100, bits, 3, &fix->a);
+    rc_bitset a = bitset_with(100, bits, RC_COUNT(bits), &fix->a);
     rc_bitset b = rc_bitset_make_copy(&a, &fix->a);
 
     RC_CHECK_TRUE(rc_bitset_is_equal(&a, &b));
@@ -154,7 +154,7 @@ RC_TEST_STEP(bitset, reserve_smaller_needs_no_arena, fix)
 RC_TEST_STEP(bitset, resize_grow_keeps_bits, fix)
 {
     uint32_t bits[] = {10, 39};
-    rc_bitset bs = bitset_with(40, bits, 2, &fix->a);
+    rc_bitset bs = bitset_with(40, bits, RC_COUNT(bits), &fix->a);
 
     rc_bitset_resize(&bs, 200, &fix->a);
     RC_CHECK(bs.num, ==, 200u);
@@ -168,7 +168,7 @@ RC_TEST_STEP(bitset, resize_shrink_clears_dropped_bits, fix)
 {
     // 70 is in the word that 66 cuts through; 150 is in a word wholly past it
     uint32_t bits[] = {5, 50, 70, 150};
-    rc_bitset bs = bitset_with(200, bits, 4, &fix->a);
+    rc_bitset bs = bitset_with(200, bits, RC_COUNT(bits), &fix->a);
 
     rc_bitset_resize(&bs, 66, NULL);
     RC_CHECK(bs.num, ==, 66u);
@@ -185,7 +185,7 @@ RC_TEST_STEP(bitset, resize_shrink_clears_dropped_bits, fix)
 RC_TEST_STEP(bitset, resize_shrink_to_word_boundary, fix)
 {
     uint32_t bits[] = {10, 64, 100};
-    rc_bitset bs = bitset_with(128, bits, 3, &fix->a);
+    rc_bitset bs = bitset_with(128, bits, RC_COUNT(bits), &fix->a);
 
     rc_bitset_resize(&bs, 64, NULL);
     rc_bitset_resize(&bs, 128, NULL);
@@ -198,7 +198,7 @@ RC_TEST_STEP(bitset, resize_shrink_to_word_boundary, fix)
 RC_TEST_STEP(bitset, resize_to_zero, fix)
 {
     uint32_t bits[] = {0, 31};
-    rc_bitset bs = bitset_with(32, bits, 2, &fix->a);
+    rc_bitset bs = bitset_with(32, bits, RC_COUNT(bits), &fix->a);
 
     rc_bitset_resize(&bs, 0, NULL);
     RC_CHECK(bs.num, ==, 0u);
@@ -268,7 +268,7 @@ RC_TEST_STEP(bitset, push_n_zero_none, fix)
 RC_TEST_STEP(bitset, clear_all, fix)
 {
     uint32_t bits[] = {3, 99};
-    rc_bitset bs = bitset_with(100, bits, 2, &fix->a);
+    rc_bitset bs = bitset_with(100, bits, RC_COUNT(bits), &fix->a);
 
     rc_bitset_clear_all(&bs);
     RC_CHECK(bs.num, ==, 100u);
@@ -331,7 +331,7 @@ RC_TEST_STEP(bitset, set_clear_is_set, fix)
 
 // ---- searching ----
 
-RC_TEST_STEP(bitset, get_first_set, fix)
+RC_TEST_STEP(bitset, first_set, fix)
 {
     rc_bitset bs = rc_bitset_make(200, &fix->a);
 
@@ -344,11 +344,11 @@ RC_TEST_STEP(bitset, get_first_set, fix)
 }
 
 
-RC_TEST_STEP(bitset, get_next_set_visits_in_order, fix)
+RC_TEST_STEP(bitset, next_set_visits_in_order, fix)
 {
     // Either side of word boundaries, and the very last bit
     uint32_t bits[] = {0, 1, 31, 32, 63, 64, 100, 200, 255};
-    rc_bitset bs = bitset_with(256, bits, 9, &fix->a);
+    rc_bitset bs = bitset_with(256, bits, RC_COUNT(bits), &fix->a);
     uint32_t visited = 0;
 
     for (uint32_t i = rc_bitset_first_set(&bs); i != RC_INDEX_NONE; i = rc_bitset_next_set(&bs, i + 1)) {
@@ -359,10 +359,10 @@ RC_TEST_STEP(bitset, get_next_set_visits_in_order, fix)
 }
 
 
-RC_TEST_STEP(bitset, get_next_set_from_pos, fix)
+RC_TEST_STEP(bitset, next_set_from_pos, fix)
 {
     uint32_t bits[] = {5, 40};
-    rc_bitset bs = bitset_with(64, bits, 2, &fix->a);
+    rc_bitset bs = bitset_with(64, bits, RC_COUNT(bits), &fix->a);
 
     // pos on a set bit finds that bit
     RC_CHECK(rc_bitset_next_set(&bs, 0), ==, 5u);
@@ -381,8 +381,8 @@ RC_TEST_STEP(bitset, copy, fix)
 {
     uint32_t a_bits[] = {1, 39};
     uint32_t b_bits[] = {5};
-    rc_bitset a = bitset_with(40, a_bits, 2, &fix->a);
-    rc_bitset b = bitset_with(40, b_bits, 1, &fix->a);
+    rc_bitset a = bitset_with(40, a_bits, RC_COUNT(a_bits), &fix->a);
+    rc_bitset b = bitset_with(40, b_bits, RC_COUNT(b_bits), &fix->a);
 
     rc_bitset_copy(&b, &a);
     RC_CHECK_TRUE(rc_bitset_is_equal(&a, &b));
@@ -394,8 +394,8 @@ RC_TEST_STEP(bitset, union_same_size, fix)
 {
     uint32_t a_bits[] = {1, 40};
     uint32_t b_bits[] = {40, 63};
-    rc_bitset a = bitset_with(64, a_bits, 2, &fix->a);
-    rc_bitset b = bitset_with(64, b_bits, 2, &fix->a);
+    rc_bitset a = bitset_with(64, a_bits, RC_COUNT(a_bits), &fix->a);
+    rc_bitset b = bitset_with(64, b_bits, RC_COUNT(b_bits), &fix->a);
 
     rc_bitset_union(&a, &b);
     RC_CHECK(rc_bitset_count_set(&a), ==, 3u);
@@ -408,11 +408,11 @@ RC_TEST_STEP(bitset, union_same_size, fix)
 RC_TEST_STEP(bitset, union_wider_src, fix)
 {
     // 45 shares dst's last word but is past dst->num, so it must not leak into dst's tail, where
-    // num_set_bits would count it
+    // count_set would see it
     uint32_t d_bits[] = {2};
     uint32_t s_bits[] = {39, 45, 70};
-    rc_bitset d = bitset_with(40, d_bits, 1, &fix->a);
-    rc_bitset s = bitset_with(80, s_bits, 3, &fix->a);
+    rc_bitset d = bitset_with(40, d_bits, RC_COUNT(d_bits), &fix->a);
+    rc_bitset s = bitset_with(80, s_bits, RC_COUNT(s_bits), &fix->a);
 
     rc_bitset_union(&d, &s);
     RC_CHECK(d.num, ==, 40u);
@@ -425,8 +425,8 @@ RC_TEST_STEP(bitset, union_narrower_src, fix)
 {
     uint32_t d_bits[] = {70};
     uint32_t s_bits[] = {5};
-    rc_bitset d = bitset_with(80, d_bits, 1, &fix->a);
-    rc_bitset s = bitset_with(32, s_bits, 1, &fix->a);
+    rc_bitset d = bitset_with(80, d_bits, RC_COUNT(d_bits), &fix->a);
+    rc_bitset s = bitset_with(32, s_bits, RC_COUNT(s_bits), &fix->a);
 
     rc_bitset_union(&d, &s);
     RC_CHECK(rc_bitset_count_set(&d), ==, 2u);
@@ -439,8 +439,8 @@ RC_TEST_STEP(bitset, intersection_same_size, fix)
 {
     uint32_t a_bits[] = {1, 40, 63};
     uint32_t b_bits[] = {40, 63};
-    rc_bitset a = bitset_with(64, a_bits, 3, &fix->a);
-    rc_bitset b = bitset_with(64, b_bits, 2, &fix->a);
+    rc_bitset a = bitset_with(64, a_bits, RC_COUNT(a_bits), &fix->a);
+    rc_bitset b = bitset_with(64, b_bits, RC_COUNT(b_bits), &fix->a);
 
     rc_bitset_intersection(&a, &b);
     RC_CHECK(rc_bitset_count_set(&a), ==, 2u);
@@ -453,8 +453,8 @@ RC_TEST_STEP(bitset, intersection_narrower_src, fix)
     // src has no bit 70, so it counts as clear
     uint32_t d_bits[] = {5, 70};
     uint32_t s_bits[] = {5, 20};
-    rc_bitset d = bitset_with(80, d_bits, 2, &fix->a);
-    rc_bitset s = bitset_with(32, s_bits, 2, &fix->a);
+    rc_bitset d = bitset_with(80, d_bits, RC_COUNT(d_bits), &fix->a);
+    rc_bitset s = bitset_with(32, s_bits, RC_COUNT(s_bits), &fix->a);
 
     rc_bitset_intersection(&d, &s);
     RC_CHECK(rc_bitset_count_set(&d), ==, 1u);
@@ -466,8 +466,8 @@ RC_TEST_STEP(bitset, intersection_disjoint, fix)
 {
     uint32_t p_bits[] = {1};
     uint32_t q_bits[] = {2};
-    rc_bitset p = bitset_with(40, p_bits, 1, &fix->a);
-    rc_bitset q = bitset_with(40, q_bits, 1, &fix->a);
+    rc_bitset p = bitset_with(40, p_bits, RC_COUNT(p_bits), &fix->a);
+    rc_bitset q = bitset_with(40, q_bits, RC_COUNT(q_bits), &fix->a);
 
     rc_bitset_intersection(&p, &q);
     RC_CHECK(rc_bitset_count_set(&p), ==, 0u);
@@ -478,8 +478,8 @@ RC_TEST_STEP(bitset, intersects, fix)
 {
     uint32_t a_bits[] = {10};
     uint32_t b_bits[] = {50};
-    rc_bitset a = bitset_with(64, a_bits, 1, &fix->a);
-    rc_bitset b = bitset_with(64, b_bits, 1, &fix->a);
+    rc_bitset a = bitset_with(64, a_bits, RC_COUNT(a_bits), &fix->a);
+    rc_bitset b = bitset_with(64, b_bits, RC_COUNT(b_bits), &fix->a);
 
     RC_CHECK_FALSE(rc_bitset_intersects(&a, &b));
     rc_bitset_set(&b, 10);
@@ -492,8 +492,8 @@ RC_TEST_STEP(bitset, intersects_different_sizes, fix)
     // Only the bits both have count, whichever way round
     uint32_t w_bits[] = {40};
     uint32_t n_bits[] = {7};
-    rc_bitset w = bitset_with(80, w_bits, 1, &fix->a);
-    rc_bitset n = bitset_with(32, n_bits, 1, &fix->a);
+    rc_bitset w = bitset_with(80, w_bits, RC_COUNT(w_bits), &fix->a);
+    rc_bitset n = bitset_with(32, n_bits, RC_COUNT(n_bits), &fix->a);
 
     RC_CHECK_FALSE(rc_bitset_intersects(&w, &n));
     rc_bitset_set(&w, 7);
@@ -505,8 +505,8 @@ RC_TEST_STEP(bitset, intersects_different_sizes, fix)
 RC_TEST_STEP(bitset, is_equal, fix)
 {
     uint32_t bits[] = {3, 64};
-    rc_bitset a = bitset_with(100, bits, 2, &fix->a);
-    rc_bitset b = bitset_with(100, bits, 2, &fix->a);
+    rc_bitset a = bitset_with(100, bits, RC_COUNT(bits), &fix->a);
+    rc_bitset b = bitset_with(100, bits, RC_COUNT(bits), &fix->a);
 
     RC_CHECK_TRUE(rc_bitset_is_equal(&a, &b));
     rc_bitset_set(&b, 65);
@@ -518,8 +518,8 @@ RC_TEST_STEP(bitset, is_equal_different_sizes, fix)
 {
     // The same bits set, but not the same size
     uint32_t bits[] = {1};
-    rc_bitset c = bitset_with(40, bits, 1, &fix->a);
-    rc_bitset d = bitset_with(64, bits, 1, &fix->a);
+    rc_bitset c = bitset_with(40, bits, RC_COUNT(bits), &fix->a);
+    rc_bitset d = bitset_with(64, bits, RC_COUNT(bits), &fix->a);
     rc_bitset e = {0};
     rc_bitset f = {0};
 
@@ -528,11 +528,11 @@ RC_TEST_STEP(bitset, is_equal_different_sizes, fix)
 }
 
 
-RC_TEST_STEP(bitset, num_set_bits, fix)
+RC_TEST_STEP(bitset, count_set, fix)
 {
     // 99 is in the last word, whose bits past num stay clear
     uint32_t bits[] = {0, 31, 32, 99};
-    rc_bitset a = bitset_with(100, bits, 4, &fix->a);
+    rc_bitset a = bitset_with(100, bits, RC_COUNT(bits), &fix->a);
 
     RC_CHECK(rc_bitset_count_set(&a), ==, 4u);
     rc_bitset_clear(&a, 31);

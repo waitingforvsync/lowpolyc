@@ -51,6 +51,7 @@
 #define RC_GENPOOL_ RC_CONCAT(rc_genpool_, RC_GENPOOL_NAME)
 #define RC_GENPOOL_SLOT_ RC_CONCAT(RC_GENPOOL_, _slot_)
 #define RC_GENPOOL_SLOTS_ RC_CONCAT(rc_array_genpool_, RC_CONCAT(RC_GENPOOL_NAME, _slot_))
+#define RC_GENPOOL_SLOTS_VIEW_ RC_CONCAT(rc_view_genpool_, RC_CONCAT(RC_GENPOOL_NAME, _slot_))
 
 #define RC_GENPOOL_MAKE_ RC_CONCAT(RC_GENPOOL_, _make)
 #define RC_GENPOOL_RESERVE_ RC_CONCAT(RC_GENPOOL_, _reserve)
@@ -66,12 +67,15 @@
 #define RC_GENPOOL_NUM_SLOTS_ RC_CONCAT(RC_GENPOOL_, _num_slots)
 #define RC_GENPOOL_IS_LIVE_ RC_CONCAT(RC_GENPOOL_, _is_live)
 #define RC_GENPOOL_HANDLE_AT_ RC_CONCAT(RC_GENPOOL_, _handle_at)
+#define RC_GENPOOL_REUSE_ RC_CONCAT(RC_GENPOOL_, _reuse_)
 
 #define RC_GENPOOL_SLOTS_MAKE_ RC_CONCAT(RC_GENPOOL_SLOTS_, _make)
 #define RC_GENPOOL_SLOTS_RESERVE_ RC_CONCAT(RC_GENPOOL_SLOTS_, _reserve)
 #define RC_GENPOOL_SLOTS_RESET_ RC_CONCAT(RC_GENPOOL_SLOTS_, _reset)
 #define RC_GENPOOL_SLOTS_RELEASE_ RC_CONCAT(RC_GENPOOL_SLOTS_, _release)
 #define RC_GENPOOL_SLOTS_PUSH_ RC_CONCAT(RC_GENPOOL_SLOTS_, _push)
+#define RC_GENPOOL_SLOTS_AT_ RC_CONCAT(RC_GENPOOL_SLOTS_, _at)
+#define RC_GENPOOL_SLOTS_VIEW_AT_ RC_CONCAT(RC_GENPOOL_SLOTS_VIEW_, _at)
 
 // ---- types ----
 
@@ -89,6 +93,7 @@ typedef struct RC_GENPOOL_SLOT_ {
 #define RC_ARRAY_NAME RC_CONCAT(genpool_, RC_CONCAT(RC_GENPOOL_NAME, _slot_))
 #include "richc/array.template.h"
 
+// The pool: its slots, and the head of the free list.
 typedef struct RC_GENPOOL_ {
     RC_GENPOOL_SLOTS_ slots_;
     uint32_t first_free_;  // the first free slot's index plus one; 0 if none is free
@@ -128,37 +133,50 @@ static inline void RC_GENPOOL_RELEASE_(RC_GENPOOL_ *pool, rc_arena *arena)
 // the slot's current one.
 static inline bool RC_GENPOOL_IS_VALID_(const RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handle)
 {
-    return (handle.gen_ & 1u) != 0 && handle.index_ < pool->slots_.num
-        && pool->slots_.data[handle.index_].gen == handle.gen_;
+    if ((handle.gen_ & 1u) == 0) {
+        return false;
+    }
+
+    if (handle.index_ >= pool->slots_.num) {
+        return false;
+    }
+
+    return RC_GENPOOL_SLOTS_VIEW_AT_(pool->slots_.view, handle.index_)->gen == handle.gen_;
 }
 
 // ---- add and remove ----
 
-// Add value, returning its handle: the most recently freed slot, or else a new one at the end.
-static inline RC_GENPOOL_HANDLE RC_GENPOOL_ADD_(RC_GENPOOL_ *pool, RC_GENPOOL_TYPE value, rc_arena *arena)
+// Put value in the most recently freed slot, moving its generation on, and return its handle.
+static inline RC_GENPOOL_HANDLE RC_GENPOOL_REUSE_(RC_GENPOOL_ *pool, RC_GENPOOL_TYPE value)
 {
-    if (pool->first_free_ == 0) {
-        RC_GENPOOL_SLOT_ slot = {.value = value, .gen = 1};
-        uint32_t index = RC_GENPOOL_SLOTS_PUSH_(&pool->slots_, slot, arena);
-
-        return (RC_GENPOOL_HANDLE) {.index_ = index, .gen_ = 1};
-    }
-
     uint32_t index = pool->first_free_ - 1;
-    RC_GENPOOL_SLOT_ *slot = &pool->slots_.data[index];
+    RC_GENPOOL_SLOT_ *slot = RC_GENPOOL_SLOTS_AT_(&pool->slots_, index);
+
     pool->first_free_ = slot->next_free_;
     slot->value = value;
     slot->gen++;
     return (RC_GENPOOL_HANDLE) {.index_ = index, .gen_ = slot->gen};
 }
 
+// Add value, returning its handle: the most recently freed slot, or else a new one at the end.
+static inline RC_GENPOOL_HANDLE RC_GENPOOL_ADD_(RC_GENPOOL_ *pool, RC_GENPOOL_TYPE value, rc_arena *arena)
+{
+    if (pool->first_free_ == 0) {
+        uint32_t index = RC_GENPOOL_SLOTS_PUSH_(&pool->slots_, (RC_GENPOOL_SLOT_) {.value = value, .gen = 1}, arena);
+
+        return (RC_GENPOOL_HANDLE) {.index_ = index, .gen_ = 1};
+    }
+
+    return RC_GENPOOL_REUSE_(pool, value);
+}
+
 // Remove the element, moving its slot's generation on so every handle to it goes stale. Asserts
 // the handle is valid, which catches removing twice.
 static inline void RC_GENPOOL_REMOVE_(RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handle)
 {
-    RC_ASSERT(RC_GENPOOL_IS_VALID_(pool, handle));
+    RC_GENPOOL_SLOT_ *slot = RC_GENPOOL_SLOTS_AT_(&pool->slots_, handle.index_);
 
-    RC_GENPOOL_SLOT_ *slot = &pool->slots_.data[handle.index_];
+    RC_ASSERT(RC_GENPOOL_IS_VALID_(pool, handle));
     slot->gen++;
     slot->next_free_ = pool->first_free_;
     pool->first_free_ = handle.index_ + 1;
@@ -170,28 +188,28 @@ static inline void RC_GENPOOL_REMOVE_(RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handl
 static inline RC_GENPOOL_TYPE RC_GENPOOL_GET_(const RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handle)
 {
     RC_ASSERT(RC_GENPOOL_IS_VALID_(pool, handle));
-    return pool->slots_.data[handle.index_].value;
+    return RC_GENPOOL_SLOTS_VIEW_AT_(pool->slots_.view, handle.index_)->value;
 }
 
 // Overwrite the element.
 static inline void RC_GENPOOL_SET_(RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handle, RC_GENPOOL_TYPE value)
 {
     RC_ASSERT(RC_GENPOOL_IS_VALID_(pool, handle));
-    pool->slots_.data[handle.index_].value = value;
+    RC_GENPOOL_SLOTS_AT_(&pool->slots_, handle.index_)->value = value;
 }
 
 // A pointer to the element. Anything that grows the pool may move it.
 static inline RC_GENPOOL_TYPE *RC_GENPOOL_AT_(RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handle)
 {
     RC_ASSERT(RC_GENPOOL_IS_VALID_(pool, handle));
-    return &pool->slots_.data[handle.index_].value;
+    return &RC_GENPOOL_SLOTS_AT_(&pool->slots_, handle.index_)->value;
 }
 
 // Like at, through a read-only pool.
 static inline const RC_GENPOOL_TYPE *RC_GENPOOL_AT_CONST_(const RC_GENPOOL_ *pool, RC_GENPOOL_HANDLE handle)
 {
     RC_ASSERT(RC_GENPOOL_IS_VALID_(pool, handle));
-    return &pool->slots_.data[handle.index_].value;
+    return &RC_GENPOOL_SLOTS_VIEW_AT_(pool->slots_.view, handle.index_)->value;
 }
 
 // ---- iteration ----
@@ -205,15 +223,14 @@ static inline uint32_t RC_GENPOOL_NUM_SLOTS_(const RC_GENPOOL_ *pool)
 // True when slot index holds an element.
 static inline bool RC_GENPOOL_IS_LIVE_(const RC_GENPOOL_ *pool, uint32_t index)
 {
-    RC_ASSERT(index < pool->slots_.num);
-    return (pool->slots_.data[index].gen & 1u) != 0;
+    return (RC_GENPOOL_SLOTS_VIEW_AT_(pool->slots_.view, index)->gen & 1u) != 0;
 }
 
 // The handle to the element in slot index, which must be live.
 static inline RC_GENPOOL_HANDLE RC_GENPOOL_HANDLE_AT_(const RC_GENPOOL_ *pool, uint32_t index)
 {
     RC_ASSERT(RC_GENPOOL_IS_LIVE_(pool, index));
-    return (RC_GENPOOL_HANDLE) {.index_ = index, .gen_ = pool->slots_.data[index].gen};
+    return (RC_GENPOOL_HANDLE) {.index_ = index, .gen_ = RC_GENPOOL_SLOTS_VIEW_AT_(pool->slots_.view, index)->gen};
 }
 
 // ---- cleanup ----
@@ -232,16 +249,20 @@ static inline RC_GENPOOL_HANDLE RC_GENPOOL_HANDLE_AT_(const RC_GENPOOL_ *pool, u
 #undef RC_GENPOOL_NUM_SLOTS_
 #undef RC_GENPOOL_IS_LIVE_
 #undef RC_GENPOOL_HANDLE_AT_
+#undef RC_GENPOOL_REUSE_
 
 #undef RC_GENPOOL_SLOTS_MAKE_
 #undef RC_GENPOOL_SLOTS_RESERVE_
 #undef RC_GENPOOL_SLOTS_RESET_
 #undef RC_GENPOOL_SLOTS_RELEASE_
 #undef RC_GENPOOL_SLOTS_PUSH_
+#undef RC_GENPOOL_SLOTS_AT_
+#undef RC_GENPOOL_SLOTS_VIEW_AT_
 
 #undef RC_GENPOOL_
 #undef RC_GENPOOL_SLOT_
 #undef RC_GENPOOL_SLOTS_
+#undef RC_GENPOOL_SLOTS_VIEW_
 
 #undef RC_GENPOOL_HANDLE
 #undef RC_GENPOOL_NAME

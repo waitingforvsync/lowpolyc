@@ -35,6 +35,29 @@ RC_TEST_GROUP_DEINIT(pool, fix)
 }
 
 
+// A pool of num zeroed slots.
+static rc_pool_i32 pool_of(uint32_t num, rc_arena *arena)
+{
+    rc_pool_i32 pool = {0};
+
+    for (uint32_t i = 0; i < num; i++) {
+        rc_pool_i32_add(&pool, 0, arena);
+    }
+    return pool;
+}
+
+
+// A pool of num zeroed slots, then first_hole and second_hole removed in that order.
+static rc_pool_i32 pool_with_holes(uint32_t num, uint32_t first_hole, uint32_t second_hole, rc_arena *arena)
+{
+    rc_pool_i32 pool = pool_of(num, arena);
+
+    rc_pool_i32_remove(&pool, first_hole);
+    rc_pool_i32_remove(&pool, second_hole);
+    return pool;
+}
+
+
 // ---- lifecycle ----
 
 RC_TEST_STEP(pool, make, fix)
@@ -108,12 +131,9 @@ RC_TEST_STEP(pool, add_stores_value, fix)
 
 RC_TEST_STEP(pool, remove_then_reuse, fix)
 {
-    rc_pool_i32 pool = {0};
+    rc_pool_i32 pool = pool_of(3, &fix->a);
+    uint32_t b = 1;
 
-    rc_pool_i32_add(&pool, 0, &fix->a);
-
-    uint32_t b = rc_pool_i32_add(&pool, 0, &fix->a);
-    rc_pool_i32_add(&pool, 0, &fix->a);
     rc_pool_i32_set(&pool, b, 7);
     rc_pool_i32_remove(&pool, b);
     RC_CHECK(rc_pool_i32_num_slots(&pool), ==, 3u);
@@ -126,13 +146,8 @@ RC_TEST_STEP(pool, remove_then_reuse, fix)
 
 RC_TEST_STEP(pool, reuses_last_freed_first, fix)
 {
-    rc_pool_i32 pool = {0};
+    rc_pool_i32 pool = pool_with_holes(4, 1, 2, &fix->a);
 
-    for (uint32_t i = 0; i < 4; i++) {
-        rc_pool_i32_add(&pool, 0, &fix->a);
-    }
-    rc_pool_i32_remove(&pool, 1);
-    rc_pool_i32_remove(&pool, 2);
     RC_CHECK(rc_pool_i32_add(&pool, 0, &fix->a), ==, 2u);
     RC_CHECK(rc_pool_i32_add(&pool, 0, &fix->a), ==, 1u);
     RC_CHECK(rc_pool_i32_add(&pool, 0, &fix->a), ==, 4u);
@@ -142,11 +157,8 @@ RC_TEST_STEP(pool, reuses_last_freed_first, fix)
 RC_TEST_STEP(pool, remove_last_slot_keeps_it, fix)
 {
     // Removing from the final slot does not shrink the pool
-    rc_pool_i32 pool = {0};
+    rc_pool_i32 pool = pool_of(3, &fix->a);
 
-    for (uint32_t i = 0; i < 3; i++) {
-        rc_pool_i32_add(&pool, 0, &fix->a);
-    }
     rc_pool_i32_remove(&pool, 2);
     RC_CHECK(pool.slots_.num, ==, 3u);
     RC_CHECK(rc_pool_i32_add(&pool, 0, &fix->a), ==, 2u);
@@ -156,10 +168,8 @@ RC_TEST_STEP(pool, remove_last_slot_keeps_it, fix)
 RC_TEST_STEP(pool, index_zero_round_trips, fix)
 {
     // Slot 0 is stored as link 1 on the free list
-    rc_pool_i32 pool = {0};
+    rc_pool_i32 pool = pool_of(2, &fix->a);
 
-    rc_pool_i32_add(&pool, 0, &fix->a);
-    rc_pool_i32_add(&pool, 0, &fix->a);
     rc_pool_i32_remove(&pool, 0);
     RC_CHECK(pool.first_free_, ==, 1u);
     RC_CHECK(rc_pool_i32_add(&pool, 0, &fix->a), ==, 0u);
@@ -170,13 +180,8 @@ RC_TEST_STEP(pool, index_zero_round_trips, fix)
 RC_TEST_STEP(pool, add_remove_are_inverses, fix)
 {
     // Whatever shape the free list has, add then remove puts it back
-    rc_pool_i32 pool = {0};
+    rc_pool_i32 pool = pool_with_holes(3, 1, 2, &fix->a);
 
-    for (uint32_t i = 0; i < 3; i++) {
-        rc_pool_i32_add(&pool, 0, &fix->a);
-    }
-    rc_pool_i32_remove(&pool, 1);
-    rc_pool_i32_remove(&pool, 2);
     for (uint32_t step = 0; step < 6; step++) {
         uint32_t num = pool.slots_.num;
         uint32_t first_free = pool.first_free_;
@@ -260,15 +265,9 @@ RC_TEST_STEP(pool, struct_elements, fix)
 
 RC_TEST_STEP(pool, free_bitset, fix)
 {
-    rc_pool_i32 pool = {0};
-
-    for (uint32_t i = 0; i < 8; i++) {
-        rc_pool_i32_add(&pool, 0, &fix->a);
-    }
-    rc_pool_i32_remove(&pool, 2);
-    rc_pool_i32_remove(&pool, 5);
-
+    rc_pool_i32 pool = pool_with_holes(8, 2, 5, &fix->a);
     rc_bitset free_slots = rc_pool_i32_free_bitset(&pool, &fix->a);
+
     RC_CHECK(free_slots.num, ==, rc_pool_i32_num_slots(&pool));
     for (uint32_t i = 0; i < 8; i++) {
         RC_CHECK(rc_bitset_is_set(&free_slots, i), ==, (i == 2 || i == 5));

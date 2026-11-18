@@ -61,10 +61,23 @@
 #define RC_HASH_TRIE_LEAF_ 1u
 #define RC_HASH_TRIE_BLOCK_LINK_ 2u
 
+// Where a key is: its node index, and the index of the node linking to its block (RC_INDEX_NONE
+// at the root).
+typedef struct rc_hash_trie_place_ {
+    uint32_t node;
+    uint32_t parent;
+} rc_hash_trie_place_;
+
 // The hash rotated right by bits, bringing the next level's bits to the bottom.
 static inline uint32_t rc_hash_trie_rotate_(uint32_t hash, uint32_t bits)
 {
     return (hash >> bits) | (hash << (32 - bits));
+}
+
+// The place of a key that is not there.
+static inline rc_hash_trie_place_ rc_hash_trie_nowhere_(void)
+{
+    return (rc_hash_trie_place_) {.node = RC_INDEX_NONE, .parent = RC_INDEX_NONE};
 }
 
 #endif // RC_HASH_TRIE_TEMPLATE_H_
@@ -138,8 +151,14 @@ static inline uint32_t rc_hash_trie_rotate_(uint32_t hash, uint32_t bits)
 #define RC_HASH_TRIE_NODE_AT_ RC_CONCAT(RC_HASH_TRIE_, _node_at_)
 #define RC_HASH_TRIE_NODE_AT_CONST_ RC_CONCAT(RC_HASH_TRIE_, _node_at_const_)
 #define RC_HASH_TRIE_BLOCK_IS_EMPTY_ RC_CONCAT(RC_HASH_TRIE_, _block_is_empty_)
-#define RC_HASH_TRIE_PROBE_ RC_CONCAT(RC_HASH_TRIE_, _probe_)
+#define RC_HASH_TRIE_HOLDS_ RC_CONCAT(RC_HASH_TRIE_, _holds_)
+#define RC_HASH_TRIE_FIRST_SLOT_ RC_CONCAT(RC_HASH_TRIE_, _first_slot_)
+#define RC_HASH_TRIE_ROOT_BLOCK_ RC_CONCAT(RC_HASH_TRIE_, _root_block_)
+#define RC_HASH_TRIE_SEARCH_ RC_CONCAT(RC_HASH_TRIE_, _search_)
+#define RC_HASH_TRIE_PLACE_OF_ RC_CONCAT(RC_HASH_TRIE_, _place_of_)
 #define RC_HASH_TRIE_INSERT_ RC_CONCAT(RC_HASH_TRIE_, _insert_)
+#define RC_HASH_TRIE_PULL_UP_ RC_CONCAT(RC_HASH_TRIE_, _pull_up_)
+#define RC_HASH_TRIE_EMPTY_LEAF_ RC_CONCAT(RC_HASH_TRIE_, _empty_leaf_)
 
 #define RC_HASH_TRIE_BLOCKS_MAKE_ RC_CONCAT(RC_HASH_TRIE_BLOCKS_, _make)
 #define RC_HASH_TRIE_BLOCKS_RESERVE_ RC_CONCAT(RC_HASH_TRIE_BLOCKS_, _reserve)
@@ -152,15 +171,17 @@ static inline uint32_t rc_hash_trie_rotate_(uint32_t hash, uint32_t bits)
 
 // ---- types ----
 
+// A slot of a block: empty, or a key with its value.
 typedef struct RC_HASH_TRIE_NODE_ {
     RC_HASH_TRIE_KEY_TYPE key;
 #ifdef RC_HASH_TRIE_VALUE_TYPE
     RC_HASH_TRIE_VALUE_TYPE value;
 #endif
-    uint32_t hash_;   // the key's hash
+    uint32_t hash_;
     uint32_t child_;  // empty, a leaf, or the child block's index plus RC_HASH_TRIE_BLOCK_LINK_
 } RC_HASH_TRIE_NODE_;
 
+// A block of nodes, one for each slot a level's hash bits can pick.
 typedef struct RC_HASH_TRIE_BLOCK_ {
     RC_HASH_TRIE_NODE_ nodes[RC_HASH_TRIE_WIDTH];
 } RC_HASH_TRIE_BLOCK_;
@@ -174,6 +195,7 @@ typedef struct RC_HASH_TRIE_POOL_ {
     RC_HASH_TRIE_BLOCKS_ blocks_;
 } RC_HASH_TRIE_POOL_;
 
+// A trie, which is only its root block's index, so copies share their entries.
 typedef struct RC_HASH_TRIE_ {
     uint32_t root_;  // the root block's index plus one; 0 before the first add
 } RC_HASH_TRIE_;
@@ -227,6 +249,7 @@ static inline RC_HASH_TRIE_BLOCK_ *RC_HASH_TRIE_BLOCK_AT_(RC_HASH_TRIE_POOL_ *po
     return RC_HASH_TRIE_BLOCKS_AT_(&pool->blocks_, index);
 }
 
+// Like block_at, through a read-only pool.
 static inline const RC_HASH_TRIE_BLOCK_ *RC_HASH_TRIE_BLOCK_AT_CONST_(const RC_HASH_TRIE_POOL_ *pool, uint32_t index)
 {
     return RC_HASH_TRIE_BLOCKS_AT_CONST_(&pool->blocks_, index);
@@ -238,6 +261,7 @@ static inline RC_HASH_TRIE_NODE_ *RC_HASH_TRIE_NODE_AT_(RC_HASH_TRIE_POOL_ *pool
     return &RC_HASH_TRIE_BLOCK_AT_(pool, index / RC_HASH_TRIE_WIDTH)->nodes[index % RC_HASH_TRIE_WIDTH];
 }
 
+// Like node_at, through a read-only pool.
 static inline const RC_HASH_TRIE_NODE_ *RC_HASH_TRIE_NODE_AT_CONST_(const RC_HASH_TRIE_POOL_ *pool, uint32_t index)
 {
     return &RC_HASH_TRIE_BLOCK_AT_CONST_(pool, index / RC_HASH_TRIE_WIDTH)->nodes[index % RC_HASH_TRIE_WIDTH];
@@ -254,32 +278,74 @@ static inline bool RC_HASH_TRIE_BLOCK_IS_EMPTY_(const RC_HASH_TRIE_BLOCK_ *block
     return true;
 }
 
-// The node index of key, or RC_INDEX_NONE.
-static inline uint32_t RC_HASH_TRIE_PROBE_(RC_HASH_TRIE_ trie, const RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key)
+// True if node holds key, whose hash is hash. The hashes are compared first, so a mismatch rarely
+// compares keys.
+static inline bool RC_HASH_TRIE_HOLDS_(const RC_HASH_TRIE_NODE_ *node, uint32_t hash, RC_HASH_TRIE_KEY_TYPE key)
 {
-    if (trie.root_ == 0) {
-        return RC_INDEX_NONE;
+    return node->hash_ == hash && RC_HASH_TRIE_EQUAL(node->key, key);
+}
+
+// The first slot of block holding a key. There must be one.
+static inline uint32_t RC_HASH_TRIE_FIRST_SLOT_(const RC_HASH_TRIE_BLOCK_ *block)
+{
+    uint32_t slot = 0;
+
+    while (block->nodes[slot].child_ == RC_HASH_TRIE_EMPTY_) {
+        slot++;
+        RC_ASSERT(slot < RC_HASH_TRIE_WIDTH);
     }
 
+    return slot;
+}
+
+// The trie's root block, which the first add makes.
+static inline uint32_t RC_HASH_TRIE_ROOT_BLOCK_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_ *pool, rc_arena *arena)
+{
+    if (trie->root_ == 0) {
+        trie->root_ = RC_HASH_TRIE_ADD_BLOCK_(pool, arena) + 1;
+    }
+
+    return trie->root_ - 1;
+}
+
+// Where key is in the trie whose root is block, or nowhere. The path is the hash, rotated so its
+// low bits pick the slot at each level.
+static inline rc_hash_trie_place_ RC_HASH_TRIE_SEARCH_(const RC_HASH_TRIE_POOL_ *pool, uint32_t block, RC_HASH_TRIE_KEY_TYPE key)
+{
     uint32_t hash = (uint32_t)RC_HASH_TRIE_HASH(key);
-    uint32_t path = hash;  // rotated so its low bits pick the slot at each level
-    uint32_t block = trie.root_ - 1;
+    uint32_t path = hash;
+    uint32_t parent = RC_INDEX_NONE;
+
     while (true) {
-        uint32_t slot = path & RC_HASH_TRIE_SLOT_MASK_;
-        const RC_HASH_TRIE_NODE_ *node = &RC_HASH_TRIE_BLOCK_AT_CONST_(pool, block)->nodes[slot];
+        uint32_t index = block * RC_HASH_TRIE_WIDTH + (path & RC_HASH_TRIE_SLOT_MASK_);
+        const RC_HASH_TRIE_NODE_ *node = RC_HASH_TRIE_NODE_AT_CONST_(pool, index);
 
         if (node->child_ == RC_HASH_TRIE_EMPTY_) {
-            return RC_INDEX_NONE;
+            return rc_hash_trie_nowhere_();
         }
-        if (node->hash_ == hash && RC_HASH_TRIE_EQUAL(node->key, key)) {
-            return block * RC_HASH_TRIE_WIDTH + slot;
+
+        if (RC_HASH_TRIE_HOLDS_(node, hash, key)) {
+            return (rc_hash_trie_place_) {.node = index, .parent = parent};
         }
+
         if (node->child_ == RC_HASH_TRIE_LEAF_) {
-            return RC_INDEX_NONE;
+            return rc_hash_trie_nowhere_();
         }
+
         block = node->child_ - RC_HASH_TRIE_BLOCK_LINK_;
         path = rc_hash_trie_rotate_(path, RC_HASH_TRIE_BITS_);
+        parent = index;
     }
+}
+
+// Where key is in the trie, or nowhere.
+static inline rc_hash_trie_place_ RC_HASH_TRIE_PLACE_OF_(RC_HASH_TRIE_ trie, const RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key)
+{
+    if (trie.root_ == 0) {
+        return rc_hash_trie_nowhere_();
+    }
+
+    return RC_HASH_TRIE_SEARCH_(pool, trie.root_ - 1, key);
 }
 
 // The node index of key, adding it if it is not there. In a map, replace says whether an existing
@@ -290,13 +356,10 @@ static inline uint32_t RC_HASH_TRIE_INSERT_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_PO
 #endif
                                             rc_arena *arena)
 {
-    if (trie->root_ == 0) {
-        trie->root_ = RC_HASH_TRIE_ADD_BLOCK_(pool, arena) + 1;
-    }
-
     uint32_t hash = (uint32_t)RC_HASH_TRIE_HASH(key);
-    uint32_t path = hash;  // rotated so its low bits pick the slot at each level
-    uint32_t block = trie->root_ - 1;
+    uint32_t path = hash;
+    uint32_t block = RC_HASH_TRIE_ROOT_BLOCK_(trie, pool, arena);
+
     while (true) {
         uint32_t slot = path & RC_HASH_TRIE_SLOT_MASK_;
         RC_HASH_TRIE_NODE_ *node = &RC_HASH_TRIE_BLOCK_AT_(pool, block)->nodes[slot];
@@ -312,7 +375,8 @@ static inline uint32_t RC_HASH_TRIE_INSERT_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_PO
             };
             return block * RC_HASH_TRIE_WIDTH + slot;
         }
-        if (node->hash_ == hash && RC_HASH_TRIE_EQUAL(node->key, key)) {
+
+        if (RC_HASH_TRIE_HOLDS_(node, hash, key)) {
 #ifdef RC_HASH_TRIE_VALUE_TYPE
             if (replace) {
                 node->value = value;
@@ -332,29 +396,73 @@ static inline uint32_t RC_HASH_TRIE_INSERT_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_PO
         else {
             block = node->child_ - RC_HASH_TRIE_BLOCK_LINK_;
         }
+
         path = rc_hash_trie_rotate_(path, RC_HASH_TRIE_BITS_);
     }
+}
+
+// Refill the node at place from below: while it has children, its child block's first key moves
+// up into it, and that key's old node is the next to refill. Returns the place of the last, which
+// has no children. Nothing grows, so node pointers stay valid.
+static inline rc_hash_trie_place_ RC_HASH_TRIE_PULL_UP_(RC_HASH_TRIE_POOL_ *pool, rc_hash_trie_place_ place)
+{
+    RC_HASH_TRIE_NODE_ *node = RC_HASH_TRIE_NODE_AT_(pool, place.node);
+
+    while (node->child_ != RC_HASH_TRIE_LEAF_) {
+        uint32_t child = node->child_ - RC_HASH_TRIE_BLOCK_LINK_;
+        uint32_t next = child * RC_HASH_TRIE_WIDTH + RC_HASH_TRIE_FIRST_SLOT_(RC_HASH_TRIE_BLOCK_AT_CONST_(pool, child));
+        const RC_HASH_TRIE_NODE_ *successor = RC_HASH_TRIE_NODE_AT_CONST_(pool, next);
+
+        *node = (RC_HASH_TRIE_NODE_) {
+            .key = successor->key,
+#ifdef RC_HASH_TRIE_VALUE_TYPE
+            .value = successor->value,
+#endif
+            .hash_ = successor->hash_,
+            .child_ = child + RC_HASH_TRIE_BLOCK_LINK_
+        };
+        place = (rc_hash_trie_place_) {.node = next, .parent = place.node};
+        node = RC_HASH_TRIE_NODE_AT_(pool, next);
+    }
+
+    return place;
+}
+
+// Empty the node at place, which has no children. A block below the root left empty is unlinked
+// and goes back to the pool.
+static inline void RC_HASH_TRIE_EMPTY_LEAF_(RC_HASH_TRIE_POOL_ *pool, rc_hash_trie_place_ place)
+{
+    uint32_t block = place.node / RC_HASH_TRIE_WIDTH;
+
+    RC_HASH_TRIE_NODE_AT_(pool, place.node)->child_ = RC_HASH_TRIE_EMPTY_;
+    if (place.parent == RC_INDEX_NONE) {
+        return;
+    }
+
+    if (!RC_HASH_TRIE_BLOCK_IS_EMPTY_(RC_HASH_TRIE_BLOCK_AT_CONST_(pool, block))) {
+        return;
+    }
+
+    RC_HASH_TRIE_NODE_AT_(pool, place.parent)->child_ = RC_HASH_TRIE_LEAF_;
+    RC_HASH_TRIE_BLOCKS_REMOVE_(&pool->blocks_, block);
 }
 
 // ---- the trie ----
 
 // Give every block of the trie back to the pool, and set the trie back to {0}. Its copies must be
-// set back to {0} too.
+// set back to {0} too. Each block's children are read before it is freed, since freeing
+// overwrites it.
 static inline void RC_HASH_TRIE_RELEASE_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_ *pool)
 {
-    if (trie->root_ == 0) {
-        return;
-    }
+    // An empty trie has no root block waiting
+    uint32_t waiting[RC_HASH_TRIE_WALK_MAX_] = {trie->root_ - 1};
+    uint32_t num_waiting = trie->root_ != 0 ? 1u : 0u;
 
-    // Each block's children are read before it is freed, since freeing overwrites it
-    uint32_t waiting[RC_HASH_TRIE_WALK_MAX_];
-    uint32_t num_waiting = 1;
-    waiting[0] = trie->root_ - 1;
     while (num_waiting > 0) {
-        num_waiting--;
-
-        uint32_t block = waiting[num_waiting];
+        uint32_t block = waiting[num_waiting - 1];
         const RC_HASH_TRIE_NODE_ *nodes = RC_HASH_TRIE_BLOCK_AT_CONST_(pool, block)->nodes;
+
+        num_waiting--;
         for (uint32_t slot = 0; slot < RC_HASH_TRIE_WIDTH; slot++) {
             if (nodes[slot].child_ >= RC_HASH_TRIE_BLOCK_LINK_) {
                 RC_ASSERT(num_waiting < RC_HASH_TRIE_WALK_MAX_);
@@ -372,13 +480,13 @@ static inline void RC_HASH_TRIE_RELEASE_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_
 // True if key is in the trie.
 static inline bool RC_HASH_TRIE_CONTAINS_(RC_HASH_TRIE_ trie, const RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key)
 {
-    return RC_HASH_TRIE_PROBE_(trie, pool, key) != RC_INDEX_NONE;
+    return RC_HASH_TRIE_PLACE_OF_(trie, pool, key).node != RC_INDEX_NONE;
 }
 
 // The node index of key, or RC_INDEX_NONE.
 static inline uint32_t RC_HASH_TRIE_FIND_(RC_HASH_TRIE_ trie, const RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key)
 {
-    return RC_HASH_TRIE_PROBE_(trie, pool, key);
+    return RC_HASH_TRIE_PLACE_OF_(trie, pool, key).node;
 }
 
 #ifdef RC_HASH_TRIE_VALUE_TYPE
@@ -401,8 +509,7 @@ static inline uint32_t RC_HASH_TRIE_SET_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_
 #else
 
 // Add key if it is not there, returning its node index either way.
-static inline uint32_t RC_HASH_TRIE_ADD_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key,
-                                         rc_arena *arena)
+static inline uint32_t RC_HASH_TRIE_ADD_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key, rc_arena *arena)
 {
     return RC_HASH_TRIE_INSERT_(trie, pool, key, arena);
 }
@@ -412,65 +519,13 @@ static inline uint32_t RC_HASH_TRIE_ADD_(RC_HASH_TRIE_ *trie, RC_HASH_TRIE_POOL_
 // Remove key: true if it was there.
 static inline bool RC_HASH_TRIE_REMOVE_(RC_HASH_TRIE_ trie, RC_HASH_TRIE_POOL_ *pool, RC_HASH_TRIE_KEY_TYPE key)
 {
-    if (trie.root_ == 0) {
+    rc_hash_trie_place_ place = RC_HASH_TRIE_PLACE_OF_(trie, pool, key);
+
+    if (place.node == RC_INDEX_NONE) {
         return false;
     }
 
-    // Find the key's node, and the node linking to its block (none for the root)
-    uint32_t hash = (uint32_t)RC_HASH_TRIE_HASH(key);
-    uint32_t path = hash;  // rotated so its low bits pick the slot at each level
-    uint32_t index = (trie.root_ - 1) * RC_HASH_TRIE_WIDTH + (path & RC_HASH_TRIE_SLOT_MASK_);
-    uint32_t parent = RC_INDEX_NONE;
-    while (true) {
-        const RC_HASH_TRIE_NODE_ *node = RC_HASH_TRIE_NODE_AT_CONST_(pool, index);
-
-        if (node->child_ == RC_HASH_TRIE_EMPTY_) {
-            return false;
-        }
-        if (node->hash_ == hash && RC_HASH_TRIE_EQUAL(node->key, key)) {
-            break;
-        }
-        if (node->child_ == RC_HASH_TRIE_LEAF_) {
-            return false;
-        }
-        path = rc_hash_trie_rotate_(path, RC_HASH_TRIE_BITS_);
-        parent = index;
-        index = (node->child_ - RC_HASH_TRIE_BLOCK_LINK_) * RC_HASH_TRIE_WIDTH + (path & RC_HASH_TRIE_SLOT_MASK_);
-    }
-
-    // While the node has children, its child block's first key moves up into it, and that key's
-    // old node is the next to go. Nothing grows, so node pointers stay valid.
-    RC_HASH_TRIE_NODE_ *node = RC_HASH_TRIE_NODE_AT_(pool, index);
-    while (node->child_ != RC_HASH_TRIE_LEAF_) {
-        uint32_t child = node->child_ - RC_HASH_TRIE_BLOCK_LINK_;
-        const RC_HASH_TRIE_NODE_ *below = RC_HASH_TRIE_BLOCK_AT_CONST_(pool, child)->nodes;
-        uint32_t first = 0;
-
-        while (below[first].child_ == RC_HASH_TRIE_EMPTY_) {
-            first++;
-            RC_ASSERT(first < RC_HASH_TRIE_WIDTH);
-        }
-        *node = (RC_HASH_TRIE_NODE_) {
-            .key = below[first].key,
-#ifdef RC_HASH_TRIE_VALUE_TYPE
-            .value = below[first].value,
-#endif
-            .hash_ = below[first].hash_,
-            .child_ = child + RC_HASH_TRIE_BLOCK_LINK_
-        };
-        parent = index;
-        index = child * RC_HASH_TRIE_WIDTH + first;
-        node = RC_HASH_TRIE_NODE_AT_(pool, index);
-    }
-
-    // A key with no children: its slot empties, and a block below the root left empty is unlinked
-    // and freed
-    uint32_t block = index / RC_HASH_TRIE_WIDTH;
-    node->child_ = RC_HASH_TRIE_EMPTY_;
-    if (parent != RC_INDEX_NONE && RC_HASH_TRIE_BLOCK_IS_EMPTY_(RC_HASH_TRIE_BLOCK_AT_CONST_(pool, block))) {
-        RC_HASH_TRIE_NODE_AT_(pool, parent)->child_ = RC_HASH_TRIE_LEAF_;
-        RC_HASH_TRIE_BLOCKS_REMOVE_(&pool->blocks_, block);
-    }
+    RC_HASH_TRIE_EMPTY_LEAF_(pool, RC_HASH_TRIE_PULL_UP_(pool, place));
     return true;
 }
 
@@ -539,8 +594,14 @@ static inline RC_HASH_TRIE_VALUE_TYPE *RC_HASH_TRIE_VALUE_AT_(RC_HASH_TRIE_POOL_
 #undef RC_HASH_TRIE_NODE_AT_
 #undef RC_HASH_TRIE_NODE_AT_CONST_
 #undef RC_HASH_TRIE_BLOCK_IS_EMPTY_
-#undef RC_HASH_TRIE_PROBE_
+#undef RC_HASH_TRIE_HOLDS_
+#undef RC_HASH_TRIE_FIRST_SLOT_
+#undef RC_HASH_TRIE_ROOT_BLOCK_
+#undef RC_HASH_TRIE_SEARCH_
+#undef RC_HASH_TRIE_PLACE_OF_
 #undef RC_HASH_TRIE_INSERT_
+#undef RC_HASH_TRIE_PULL_UP_
+#undef RC_HASH_TRIE_EMPTY_LEAF_
 
 #undef RC_HASH_TRIE_BLOCKS_MAKE_
 #undef RC_HASH_TRIE_BLOCKS_RESERVE_

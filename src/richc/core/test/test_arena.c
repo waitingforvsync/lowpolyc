@@ -16,13 +16,14 @@ enum {
     PAGE = 65536
 };
 
+// True if p is a multiple of align.
 static bool is_aligned(const void *p, uint32_t align)
 {
     return (uintptr_t)p % align == 0;
 }
 
 
-// Fill with a pattern derived from seed, and check it back.
+// Fill size bytes at p with a pattern derived from seed.
 static void fill(uint8_t *p, uint32_t size, uint8_t seed)
 {
     for (uint32_t i = 0; i < size; i++) {
@@ -31,6 +32,7 @@ static void fill(uint8_t *p, uint32_t size, uint8_t seed)
 }
 
 
+// True if the size bytes at p still hold seed's pattern.
 static bool check_fill(const uint8_t *p, uint32_t size, uint8_t seed)
 {
     for (uint32_t i = 0; i < size; i++) {
@@ -42,10 +44,57 @@ static bool check_fill(const uint8_t *p, uint32_t size, uint8_t seed)
 }
 
 
+// size bytes from arena, filled with seed's pattern.
+static uint8_t *alloc_filled(rc_arena *arena, uint32_t size, uint8_t seed)
+{
+    uint8_t *p = rc_arena_alloc(arena, size);
+
+    fill(p, size, seed);
+    return p;
+}
+
+
+// size bytes filled with seed's pattern, with another block after them so they are not the last.
+static uint8_t *alloc_buried(rc_arena *arena, uint32_t size, uint8_t seed)
+{
+    uint8_t *p = alloc_filled(arena, size, seed);
+
+    rc_arena_alloc(arena, 16);
+    return p;
+}
+
+
+// Dirty size bytes at the top of arena and free them again, so the next allocation lands on them.
+static uint8_t *alloc_dirty_and_free(rc_arena *arena, uint32_t size, uint8_t seed)
+{
+    uint8_t *p = alloc_filled(arena, size, seed);
+
+    RC_CHECK_TRUE(rc_arena_free(arena, p, size));
+    return p;
+}
+
+
+// size bytes aligned to align, allocated after a plain block of first_size bytes.
+static uint8_t *alloc_aligned_after(rc_arena *arena, uint32_t first_size, uint32_t size, uint32_t align)
+{
+    rc_arena_alloc(arena, first_size);
+    return rc_arena_alloc_aligned(arena, size, align);
+}
+
+
+// Release a, then make an arena of chunk_size, which may take a's chunks from the pool.
+static rc_arena release_and_make(rc_arena *a, uint32_t chunk_size)
+{
+    rc_arena_release(a);
+    return rc_arena_make(chunk_size);
+}
+
+
 // Most tests run against a fresh default arena.
 RC_TEST_GROUP_DATA(arena) {
     rc_arena a;
 };
+
 
 RC_TEST_GROUP_INIT(arena, fix)
 {
@@ -123,29 +172,35 @@ RC_TEST(arena, release_recycles_chunk)
     // An odd size, so the best fit from the pool is exactly our chunk
     rc_arena a = rc_arena_make(7 * PAGE);
     uint32_t first = a.first;
+    rc_arena b = release_and_make(&a, 7 * PAGE);
 
-    rc_arena_release(&a);
-    rc_arena b = rc_arena_make(7 * PAGE);
     RC_CHECK(b.first, ==, first);
     rc_arena_release(&b);
+}
+
+
+// Fill a's first chunk, of chunk_size, and spill into a second, returning the second's page.
+static uint32_t spill_into_second_chunk(rc_arena *a, uint32_t chunk_size)
+{
+    rc_arena_alloc(a, chunk_size - RC_MAX_ALIGN);
+    rc_arena_alloc(a, 1000);
+    return a->chunk;
 }
 
 
 RC_TEST(arena, release_recycles_whole_chain)
 {
     rc_arena a = rc_arena_make(8 * PAGE);
-    rc_arena blocker = rc_arena_make(PAGE);   // stops a's chunk growing in place
-
-    // Spill into a second chunk
-    rc_arena_alloc(&a, 8 * PAGE - RC_MAX_ALIGN);
-    rc_arena_alloc(&a, 1000);
-    uint32_t second = a.chunk;
-    RC_CHECK(second, !=, a.first);
-
-    rc_arena_release(&a);
-    rc_arena b = rc_arena_make(8 * PAGE);
+    rc_arena blocker = rc_arena_make(PAGE);
+    uint32_t second = spill_into_second_chunk(&a, 8 * PAGE);
+    uint32_t first = a.first;
+    rc_arena b = release_and_make(&a, 8 * PAGE);
     rc_arena c = rc_arena_make(8 * PAGE);
-    RC_CHECK(b.first, ==, second);   // the pool is a stack: last chunk in, first out
+
+    RC_CHECK(second, !=, first);
+
+    // The pool is a stack: last chunk in, first out
+    RC_CHECK(b.first, ==, second);
     RC_CHECK(c.first, !=, 0u);
     rc_arena_release(&b);
     rc_arena_release(&c);
@@ -176,7 +231,8 @@ RC_TEST(arena, each_test_starts_with_empty_heap)
 {
     rc_arena a = rc_arena_make(PAGE);
 
-    RC_CHECK(a.first, ==, 1u);   // the first page the heap hands out
+    // The first page the heap hands out
+    RC_CHECK(a.first, ==, 1u);
     rc_arena_release(&a);
 }
 
@@ -184,37 +240,54 @@ RC_TEST(arena, each_test_starts_with_empty_heap)
 RC_TEST(arena, init_twice_is_noop)
 {
     rc_arena a = rc_arena_make(PAGE);
-
-    RC_CHECK_TRUE(rc_arena_init());
+    bool initialised = rc_arena_init();
     rc_arena b = rc_arena_make(PAGE);
-    RC_CHECK(b.first, ==, a.first + 1u);   // the heap carried on, not restarted
+
+    RC_CHECK_TRUE(initialised);
+
+    // The heap carried on, not restarted
+    RC_CHECK(b.first, ==, a.first + 1u);
     rc_arena_release(&a);
     rc_arena_release(&b);
 }
 
 
-RC_TEST(arena, make_after_deinit_reinits)
+// Deinit the page heap, then make a default arena, which starts it again.
+static rc_arena deinit_and_make_default(void)
 {
     rc_arena_deinit();
+    return rc_arena_make_default();
+}
 
-    rc_arena a = rc_arena_make_default();
-    uint8_t *p = rc_arena_alloc(&a, 1000);
-    fill(p, 1000, 8);
+
+RC_TEST(arena, make_after_deinit_reinits)
+{
+    rc_arena a = deinit_and_make_default();
+    uint8_t *p = alloc_filled(&a, 1000, 8);
+
     RC_CHECK_TRUE(check_fill(p, 1000, 8));
     rc_arena_release(&a);
+}
+
+
+// Release a and start the page heap afresh, returning whether it started.
+static bool release_and_restart_heap(rc_arena *a)
+{
+    rc_arena_release(a);
+    rc_arena_deinit();
+    return rc_arena_init();
 }
 
 
 RC_TEST(arena, deinit_empties_pool)
 {
     rc_arena a = rc_arena_make(7 * PAGE);
+    bool restarted = release_and_restart_heap(&a);
+    rc_arena b = rc_arena_make(PAGE);
 
-    rc_arena_release(&a);
-    rc_arena_deinit();
-    RC_CHECK_TRUE(rc_arena_init());
+    RC_CHECK_TRUE(restarted);
 
     // From the pool this would be the 7-page chunk; fresh, it is one page
-    rc_arena b = rc_arena_make(PAGE);
     RC_CHECK(b.end, ==, (uint32_t)PAGE);
     rc_arena_release(&b);
 }
@@ -236,7 +309,9 @@ RC_TEST_STEP(arena, alloc_basic, fix)
     uint8_t *p = rc_arena_alloc(&fix->a, 100);
 
     RC_CHECK_TRUE(p != NULL);
-    RC_CHECK(fix->a.top, ==, top + 112u);   // 100 rounded up to 16
+
+    // 100 rounded up to a multiple of 16
+    RC_CHECK(fix->a.top, ==, top + 112u);
     fill(p, 100, 1);
     RC_CHECK_TRUE(check_fill(p, 100, 1));
 }
@@ -244,20 +319,21 @@ RC_TEST_STEP(arena, alloc_basic, fix)
 
 RC_TEST_STEP(arena, alloc_alignment, fix)
 {
+    uint8_t *p1 = rc_arena_alloc(&fix->a, 1);
+    uint8_t *p2 = rc_arena_alloc(&fix->a, 1);
+
     for (uint32_t size = 1; size <= 100; size++) {
         RC_CHECK_TRUE(is_aligned(rc_arena_alloc(&fix->a, size), RC_MAX_ALIGN));
     }
 
     // A 1-byte request costs exactly one alignment unit
-    uint8_t *p1 = rc_arena_alloc(&fix->a, 1);
-    uint8_t *p2 = rc_arena_alloc(&fix->a, 1);
     RC_CHECK((uint32_t)(p2 - p1), ==, RC_MAX_ALIGN);
 }
 
 
 RC_TEST_STEP(arena, alloc_consecutive_do_not_overlap, fix)
 {
-    uint8_t *ptrs[50];
+    uint8_t *ptrs[50] = {0};
 
     for (uint32_t i = 0; i < 50; i++) {
         ptrs[i] = rc_arena_alloc(&fix->a, 3000);
@@ -271,13 +347,11 @@ RC_TEST_STEP(arena, alloc_consecutive_do_not_overlap, fix)
 
 RC_TEST_STEP(arena, alloc_zero, fix)
 {
-    uint8_t *p = rc_arena_alloc(&fix->a, 64);
-
-    fill(p, 64, 0xAA);
-    RC_CHECK_TRUE(rc_arena_free(&fix->a, p, 64));
-
+    uint8_t *p = alloc_dirty_and_free(&fix->a, 64, 0xAA);
     uint8_t *q = rc_arena_alloc_zero(&fix->a, 64);
-    RC_CHECK_TRUE(q == p);   // same memory, reused
+
+    // The same memory, reused
+    RC_CHECK_TRUE(q == p);
     for (uint32_t i = 0; i < 64; i++) {
         RC_CHECK(q[i], ==, (uint8_t)0);
     }
@@ -300,18 +374,15 @@ RC_TEST_STEP(arena, alloc_fills_chunk_exactly, fix)
 RC_TEST(arena, alloc_spills_into_new_chunk)
 {
     rc_arena a = rc_arena_make(PAGE);
-    rc_arena blocker = rc_arena_make(PAGE);   // a's chunk is no longer the newest
-
+    rc_arena blocker = rc_arena_make(PAGE);
     uint32_t first = a.chunk;
     uint32_t room = a.end - a.top;
-    uint8_t *p = rc_arena_alloc(&a, room - 64);
-    fill(p, room - 64, 5);
+    uint8_t *p = alloc_filled(&a, room - 64, 5);
+    uint8_t *q = alloc_filled(&a, 1000, 9);
 
-    // Too big for what is left, so it starts a fresh chunk
-    uint8_t *q = rc_arena_alloc(&a, 1000);
+    // q was too big for what was left, so it started a fresh chunk
     RC_CHECK(a.chunk, !=, first);
     RC_CHECK(a.top, ==, RC_MAX_ALIGN + 1008u);
-    fill(q, 1000, 9);
     RC_CHECK_TRUE(check_fill(p, room - 64, 5));
     RC_CHECK_TRUE(check_fill(q, 1000, 9));
     rc_arena_release(&a);
@@ -323,10 +394,9 @@ RC_TEST(arena, alloc_larger_than_chunk_size)
 {
     rc_arena a = rc_arena_make_default();
     rc_arena blocker = rc_arena_make(PAGE);
+    uint8_t *p = alloc_filled(&a, 5 * PAGE, 11);
 
-    uint8_t *p = rc_arena_alloc(&a, 5 * PAGE);
     RC_CHECK(a.end - RC_MAX_ALIGN, >=, 5u * PAGE);
-    fill(p, 5 * PAGE, 11);
     RC_CHECK_TRUE(check_fill(p, 5 * PAGE, 11));
     rc_arena_release(&a);
     rc_arena_release(&blocker);
@@ -349,17 +419,16 @@ RC_TEST_STEP(arena, alloc_aligned_various, fix)
 {
     static const uint32_t aligns[] = {32, 64, 128, 256, 4096, 65536};
 
-    for (uint32_t i = 0; i < sizeof aligns / sizeof aligns[0]; i++) {
+    for (uint32_t i = 0; i < RC_COUNT(aligns); i++) {
+        // A 1-byte block first knocks top off alignment, so padding is needed
+        uint8_t *p = alloc_aligned_after(&fix->a, 1, 100, aligns[i]);
+        uint8_t *q = rc_arena_alloc(&fix->a, 16);
 
-        // Knock top off alignment first, so padding is needed
-        rc_arena_alloc(&fix->a, 1);
-        uint8_t *p = rc_arena_alloc_aligned(&fix->a, 100, aligns[i]);
         RC_CHECK_TRUE(is_aligned(p, aligns[i]));
         fill(p, 100, (uint8_t)i);
         RC_CHECK_TRUE(check_fill(p, 100, (uint8_t)i));
 
         // A plain allocation after it is still aligned and does not overlap
-        uint8_t *q = rc_arena_alloc(&fix->a, 16);
         RC_CHECK_TRUE(is_aligned(q, RC_MAX_ALIGN));
         RC_CHECK_TRUE(q >= p + 100 || q < p);
     }
@@ -369,9 +438,8 @@ RC_TEST_STEP(arena, alloc_aligned_various, fix)
 RC_TEST_STEP(arena, alloc_aligned_needs_new_room, fix)
 {
     // Leave less room than the padding needs
-    rc_arena_alloc(&fix->a, fix->a.end - fix->a.top - 32);
+    uint8_t *p = alloc_aligned_after(&fix->a, fix->a.end - fix->a.top - 32, 1000, 4096);
 
-    uint8_t *p = rc_arena_alloc_aligned(&fix->a, 1000, 4096);
     RC_CHECK_TRUE(is_aligned(p, 4096));
     fill(p, 1000, 7);
     RC_CHECK_TRUE(check_fill(p, 1000, 7));
@@ -380,8 +448,7 @@ RC_TEST_STEP(arena, alloc_aligned_needs_new_room, fix)
 
 RC_TEST_STEP(arena, alloc_aligned_then_free, fix)
 {
-    rc_arena_alloc(&fix->a, 1);
-    uint8_t *p = rc_arena_alloc_aligned(&fix->a, 64, 256);
+    uint8_t *p = alloc_aligned_after(&fix->a, 1, 64, 256);
 
     // The block itself can be freed; its padding stays used
     RC_CHECK_TRUE(rc_arena_free(&fix->a, p, 64));
@@ -413,11 +480,10 @@ RC_TEST_STEP(arena, free_last_unaligned_size, fix)
 
 RC_TEST_STEP(arena, free_not_last, fix)
 {
-    void *p1 = rc_arena_alloc(&fix->a, 64);
-    rc_arena_alloc(&fix->a, 64);
+    uint8_t *p = alloc_buried(&fix->a, 64, 0);
     uint32_t top = fix->a.top;
 
-    RC_CHECK_FALSE(rc_arena_free(&fix->a, p1, 64));
+    RC_CHECK_FALSE(rc_arena_free(&fix->a, p, 64));
     RC_CHECK(fix->a.top, ==, top);
 }
 
@@ -471,10 +537,9 @@ RC_TEST_STEP(arena, realloc_null_is_alloc, fix)
 
 RC_TEST_STEP(arena, realloc_grow_in_place, fix)
 {
-    uint8_t *p = rc_arena_alloc(&fix->a, 32);
-
-    fill(p, 32, 1);
+    uint8_t *p = alloc_filled(&fix->a, 32, 1);
     uint8_t *q = rc_arena_realloc(&fix->a, p, 32, 96);
+
     RC_CHECK_TRUE(q == p);
     RC_CHECK_TRUE(check_fill(q, 32, 1));
 }
@@ -487,7 +552,9 @@ RC_TEST_STEP(arena, realloc_shrink_in_place, fix)
     uint8_t *q = rc_arena_realloc(&fix->a, p, 128, 32);
 
     RC_CHECK_TRUE(q == p);
-    RC_CHECK(fix->a.top, ==, top - 96u);   // the tail is reclaimed
+
+    // The tail is reclaimed
+    RC_CHECK(fix->a.top, ==, top - 96u);
 }
 
 
@@ -496,18 +563,17 @@ RC_TEST_STEP(arena, realloc_same_size, fix)
     uint8_t *p = rc_arena_alloc(&fix->a, 40);
     uint32_t top = fix->a.top;
 
-    RC_CHECK_TRUE(rc_arena_realloc(&fix->a, p, 40, 48) == p);   // same aligned size
+    // 40 and 48 round to the same aligned size
+    RC_CHECK_TRUE(rc_arena_realloc(&fix->a, p, 40, 48) == p);
     RC_CHECK(fix->a.top, ==, top);
 }
 
 
 RC_TEST_STEP(arena, realloc_move, fix)
 {
-    uint8_t *p = rc_arena_alloc(&fix->a, 16);
-
-    fill(p, 16, 1);
-    rc_arena_alloc(&fix->a, 16);   // p is no longer the last block
+    uint8_t *p = alloc_buried(&fix->a, 16, 1);
     uint8_t *q = rc_arena_realloc(&fix->a, p, 16, 64);
+
     RC_CHECK_TRUE(q != p);
     RC_CHECK_TRUE(check_fill(q, 16, 1));
 }
@@ -515,21 +581,20 @@ RC_TEST_STEP(arena, realloc_move, fix)
 
 RC_TEST_STEP(arena, realloc_shrink_not_last, fix)
 {
-    uint8_t *p = rc_arena_alloc(&fix->a, 128);
-
-    rc_arena_alloc(&fix->a, 16);
+    uint8_t *p = alloc_buried(&fix->a, 128, 0);
     uint32_t top = fix->a.top;
-    RC_CHECK_TRUE(rc_arena_realloc(&fix->a, p, 128, 32) == p);   // a no-op
+
+    // Shrinking a block that is not the last is a no-op
+    RC_CHECK_TRUE(rc_arena_realloc(&fix->a, p, 128, 32) == p);
     RC_CHECK(fix->a.top, ==, top);
 }
 
 
 RC_TEST_STEP(arena, realloc_zero_grows, fix)
 {
-    uint8_t *p = rc_arena_alloc(&fix->a, 16);
-
-    fill(p, 16, 0xF0);
+    uint8_t *p = alloc_filled(&fix->a, 16, 0xF0);
     uint8_t *q = rc_arena_realloc_zero(&fix->a, p, 16, 48);
+
     RC_CHECK_TRUE(q == p);
     RC_CHECK_TRUE(check_fill(q, 16, 0xF0));
     for (uint32_t i = 16; i < 48; i++) {
@@ -540,19 +605,13 @@ RC_TEST_STEP(arena, realloc_zero_grows, fix)
 
 RC_TEST_STEP(arena, realloc_zero_moves, fix)
 {
-    uint8_t *p = rc_arena_alloc(&fix->a, 20);
-
-    fill(p, 20, 0x10);
-    uint8_t *blocker = rc_arena_alloc(&fix->a, 16);
-    fill(blocker, 16, 0xFF);
-
-    // Dirty the memory the moved block will land on, then free it again
-    uint8_t *dirty = rc_arena_alloc(&fix->a, 200);
-    fill(dirty, 200, 0xEE);
-    rc_arena_free(&fix->a, dirty, 200);
-
+    uint8_t *p = alloc_buried(&fix->a, 20, 0x10);
+    uint8_t *dirty = alloc_dirty_and_free(&fix->a, 200, 0xEE);
     uint8_t *q = rc_arena_realloc_zero(&fix->a, p, 20, 200);
+
+    // The block moves onto the dirty memory, which is zeroed past the copy
     RC_CHECK_TRUE(q != p);
+    RC_CHECK_TRUE(q == dirty);
     RC_CHECK_TRUE(check_fill(q, 20, 0x10));
     for (uint32_t i = 20; i < 200; i++) {
         RC_CHECK(q[i], ==, (uint8_t)0);
@@ -562,12 +621,9 @@ RC_TEST_STEP(arena, realloc_zero_moves, fix)
 
 RC_TEST_STEP(arena, realloc_zero_null_is_alloc_zero, fix)
 {
-    uint8_t *dirty = rc_arena_alloc(&fix->a, 64);
-
-    fill(dirty, 64, 0xAB);
-    rc_arena_free(&fix->a, dirty, 64);
-
+    uint8_t *dirty = alloc_dirty_and_free(&fix->a, 64, 0xAB);
     uint8_t *p = rc_arena_realloc_zero(&fix->a, NULL, 0, 64);
+
     RC_CHECK_TRUE(p == dirty);
     for (uint32_t i = 0; i < 64; i++) {
         RC_CHECK(p[i], ==, (uint8_t)0);
@@ -577,13 +633,11 @@ RC_TEST_STEP(arena, realloc_zero_null_is_alloc_zero, fix)
 
 RC_TEST_STEP(arena, realloc_last_past_chunk_end_moves, fix)
 {
-    rc_arena blocker = rc_arena_make(PAGE);   // our chunk cannot grow in place
-
+    rc_arena blocker = rc_arena_make(PAGE);
     uint32_t room = fix->a.end - fix->a.top;
-    uint8_t *p = rc_arena_alloc(&fix->a, room - 128);
-    fill(p, 1000, 4);
-
+    uint8_t *p = alloc_filled(&fix->a, room - 128, 4);
     uint8_t *q = rc_arena_realloc(&fix->a, p, room - 128, room + 1000);
+
     RC_CHECK_TRUE(q != p);
     RC_CHECK_TRUE(check_fill(q, 1000, 4));
     rc_arena_release(&blocker);
@@ -592,6 +646,7 @@ RC_TEST_STEP(arena, realloc_last_past_chunk_end_moves, fix)
 
 // ---- scratch, marks and reset ----
 
+// Allocate from scratch, an arena passed by value, as a function taking a scratch arena does.
 static uint8_t *scratch_alloc(rc_arena scratch, uint32_t size)
 {
     return rc_arena_alloc(&scratch, size);
@@ -641,13 +696,20 @@ RC_TEST_STEP(arena, save_and_restore, fix)
 }
 
 
+// Allocate size bytes, then mark the arena just after them.
+static rc_arena_mark mark_after(rc_arena *arena, uint32_t size)
+{
+    rc_arena_alloc(arena, size);
+    return rc_arena_save(arena);
+}
+
+
 RC_TEST_STEP(arena, restore_across_chunks, fix)
 {
     rc_arena blocker = rc_arena_make(PAGE);
-
-    rc_arena_alloc(&fix->a, 100);
-    rc_arena_mark mark = rc_arena_save(&fix->a);
+    rc_arena_mark mark = mark_after(&fix->a, 100);
     uint8_t *p = rc_arena_alloc(&fix->a, 100);
+
     for (uint32_t i = 0; i < 10; i++) {
         rc_arena_alloc(&fix->a, PAGE / 2);
     }
@@ -673,16 +735,16 @@ RC_TEST_STEP(arena, reset_rewinds_to_start, fix)
 
 RC_TEST_STEP(arena, reset_replays_same_addresses, fix)
 {
-    rc_arena blocker = rc_arena_make(PAGE);
     static const uint32_t sizes[] = {100, 40000, 30000, 70000, 16, 50000, 65000};
-    uint8_t *ptrs[sizeof sizes / sizeof sizes[0]];
+    rc_arena blocker = rc_arena_make(PAGE);
+    uint8_t *ptrs[RC_COUNT(sizes)] = {0};
 
     // The chain built the first time round is walked again after reset
-    for (uint32_t i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+    for (uint32_t i = 0; i < RC_COUNT(sizes); i++) {
         ptrs[i] = rc_arena_alloc(&fix->a, sizes[i]);
     }
     rc_arena_reset(&fix->a);
-    for (uint32_t i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+    for (uint32_t i = 0; i < RC_COUNT(sizes); i++) {
         RC_CHECK_TRUE(rc_arena_alloc(&fix->a, sizes[i]) == ptrs[i]);
     }
     rc_arena_release(&blocker);
@@ -715,6 +777,7 @@ RC_TEST_STEP(arena, pointer_stability, fix)
 static jmp_buf oom_exit;
 static uint32_t oom_size;
 
+// The out-of-memory handler: note the size asked for and jump back into the test.
 static void on_oom(uint32_t size)
 {
     oom_size = size;
@@ -729,6 +792,7 @@ RC_TEST_STEP(arena, oom_handler_alloc, fix)
     if (!setjmp(oom_exit)) {
         rc_arena_alloc(&fix->a, 0xFFFFFFFFu);
     }
+
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(oom_size, ==, 0xFFFFFFFFu);
 }
@@ -743,6 +807,7 @@ RC_TEST_STEP(arena, oom_handler_realloc, fix)
     if (!setjmp(oom_exit)) {
         rc_arena_realloc(&fix->a, p, 16, 0xFFFFFFF0u);
     }
+
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(oom_size, ==, 0xFFFFFFF0u);
 }
@@ -755,6 +820,7 @@ RC_TEST_STEP(arena, oom_handler_alloc_aligned, fix)
     if (!setjmp(oom_exit)) {
         rc_arena_alloc_aligned(&fix->a, 0xFFFF0000u, 65536);
     }
+
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(oom_size, ==, 0xFFFF0000u);
 }
@@ -768,6 +834,7 @@ RC_TEST_STEP(arena, oom_leaves_arena_usable, fix)
     if (!setjmp(oom_exit)) {
         rc_arena_alloc(&fix->a, 0xFFFFFFFFu);
     }
+
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(fix->a.top, ==, top);
     RC_CHECK_TRUE(rc_arena_alloc(&fix->a, 100) != NULL);
@@ -781,11 +848,11 @@ RC_TEST(arena, alloc_extends_newest_chunk)
     rc_arena a = rc_arena_make(4 * PAGE);
     uint32_t first = a.first;
     uint32_t end = a.end;
-
-    uint8_t *p = rc_arena_alloc(&a, end - a.top);
-    fill(p, 1000, 2);
+    uint8_t *p = alloc_filled(&a, end - a.top, 2);
     uint8_t *q = rc_arena_alloc(&a, 1000);
-    RC_CHECK(a.chunk, ==, first);   // grew in place, no new chunk
+
+    // Grew in place, with no new chunk
+    RC_CHECK(a.chunk, ==, first);
     RC_CHECK(a.end, >, end);
     RC_CHECK_TRUE(q == p + (end - RC_MAX_ALIGN));
     RC_CHECK_TRUE(check_fill(p, 1000, 2));
@@ -797,19 +864,21 @@ RC_TEST(arena, realloc_growing_array_stays_put)
 {
     rc_arena a = rc_arena_make(0);
     uint32_t cap = 1024;
-    uint8_t *p = rc_arena_alloc(&a, cap);
+    uint8_t *p = alloc_filled(&a, cap, 6);
 
     // Doubling all the way to 64 MiB never moves it: the chunk grows instead
-    fill(p, cap, 6);
     while (cap < (64u << 20)) {
         uint8_t *q = rc_arena_realloc(&a, p, cap, cap * 2);
+
         RC_CHECK_TRUE(q == p);
         cap *= 2;
     }
     RC_CHECK_TRUE(check_fill(p, 1024, 6));
     RC_CHECK(a.chunk, ==, a.first);
-    RC_CHECK(a.end, ==, (64u << 20) + (uint32_t)PAGE);   // the array, plus the page its header shares
-    p[cap - 1] = 0x5A;   // the whole thing is writable
+
+    // The array, plus the page its header shares, and every byte of it writable
+    RC_CHECK(a.end, ==, (64u << 20) + (uint32_t)PAGE);
+    p[cap - 1] = 0x5A;
     RC_CHECK(p[cap - 1], ==, (uint8_t)0x5A);
     rc_arena_release(&a);
 }

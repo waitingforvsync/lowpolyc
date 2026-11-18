@@ -6,8 +6,8 @@
 //
 // Every function is called through rc_<name> (rc_glClear for glClear). The prefix keeps our names
 // apart from any glClear the GL driver exports. Natively each is a pointer that rc_gl_load fills
-// from the context.
-// On wasm each is an import from the module richc, which gl.js supplies under its GL name.
+// from the context. On wasm each is an import from the module richc, which gl.js supplies under
+// its GL name.
 
 #ifndef RC_APP_GL_H_
 #define RC_APP_GL_H_

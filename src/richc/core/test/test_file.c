@@ -4,6 +4,7 @@
 // directory, deleting each one when done.
 
 #include "richc/file.h"
+
 #include "richc/test.h"
 
 // Most tests run against a fresh default arena.
@@ -30,10 +31,10 @@ RC_TEST_STEP(file, text_round_trip, fix)
     // Binary I/O: the CR LF comes back as it went
     rc_str path = RC_STR("richc_test_file_text.txt");
     rc_str text = RC_STR("hello\nworld\r\n");
-
-    RC_CHECK(rc_file_save_text(path, text), ==, RC_FILE_ERROR_NONE);
-
+    rc_file_error saved = rc_file_save_text(path, text);
     rc_file_load_text_result loaded = rc_file_load_text(path, 0, &fix->a);
+
+    RC_CHECK(saved, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.text.view, ==, text);
     RC_CHECK_TRUE(loaded.text.data[loaded.text.len] == '\0');
@@ -47,10 +48,10 @@ RC_TEST_STEP(file, binary_round_trip_keeps_zero_bytes, fix)
     static uint8_t data[] = {0, 1, 0, 255, 0};
     rc_view_bytes bytes = RC_VIEW(data);
     rc_str path = RC_STR("richc_test_file_binary.bin");
-
-    RC_CHECK(rc_file_save_binary(path, bytes), ==, RC_FILE_ERROR_NONE);
-
+    rc_file_error saved = rc_file_save_binary(path, bytes);
     rc_file_load_binary_result loaded = rc_file_load_binary(path, 0, &fix->a);
+
+    RC_CHECK(saved, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.contents.num, ==, 5u);
     RC_CHECK(rc_memcmp(loaded.contents.data, data, 5), ==, 0);
@@ -58,21 +59,30 @@ RC_TEST_STEP(file, binary_round_trip_keeps_zero_bytes, fix)
 }
 
 
-RC_TEST_STEP(file, a_large_file_round_trips, fix)
+// size bytes of a fixed pseudo-random sequence.
+static rc_array_bytes noise(uint32_t size, rc_arena *arena)
 {
-    // A megabyte, enough that the OS may hand reads and writes back in pieces
-    uint32_t size = 1u << 20;
-    rc_array_bytes data = rc_array_bytes_make(size, &fix->a);
-    rc_str path = RC_STR("richc_test_file_large.bin");
+    rc_array_bytes data = rc_array_bytes_make(size, arena);
     uint32_t state = 1;
 
     for (uint32_t i = 0; i < size; i++) {
         state = state * 1664525u + 1013904223u;
         rc_array_bytes_push(&data, (uint8_t)(state >> 24), NULL);
     }
-    RC_CHECK(rc_file_save_binary(path, data.view), ==, RC_FILE_ERROR_NONE);
+    return data;
+}
 
+
+RC_TEST_STEP(file, a_large_file_round_trips, fix)
+{
+    // A megabyte, enough that the OS may hand reads and writes back in pieces
+    uint32_t size = 1u << 20;
+    rc_array_bytes data = noise(size, &fix->a);
+    rc_str path = RC_STR("richc_test_file_large.bin");
+    rc_file_error saved = rc_file_save_binary(path, data.view);
     rc_file_load_binary_result loaded = rc_file_load_binary(path, 0, &fix->a);
+
+    RC_CHECK(saved, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(loaded.contents.num, ==, size);
     RC_CHECK(rc_memcmp(loaded.contents.data, data.data, size), ==, 0);
@@ -84,18 +94,19 @@ RC_TEST_STEP(file, a_large_file_round_trips, fix)
 RC_TEST_STEP(file, empty_file, fix)
 {
     rc_str path = RC_STR("richc_test_file_empty.txt");
+    rc_file_error saved = rc_file_save_text(path, RC_STR(""));
+    rc_file_size_result size = rc_file_size(path);
+    rc_file_load_text_result text = rc_file_load_text(path, 0, &fix->a);
+    rc_file_load_binary_result binary = rc_file_load_binary(path, 0, &fix->a);
 
-    RC_CHECK(rc_file_save_text(path, RC_STR("")), ==, RC_FILE_ERROR_NONE);
-    RC_CHECK(rc_file_size(path).size, ==, 0u);
+    RC_CHECK(saved, ==, RC_FILE_ERROR_NONE);
+    RC_CHECK(size.size, ==, 0u);
 
     // Still a valid, terminated string, and valid bytes
-    rc_file_load_text_result text = rc_file_load_text(path, 0, &fix->a);
     RC_CHECK(text.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK_TRUE(rc_mstr_is_valid(&text.text));
     RC_CHECK(text.text.len, ==, 0u);
     RC_CHECK_TRUE(text.text.data[0] == '\0');
-
-    rc_file_load_binary_result binary = rc_file_load_binary(path, 0, &fix->a);
     RC_CHECK(binary.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK_TRUE(rc_array_bytes_is_valid(&binary.contents));
     RC_CHECK(binary.contents.num, ==, 0u);
@@ -146,10 +157,10 @@ RC_TEST_STEP(file, paths_need_no_terminator, fix)
 RC_TEST(file, size_and_exists)
 {
     rc_str path = RC_STR("richc_test_file_size.txt");
-
-    RC_CHECK(rc_file_save_text(path, RC_STR("12345")), ==, RC_FILE_ERROR_NONE);
-
+    rc_file_error saved = rc_file_save_text(path, RC_STR("12345"));
     rc_file_size_result size = rc_file_size(path);
+
+    RC_CHECK(saved, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(size.error, ==, RC_FILE_ERROR_NONE);
     RC_CHECK(size.size, ==, 5u);
     RC_CHECK_TRUE(rc_file_exists(path));
@@ -161,12 +172,11 @@ RC_TEST(file, size_and_exists)
 RC_TEST_STEP(file, missing_files, fix)
 {
     rc_str path = RC_STR("richc_test_file_missing.txt");
-
     rc_file_load_text_result text = rc_file_load_text(path, 0, &fix->a);
+    rc_file_load_binary_result binary = rc_file_load_binary(path, 0, &fix->a);
+
     RC_CHECK(text.error, ==, RC_FILE_ERROR_NOT_FOUND);
     RC_CHECK_FALSE(rc_mstr_is_valid(&text.text));
-
-    rc_file_load_binary_result binary = rc_file_load_binary(path, 0, &fix->a);
     RC_CHECK(binary.error, ==, RC_FILE_ERROR_NOT_FOUND);
     RC_CHECK_FALSE(rc_array_bytes_is_valid(&binary.contents));
 

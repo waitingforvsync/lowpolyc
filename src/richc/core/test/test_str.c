@@ -426,7 +426,7 @@ RC_TEST(str, as_cstr_fast)
 {
     // A view already followed by a null comes back without a copy
     rc_str s = RC_STR("hello");
-    char buf[16];
+    char buf[16] = {0};
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
     RC_CHECK_TRUE(c == s.data);
@@ -446,7 +446,7 @@ RC_TEST(str, as_cstr_copy)
 {
     // A view not followed by a null is copied into the buffer
     rc_str s = rc_str_first(RC_STR("hello world"), 5);
-    char buf[16];
+    char buf[16] = {0};
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
     RC_CHECK_TRUE(c == buf);
@@ -457,7 +457,7 @@ RC_TEST(str, as_cstr_copy)
 RC_TEST(str, as_cstr_copy_exact_fit)
 {
     rc_str s = rc_str_first(RC_STR("hello world"), 5);
-    char buf[6];
+    char buf[6] = {0};
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
     RC_CHECK(rc_str_from_cstr(c), ==, RC_STR("hello"));
@@ -468,7 +468,7 @@ RC_TEST(str, as_cstr_truncate)
 {
     // The copy is cut to fit, and always terminated
     rc_str s = rc_str_first(RC_STR("hello world"), 5);
-    char buf[3];
+    char buf[3] = {0};
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
     RC_CHECK(rc_str_from_cstr(c), ==, RC_STR("he"));
@@ -478,7 +478,7 @@ RC_TEST(str, as_cstr_truncate)
 RC_TEST(str, as_cstr_one_byte_buffer)
 {
     rc_str s = rc_str_first(RC_STR("hello world"), 5);
-    char buf[1];
+    char buf[1] = {0};
     const char *c = rc_str_as_cstr(s, buf, sizeof buf);
 
     RC_CHECK(rc_str_from_cstr(c), ==, RC_STR(""));
@@ -489,7 +489,7 @@ RC_TEST(str, as_cstr_no_buffer)
 {
     // No fast path and nowhere to copy to
     rc_str s = rc_str_first(RC_STR("hello world"), 5);
-    char buf[4];
+    char buf[4] = {0};
 
     RC_CHECK_TRUE(rc_str_as_cstr(s, NULL, 0) == NULL);
     RC_CHECK_TRUE(rc_str_as_cstr(s, buf, 0) == NULL);

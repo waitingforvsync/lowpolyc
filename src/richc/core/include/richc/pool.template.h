@@ -43,6 +43,7 @@
 #define RC_POOL_ RC_CONCAT(rc_pool_, RC_POOL_NAME)
 #define RC_POOL_SLOT_ RC_CONCAT(RC_POOL_, _slot_)
 #define RC_POOL_SLOTS_ RC_CONCAT(rc_array_pool_, RC_CONCAT(RC_POOL_NAME, _slot_))
+#define RC_POOL_SLOTS_VIEW_ RC_CONCAT(rc_view_pool_, RC_CONCAT(RC_POOL_NAME, _slot_))
 
 #define RC_POOL_MAKE_ RC_CONCAT(RC_POOL_, _make)
 #define RC_POOL_RESERVE_ RC_CONCAT(RC_POOL_, _reserve)
@@ -56,12 +57,15 @@
 #define RC_POOL_AT_ RC_CONCAT(RC_POOL_, _at)
 #define RC_POOL_AT_CONST_ RC_CONCAT(RC_POOL_, _at_const)
 #define RC_POOL_FREE_BITSET_ RC_CONCAT(RC_POOL_, _free_bitset)
+#define RC_POOL_REUSE_ RC_CONCAT(RC_POOL_, _reuse_)
 
 #define RC_POOL_SLOTS_MAKE_ RC_CONCAT(RC_POOL_SLOTS_, _make)
 #define RC_POOL_SLOTS_RESERVE_ RC_CONCAT(RC_POOL_SLOTS_, _reserve)
 #define RC_POOL_SLOTS_RESET_ RC_CONCAT(RC_POOL_SLOTS_, _reset)
 #define RC_POOL_SLOTS_RELEASE_ RC_CONCAT(RC_POOL_SLOTS_, _release)
 #define RC_POOL_SLOTS_PUSH_ RC_CONCAT(RC_POOL_SLOTS_, _push)
+#define RC_POOL_SLOTS_AT_ RC_CONCAT(RC_POOL_SLOTS_, _at)
+#define RC_POOL_SLOTS_VIEW_AT_ RC_CONCAT(RC_POOL_SLOTS_VIEW_, _at)
 
 // ---- types ----
 
@@ -75,6 +79,7 @@ typedef union RC_POOL_SLOT_ {
 #define RC_ARRAY_NAME RC_CONCAT(pool_, RC_CONCAT(RC_POOL_NAME, _slot_))
 #include "richc/array.template.h"
 
+// The pool: its slots, and the head of the free list.
 typedef struct RC_POOL_ {
     RC_POOL_SLOTS_ slots_;
     uint32_t first_free_;  // the first free slot's index plus one; 0 if none is free
@@ -110,6 +115,17 @@ static inline void RC_POOL_RELEASE_(RC_POOL_ *pool, rc_arena *arena)
 
 // ---- add and remove ----
 
+// Put value in the most recently freed slot, returning its index.
+static inline uint32_t RC_POOL_REUSE_(RC_POOL_ *pool, RC_POOL_TYPE value)
+{
+    uint32_t index = pool->first_free_ - 1;
+    RC_POOL_SLOT_ *slot = RC_POOL_SLOTS_AT_(&pool->slots_, index);
+
+    pool->first_free_ = slot->next_free_;
+    slot->value = value;
+    return index;
+}
+
 // Add value, returning its index: the most recently freed slot, or else a new one at the end.
 static inline uint32_t RC_POOL_ADD_(RC_POOL_ *pool, RC_POOL_TYPE value, rc_arena *arena)
 {
@@ -117,19 +133,14 @@ static inline uint32_t RC_POOL_ADD_(RC_POOL_ *pool, RC_POOL_TYPE value, rc_arena
         return RC_POOL_SLOTS_PUSH_(&pool->slots_, (RC_POOL_SLOT_) {.value = value}, arena);
     }
 
-    uint32_t index = pool->first_free_ - 1;
-    RC_POOL_SLOT_ *slot = &pool->slots_.data[index];
-    pool->first_free_ = slot->next_free_;
-    slot->value = value;
-    return index;
+    return RC_POOL_REUSE_(pool, value);
 }
 
 // Remove the element at index, freeing its slot. Removing from a free slot corrupts the pool, and
 // is not detected.
 static inline void RC_POOL_REMOVE_(RC_POOL_ *pool, uint32_t index)
 {
-    RC_ASSERT(index < pool->slots_.num);
-    pool->slots_.data[index].next_free_ = pool->first_free_;
+    RC_POOL_SLOTS_AT_(&pool->slots_, index)->next_free_ = pool->first_free_;
     pool->first_free_ = index + 1;
 }
 
@@ -138,29 +149,25 @@ static inline void RC_POOL_REMOVE_(RC_POOL_ *pool, uint32_t index)
 // The element at index, by value.
 static inline RC_POOL_TYPE RC_POOL_GET_(const RC_POOL_ *pool, uint32_t index)
 {
-    RC_ASSERT(index < pool->slots_.num);
-    return pool->slots_.data[index].value;
+    return RC_POOL_SLOTS_VIEW_AT_(pool->slots_.view, index)->value;
 }
 
 // Overwrite the element at index.
 static inline void RC_POOL_SET_(RC_POOL_ *pool, uint32_t index, RC_POOL_TYPE value)
 {
-    RC_ASSERT(index < pool->slots_.num);
-    pool->slots_.data[index].value = value;
+    RC_POOL_SLOTS_AT_(&pool->slots_, index)->value = value;
 }
 
 // A pointer to the element at index. Anything that grows the pool may move it.
 static inline RC_POOL_TYPE *RC_POOL_AT_(RC_POOL_ *pool, uint32_t index)
 {
-    RC_ASSERT(index < pool->slots_.num);
-    return &pool->slots_.data[index].value;
+    return &RC_POOL_SLOTS_AT_(&pool->slots_, index)->value;
 }
 
 // Like at, through a read-only pool.
 static inline const RC_POOL_TYPE *RC_POOL_AT_CONST_(const RC_POOL_ *pool, uint32_t index)
 {
-    RC_ASSERT(index < pool->slots_.num);
-    return &pool->slots_.data[index].value;
+    return &RC_POOL_SLOTS_VIEW_AT_(pool->slots_.view, index)->value;
 }
 
 // ---- iteration ----
@@ -176,7 +183,7 @@ static inline rc_bitset RC_POOL_FREE_BITSET_(const RC_POOL_ *pool, rc_arena *are
 {
     rc_bitset free_slots = rc_bitset_make(pool->slots_.num, arena);
 
-    for (uint32_t link = pool->first_free_; link != 0; link = pool->slots_.data[link - 1].next_free_) {
+    for (uint32_t link = pool->first_free_; link != 0; link = RC_POOL_SLOTS_VIEW_AT_(pool->slots_.view, link - 1)->next_free_) {
         rc_bitset_set(&free_slots, link - 1);
     }
     return free_slots;
@@ -196,16 +203,20 @@ static inline rc_bitset RC_POOL_FREE_BITSET_(const RC_POOL_ *pool, rc_arena *are
 #undef RC_POOL_AT_
 #undef RC_POOL_AT_CONST_
 #undef RC_POOL_FREE_BITSET_
+#undef RC_POOL_REUSE_
 
 #undef RC_POOL_SLOTS_MAKE_
 #undef RC_POOL_SLOTS_RESERVE_
 #undef RC_POOL_SLOTS_RESET_
 #undef RC_POOL_SLOTS_RELEASE_
 #undef RC_POOL_SLOTS_PUSH_
+#undef RC_POOL_SLOTS_AT_
+#undef RC_POOL_SLOTS_VIEW_AT_
 
 #undef RC_POOL_
 #undef RC_POOL_SLOT_
 #undef RC_POOL_SLOTS_
+#undef RC_POOL_SLOTS_VIEW_
 
 #undef RC_POOL_NAME
 #undef RC_POOL_TYPE

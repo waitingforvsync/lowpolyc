@@ -20,6 +20,7 @@ rc_heap rc_heap_reserve(void)
     // Reservations are aligned to the 64 KiB allocation granularity, which is exactly our page
     // size, so no over-reserving is needed
     void *mem = VirtualAlloc(NULL, (SIZE_T)RC_PAGE_HEAP_RESERVE, MEM_RESERVE, PAGE_NOACCESS);
+
     if (!mem) {
         return (rc_heap) {0};
     }

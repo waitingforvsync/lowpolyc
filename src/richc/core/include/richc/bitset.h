@@ -19,6 +19,7 @@
 
 typedef struct rc_arena rc_arena;
 
+// A growable array of bits; {0} is empty.
 typedef struct rc_bitset {
     uint32_t *data;
     uint32_t num;  // the number of bits

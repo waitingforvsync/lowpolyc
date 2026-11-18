@@ -1,7 +1,6 @@
 // print.c
 //
-// Linux and macOS. Straight to file descriptors 1 and 2, carrying on after short writes and
-// interruptions.
+// Linux and macOS. Straight to file descriptors 1 and 2, carrying on after short writes and EINTR.
 
 #include "richc/print.h"
 
@@ -17,14 +16,15 @@ static void rc_print_to(int fd, rc_str text)
     while (left > 0) {
         ssize_t written = write(fd, at, left);
 
-        if (written < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
 
-            // Nowhere left to report it, so the text is lost
+        // Nowhere left to report it, so the text is lost
+        if (written < 0) {
             return;
         }
+
         at += written;
         left -= (uint32_t)written;
     }

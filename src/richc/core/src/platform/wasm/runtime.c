@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// No libc header declares them for us.
 void *memcpy(void *dst, const void *src, size_t size);
 void *memmove(void *dst, const void *src, size_t size);
 void *memset(void *dst, int value, size_t size);

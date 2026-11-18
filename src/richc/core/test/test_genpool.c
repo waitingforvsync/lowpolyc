@@ -43,6 +43,22 @@ RC_TEST_GROUP_DEINIT(genpool, fix)
 }
 
 
+// Remove h, giving the generation its slot is left with.
+static uint32_t remove_giving_gen(rc_genpool_i32 *pool, rc_handle_i32 h)
+{
+    rc_genpool_i32_remove(pool, h);
+    return pool->slots_.data[h.index_].gen;
+}
+
+
+// Remove h, then add value, which takes over h's slot.
+static rc_handle_i32 replace(rc_genpool_i32 *pool, rc_handle_i32 h, int32_t value, rc_arena *arena)
+{
+    rc_genpool_i32_remove(pool, h);
+    return rc_genpool_i32_add(pool, value, arena);
+}
+
+
 // ---- handles ----
 
 RC_TEST(genpool, handle_none)
@@ -118,9 +134,7 @@ RC_TEST_STEP(genpool, reset_restarts_generations, fix)
     RC_CHECK(rc_genpool_i32_num_slots(&pool), ==, 0u);
     RC_CHECK(pool.first_free_, ==, 0u);
     RC_CHECK_FALSE(rc_genpool_i32_is_valid(&pool, before));
-
-    rc_handle_i32 after = rc_genpool_i32_add(&pool, 2, &fix->a);
-    RC_CHECK_TRUE(rc_handle_i32_is_equal(before, after));
+    RC_CHECK_TRUE(rc_handle_i32_is_equal(before, rc_genpool_i32_add(&pool, 2, &fix->a)));
 }
 
 
@@ -171,20 +185,20 @@ RC_TEST_STEP(genpool, generation_parity_tracks_liveness, fix)
     // add and remove each move the generation on by one: odd while live, even while free
     rc_genpool_i32 pool = {0};
     rc_handle_i32 h0 = rc_genpool_i32_add(&pool, 1, &fix->a);
+    uint32_t h0_freed_gen = remove_giving_gen(&pool, h0);
+    rc_handle_i32 h1 = rc_genpool_i32_add(&pool, 2, &fix->a);
+    bool h0_valid_beside_h1 = rc_genpool_i32_is_valid(&pool, h0);
+    bool h1_valid = rc_genpool_i32_is_valid(&pool, h1);
+    uint32_t h1_freed_gen = remove_giving_gen(&pool, h1);
+    rc_handle_i32 h2 = rc_genpool_i32_add(&pool, 3, &fix->a);
 
     RC_CHECK(h0.gen_, ==, 1u);
-    rc_genpool_i32_remove(&pool, h0);
-    RC_CHECK(pool.slots_.data[0].gen, ==, 2u);
-
-    rc_handle_i32 h1 = rc_genpool_i32_add(&pool, 2, &fix->a);
+    RC_CHECK(h0_freed_gen, ==, 2u);
     RC_CHECK(h1.index_, ==, h0.index_);
     RC_CHECK(h1.gen_, ==, 3u);
-    RC_CHECK_FALSE(rc_genpool_i32_is_valid(&pool, h0));
-    RC_CHECK_TRUE(rc_genpool_i32_is_valid(&pool, h1));
-
-    rc_genpool_i32_remove(&pool, h1);
-
-    rc_handle_i32 h2 = rc_genpool_i32_add(&pool, 3, &fix->a);
+    RC_CHECK_FALSE(h0_valid_beside_h1);
+    RC_CHECK_TRUE(h1_valid);
+    RC_CHECK(h1_freed_gen, ==, 4u);
     RC_CHECK(h2.gen_, ==, 5u);
     RC_CHECK_FALSE(rc_genpool_i32_is_valid(&pool, h1));
     RC_CHECK_TRUE(rc_genpool_i32_is_valid(&pool, h2));
@@ -210,7 +224,7 @@ RC_TEST_STEP(genpool, generation_wraps_to_free, fix)
 RC_TEST_STEP(genpool, reuses_last_freed_first, fix)
 {
     rc_genpool_i32 pool = {0};
-    rc_handle_i32 h[4];
+    rc_handle_i32 h[4] = {0};
 
     for (uint32_t i = 0; i < 4; i++) {
         h[i] = rc_genpool_i32_add(&pool, 0, &fix->a);
@@ -226,7 +240,7 @@ RC_TEST_STEP(genpool, reuses_last_freed_first, fix)
 RC_TEST_STEP(genpool, growth_and_reuse, fix)
 {
     rc_genpool_i32 pool = {0};
-    rc_handle_i32 h[100];
+    rc_handle_i32 h[100] = {0};
 
     for (uint32_t i = 0; i < 100; i++) {
         h[i] = rc_genpool_i32_add(&pool, (int32_t)(i * 10), &fix->a);
@@ -325,7 +339,7 @@ RC_TEST_STEP(genpool, struct_elements, fix)
 RC_TEST_STEP(genpool, is_live, fix)
 {
     rc_genpool_i32 pool = {0};
-    rc_handle_i32 h[8];
+    rc_handle_i32 h[8] = {0};
 
     for (uint32_t i = 0; i < 8; i++) {
         h[i] = rc_genpool_i32_add(&pool, 0, &fix->a);
@@ -342,7 +356,7 @@ RC_TEST_STEP(genpool, visit_live_elements, fix)
 {
     // The pattern num_slots, is_live and handle_at are for: every live element, by handle
     rc_genpool_i32 pool = {0};
-    rc_handle_i32 h[6];
+    rc_handle_i32 h[6] = {0};
     int32_t sum = 0;
 
     for (uint32_t i = 0; i < 6; i++) {
@@ -364,10 +378,8 @@ RC_TEST_STEP(genpool, handle_at, fix)
     rc_genpool_i32 pool = {0};
     rc_handle_i32 a = rc_genpool_i32_add(&pool, 1, &fix->a);
     rc_handle_i32 b = rc_genpool_i32_add(&pool, 2, &fix->a);
+    rc_handle_i32 b2 = replace(&pool, b, 3, &fix->a);
 
-    rc_genpool_i32_remove(&pool, b);
-
-    rc_handle_i32 b2 = rc_genpool_i32_add(&pool, 3, &fix->a);
     RC_CHECK_TRUE(rc_handle_i32_is_equal(rc_genpool_i32_handle_at(&pool, 0), a));
     RC_CHECK_TRUE(rc_handle_i32_is_equal(rc_genpool_i32_handle_at(&pool, 1), b2));
     RC_CHECK_FALSE(rc_handle_i32_is_equal(rc_genpool_i32_handle_at(&pool, 1), b));

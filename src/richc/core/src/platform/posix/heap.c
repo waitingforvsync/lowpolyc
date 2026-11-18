@@ -22,32 +22,40 @@
 #  define RC_PAGE_HEAP_RESERVE ((uint64_t)1 << 30)
 #endif
 
-rc_heap rc_heap_reserve(void)
+// Trim the slack either side of a mapping at start, a page bigger than the heap, so the mapping is
+// exactly the heap and release can unmap it by base and size alone.
+static rc_heap rc_heap_trim(uintptr_t start)
 {
-    // mmap only promises the OS page size, so over-reserve by one of our pages and align the base
-    // up within it
     size_t size = (size_t)RC_PAGE_HEAP_RESERVE;
     size_t page = RC_HEAP_PAGE_SIZE;
-    void *mem = mmap(NULL, size + page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (mem == MAP_FAILED) {
-        return (rc_heap) {0};
-    }
-
-    // Trim the slack either side, so the mapping is exactly the heap and release can unmap it by
-    // base and size alone
-    uintptr_t start = (uintptr_t)mem;
     uintptr_t base = (start + page - 1) & ~(uintptr_t)(page - 1);
     size_t head = (size_t)(base - start);
-    if (head) {
-        munmap(mem, head);
-    }
-    munmap((void *)(base + size), page - head);
 
+    if (head) {
+        munmap((void *)start, head);
+    }
+
+    munmap((void *)(base + size), page - head);
     return (rc_heap) {
         .base = base,
         .first = 1,
         .limit = (uint32_t)(RC_PAGE_HEAP_RESERVE / RC_HEAP_PAGE_SIZE)
     };
+}
+
+
+rc_heap rc_heap_reserve(void)
+{
+    // mmap only promises the OS page size, so over-reserve by one of our pages and align the base
+    // up within it
+    size_t mapping = (size_t)RC_PAGE_HEAP_RESERVE + RC_HEAP_PAGE_SIZE;
+    void *mem = mmap(NULL, mapping, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+
+    if (mem == MAP_FAILED) {
+        return (rc_heap) {0};
+    }
+
+    return rc_heap_trim((uintptr_t)mem);
 }
 
 

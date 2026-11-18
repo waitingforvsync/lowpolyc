@@ -38,18 +38,27 @@ extern const rc_test *__stop_rc_test[] __attribute__((weak));
 static jmp_buf rc_test_jmp;
 static const double rc_test_epsilon = 0.0001;
 
+// The tests a filter matches: how many, and the widest of their names.
+typedef struct rc_test_census {
+    int total;
+    int max_width;
+} rc_test_census;
+
+// True if a check's operator is name.
 static bool rc_test_op_is(const char *op, const char *name)
 {
     return strcmp(op, name) == 0;
 }
 
 
+// Abandon the running test.
 RC_NORETURN static void rc_test_fail(void)
 {
     longjmp(rc_test_jmp, 1);
 }
 
 
+// Report a check whose operator its operand type can't do.
 static void rc_test_unsupported(const char *op, const char *file, int line)
 {
     printf("[FAIL]\n%s:%d: unsupported operation: %s\n", file, line, op);
@@ -58,18 +67,20 @@ static void rc_test_unsupported(const char *op, const char *file, int line)
 
 void rc_test_check_bool(bool actual, const char *op, bool expected, const char *expr, const char *file, int line)
 {
+    bool pass = false;
+
     if (rc_test_op_is(op, "==")) {
-        if (actual == expected) {
-            return;
-        }
+        pass = actual == expected;
     }
     else if (rc_test_op_is(op, "!=")) {
-        if (actual != expected) {
-            return;
-        }
+        pass = actual != expected;
     }
     else {
         rc_test_unsupported(op, file, line);
+    }
+
+    if (pass) {
+        return;
     }
 
     printf("[FAIL]\n%s:%d: %s: actual %s\n", file, line, expr, actual ? "true" : "false");
@@ -106,6 +117,7 @@ void rc_test_check_int(int64_t actual, const char *op, int64_t expected, const c
     if (pass) {
         return;
     }
+
     printf("[FAIL]\n%s:%d: %s: actual %" PRId64 "\n", file, line, expr, actual);
     rc_test_fail();
 }
@@ -140,6 +152,7 @@ void rc_test_check_u64(uint64_t actual, const char *op, uint64_t expected, const
     if (pass) {
         return;
     }
+
     printf("[FAIL]\n%s:%d: %s: actual %" PRIu64 "\n", file, line, expr, actual);
     rc_test_fail();
 }
@@ -177,6 +190,7 @@ void rc_test_check_f64(double actual, const char *op, double expected, const cha
     if (pass) {
         return;
     }
+
     printf("[FAIL]\n%s:%d: %s: actual %f\n", file, line, expr, actual);
     rc_test_fail();
 }
@@ -195,6 +209,7 @@ static bool rc_test_str_matches(rc_str a, rc_str b)
     if (!rc_str_is_valid(a) || !rc_str_is_valid(b)) {
         return rc_str_is_valid(a) == rc_str_is_valid(b);
     }
+
     return rc_str_is_equal(a, b);
 }
 
@@ -216,16 +231,19 @@ void rc_test_check_str(rc_str actual, const char *op, rc_str expected, const cha
     if (pass) {
         return;
     }
+
     if (rc_str_is_valid(actual)) {
         printf("[FAIL]\n%s:%d: %s: actual \"%.*s\"\n", file, line, expr, (int)actual.len, actual.data);
     }
     else {
         printf("[FAIL]\n%s:%d: %s: actual invalid\n", file, line, expr);
     }
+
     rc_test_fail();
 }
 
 
+// True if the test is in a group whose name starts with filter.
 static bool rc_test_matches(const rc_test *t, const char *filter)
 {
     return t && strncmp(t->group_name, filter, strlen(filter)) == 0;
@@ -247,12 +265,12 @@ static bool rc_test_run_one(const rc_test *t)
     }
 
     if (setjmp(rc_test_jmp)) {
-
         // Cleared before the call: a failing deinit longjmps back here and must not run twice
         if (owes_deinit) {
             owes_deinit = false;
             t->deinit_fn(t->context);
         }
+
         rc_arena_deinit();
         return false;
     }
@@ -260,6 +278,7 @@ static bool rc_test_run_one(const rc_test *t)
     if (t->init_fn) {
         t->init_fn(t->context);
     }
+
     owes_deinit = t->deinit_fn != NULL;
     if (t->step_fn) {
         t->step_fn(t->context);
@@ -267,47 +286,70 @@ static bool rc_test_run_one(const rc_test *t)
     else {
         t->fn();
     }
+
     owes_deinit = false;
     if (t->deinit_fn) {
         t->deinit_fn(t->context);
     }
+
     rc_arena_deinit();
     return true;
 }
 
 
-int rc_test_run(const char *filter)
+// The length of a test's group and test names together.
+static int rc_test_name_width(const rc_test *t)
 {
-    int num_fail = 0;
-    int num_pass = 0;
-    int num_skip = 0;
+    return (int)(strlen(t->group_name) + strlen(t->test_name));
+}
+
+
+// Count the tests filter matches, and find the widest name.
+static rc_test_census rc_test_take_census(const char *filter)
+{
     int total = 0;
     int max_width = 0;
 
-    // First pass: count the matching tests and find the widest name
     for (const rc_test **it = RC_TEST_BEGIN; it != RC_TEST_END; ++it) {
         if (rc_test_matches(*it, filter)) {
-            int width = (int)(strlen((*it)->group_name) + strlen((*it)->test_name));
-            if (width > max_width) {
-                max_width = width;
-            }
+            int width = rc_test_name_width(*it);
+
+            max_width = width > max_width ? width : max_width;
             total++;
         }
     }
 
-    // Second pass: run each matching test
+    return (rc_test_census) {.total = total, .max_width = max_width};
+}
+
+
+// Print the test's number and name, padded so the results line up.
+static void rc_test_print_name(const rc_test *t, int count, rc_test_census census)
+{
+    int padding = census.max_width + 3 - rc_test_name_width(t);
+
+    printf("%4d/%d:  %s.%s%-*s", count, census.total, t->group_name, t->test_name, padding, ":");
+    fflush(stdout);
+}
+
+
+int rc_test_run(const char *filter)
+{
+    rc_test_census census = rc_test_take_census(filter);
     int count = 1;
+    int num_fail = 0;
+    int num_pass = 0;
+    int num_skip = 0;
+
     for (const rc_test **it = RC_TEST_BEGIN; it != RC_TEST_END; ++it) {
         const rc_test *t = *it;
+
         if (!rc_test_matches(t, filter)) {
             continue;
         }
 
-        int padding = max_width + 3 - (int)(strlen(t->group_name) + strlen(t->test_name));
-        printf("%4d/%d:  %s.%s%-*s", count, total, t->group_name, t->test_name, padding, ":");
-        fflush(stdout);
+        rc_test_print_name(t, count, census);
         count++;
-
         if (t->skip) {
             printf("[SKIP]\n");
             num_skip++;
@@ -323,7 +365,7 @@ int rc_test_run(const char *filter)
         }
     }
 
-    printf("\nRESULTS: %d tests (%d ok, %d failed, %d skipped)\n", total, num_pass, num_fail, num_skip);
+    printf("\nRESULTS: %d tests (%d ok, %d failed, %d skipped)\n", census.total, num_pass, num_fail, num_skip);
     fflush(stdout);
     return num_fail;
 }

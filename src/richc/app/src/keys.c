@@ -135,29 +135,43 @@ static uint32_t rc_app_lower(uint32_t codepoint)
 }
 
 
+// The keycode of a character key, which types us_char on a US layout: the number row gives digits
+// whatever the layout types there, and a key whose character is not Latin (or is not known, or is
+// a dead key) gives the US one.
+static uint32_t rc_app_character_keycode(rc_scancode scancode, uint32_t us_char, uint32_t layout_char)
+{
+    if (scancode >= RC_SCANCODE_1 && scancode <= RC_SCANCODE_0) {
+        return us_char;
+    }
+
+    return rc_app_is_latin(layout_char) ? rc_app_lower(layout_char) : us_char;
+}
+
+
+// The keycode of a key with no name: one we know no position for goes by whatever it types.
+static uint32_t rc_app_unnamed_keycode(rc_scancode scancode, uint32_t layout_char)
+{
+    uint32_t us_char = rc_app_us_chars[scancode];
+
+    if (us_char == 0) {
+        return rc_app_is_latin(layout_char) ? rc_app_lower(layout_char) : RC_KEY_NONE;
+    }
+
+    return rc_app_character_keycode(scancode, us_char, layout_char);
+}
+
+
 uint32_t rc_app_keycode(rc_scancode scancode, uint32_t layout_char)
 {
     if ((uint32_t)scancode >= RC_SCANCODE_COUNT) {
         return RC_KEY_NONE;
     }
 
-    uint32_t named = rc_app_named_keys[scancode];
-    if (named != 0) {
-        return named;
+    if (rc_app_named_keys[scancode] != 0) {
+        return rc_app_named_keys[scancode];
     }
 
-    // A key we know no position for keys by whatever it types
-    uint32_t us_char = rc_app_us_chars[scancode];
-    if (us_char == 0) {
-        return rc_app_is_latin(layout_char) ? rc_app_lower(layout_char) : RC_KEY_NONE;
-    }
-
-    // The number row gives digits whatever the layout types there, and a key whose character is not
-    // Latin (or is not known, or is a dead key) gives the US one
-    if (scancode >= RC_SCANCODE_1 && scancode <= RC_SCANCODE_0) {
-        return us_char;
-    }
-    return rc_app_is_latin(layout_char) ? rc_app_lower(layout_char) : us_char;
+    return rc_app_unnamed_keycode(scancode, layout_char);
 }
 
 

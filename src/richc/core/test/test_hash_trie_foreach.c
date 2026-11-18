@@ -34,6 +34,7 @@ typedef struct visits {
 } visits;
 
 
+// Count the entry at index into v.
 static void visit(visits *v, const rc_hash_trie_fe_pool *pool, uint32_t index)
 {
     v->count++;
@@ -42,6 +43,7 @@ static void visit(visits *v, const rc_hash_trie_fe_pool *pool, uint32_t index)
 }
 
 
+// Count the entry at index of a chained trie into v.
 static void visit_chain(visits *v, const rc_hash_trie_fe_chain_pool *pool, uint32_t index)
 {
     v->count++;
@@ -62,9 +64,11 @@ static void visit_chain(visits *v, const rc_hash_trie_fe_chain_pool *pool, uint3
 #define RC_HASH_TRIE_FOREACH_FUNC(ctx, pool, index) visit_chain(ctx, pool, index)
 #include "richc/hash_trie_foreach.template.h"
 
+// The entries the context-free walks have seen
 static uint32_t visit_count;
 
 
+// Count one more entry of a trie.
 static void count_one(const rc_hash_trie_fe_pool *pool, uint32_t index)
 {
     (void)pool;
@@ -73,6 +77,7 @@ static void count_one(const rc_hash_trie_fe_pool *pool, uint32_t index)
 }
 
 
+// Count one more entry of a set.
 static void count_weak(const rc_hash_trie_fe_weak_pool *pool, uint32_t index)
 {
     (void)pool;
@@ -93,6 +98,7 @@ static void count_weak(const rc_hash_trie_fe_weak_pool *pool, uint32_t index)
 #include "richc/hash_trie_foreach.template.h"
 
 
+// Double the value at index.
 static void double_value(rc_hash_trie_fe_pool *pool, uint32_t index)
 {
     rc_hash_trie_fe_value_set(pool, index, rc_hash_trie_fe_value_get(pool, index) * 2);
@@ -129,6 +135,18 @@ static rc_hash_trie_fe trie_with(uint64_t n, rc_hash_trie_fe_pool *pool, rc_aren
 
     for (uint64_t k = 1; k <= n; k++) {
         rc_hash_trie_fe_add(&trie, pool, k, (int32_t)(k * 10), arena);
+    }
+    return trie;
+}
+
+
+// A chained trie in pool with the keys 1 to n, each valued as its key.
+static rc_hash_trie_fe_chain chain_with(uint64_t n, rc_hash_trie_fe_chain_pool *pool, rc_arena *arena)
+{
+    rc_hash_trie_fe_chain trie = {0};
+
+    for (uint64_t k = 1; k <= n; k++) {
+        rc_hash_trie_fe_chain_add(&trie, pool, k, (int32_t)k, arena);
     }
     return trie;
 }
@@ -173,12 +191,9 @@ RC_TEST_STEP(hash_trie_foreach, visits_each_once, fix)
 RC_TEST_STEP(hash_trie_foreach, deep_chain, fix)
 {
     rc_hash_trie_fe_chain_pool pool = {0};
-    rc_hash_trie_fe_chain trie = {0};
+    rc_hash_trie_fe_chain trie = chain_with(20, &pool, &fix->a);
     visits v = {0};
 
-    for (uint64_t k = 1; k <= 20; k++) {
-        rc_hash_trie_fe_chain_add(&trie, &pool, k, (int32_t)k, &fix->a);
-    }
     rc_hash_trie_fe_chain_foreach(trie, &pool, &v);
     RC_CHECK(v.count, ==, 20u);
     RC_CHECK(v.key_sum, ==, (uint64_t)210);
@@ -231,12 +246,9 @@ RC_TEST_STEP(hash_trie_foreach, long_chain, fix)
 {
     // The walk keeps its own list of blocks, so a chain of thousands is fine
     rc_hash_trie_fe_chain_pool pool = {0};
-    rc_hash_trie_fe_chain trie = {0};
+    rc_hash_trie_fe_chain trie = chain_with(2000, &pool, &fix->a);
     visits v = {0};
 
-    for (uint64_t k = 1; k <= 2000; k++) {
-        rc_hash_trie_fe_chain_add(&trie, &pool, k, 1, &fix->a);
-    }
     rc_hash_trie_fe_chain_foreach(trie, &pool, &v);
     RC_CHECK(v.count, ==, 2000u);
     RC_CHECK(v.key_sum, ==, (uint64_t)2001000);

@@ -467,10 +467,13 @@ core. Nothing outside the platform backends knows which target it is running on.
 - **Code lines have a hard limit of 140 characters.** A line that fits stays
   whole, signatures and calls included; one that doesn't is split at a natural
   place, such as between arguments.
-- **No big conditions.** An `if` whose condition chains several `&&` and `||`
-  terms is split into early outs, one `if` each, or its condition becomes a
-  small helper with a name that says what it tests. Two simple terms on one
-  line are fine.
+- **Code reads for itself.** Well-named symbols and small functions should
+  make the code understandable without its comments. Comments are brief, sit
+  between blocks for visual relief, and say what the names can't.
+- **No big conditions.** An `if` condition should not be a complicated boolean
+  expression. An early-out condition is split into several `if`s, one each;
+  any other becomes a small static function, named for what it tests. Two
+  simple terms on one line are fine.
 
   ```c
   if (type == 0) {

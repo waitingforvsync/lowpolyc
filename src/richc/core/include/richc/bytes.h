@@ -25,19 +25,25 @@ static inline rc_str rc_span_bytes_as_str(rc_span_bytes bytes)
     return rc_view_bytes_as_str(bytes.view);
 }
 
-// Move the bytes into a string: we append a terminator (growing only if the buffer is full) and
-// reset *bytes to {0}, so the string is left as the buffer's only writer.
-static inline rc_mstr rc_array_bytes_to_mstr(rc_array_bytes *bytes, rc_arena *arena)
+// Move bytes whose last is a terminator into a string, resetting *bytes to {0}.
+static inline rc_mstr rc_array_bytes_take_terminated_(rc_array_bytes *bytes)
 {
-    rc_array_bytes_push(bytes, 0, arena);
-
     rc_mstr s = {
         .data = (char *)bytes->data,
         .len = bytes->num - 1,
         .cap = bytes->cap
     };
+
     *bytes = (rc_array_bytes) {0};
     return s;
+}
+
+// Move the bytes into a string: we append a terminator (growing only if the buffer is full) and
+// reset *bytes to {0}, so the string is left as the buffer's only writer.
+static inline rc_mstr rc_array_bytes_to_mstr(rc_array_bytes *bytes, rc_arena *arena)
+{
+    rc_array_bytes_push(bytes, 0, arena);
+    return rc_array_bytes_take_terminated_(bytes);
 }
 
 #endif // RC_BYTES_H_
