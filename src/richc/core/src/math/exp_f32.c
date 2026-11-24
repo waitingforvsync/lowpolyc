@@ -1,61 +1,37 @@
 // math/exp_f32.c
 //
-// e to the power of a float. Ported from musl 1.2.5 (MIT), src/math/expf.c, which is Arm's
-// optimized-routines. Its notice:
-//
-// Copyright (c) 2017-2018, Arm Limited.
-// SPDX-License-Identifier: MIT
-//
-// The error is at most 0.502 ulp. Before rounding, the relative error of the cubic is 1.69 x 2^-34
-// on [-ln2/64, ln2/64].
+// e^x for floats, as 2^(n / 32) with n = 32 x log2(e) in double, from the kernel in
+// exp_log_f32.h. Rounding n moves it by at most 2^-41 below |x| = 111, which moves the result by
+// about 2^-46 relative, and the kernel adds under 2^-33, so the error stays within 0.502 ulp. The
+// main path takes every x whose e^x is a finite float other than +0, and the double result rounds
+// to float as e^x does, subnormals included. Beyond it e^x rounds to +inf or +0, which we return
+// straight away. NaN fails both comparisons and takes the slow path too.
 
-#include "exp_log_f32.h"
+#include "richc/math/math.h"
 
-// The sign, the exponent and the top 3 bits of the mantissa of x.
-static uint32_t rc_exp_top12_f32(float x)
+#include "math/exp_log_f32.h"
+
+// True for the x of the main path: from the least x whose e^x doesn't round to +0,
+// -0x1.9fe368p6, up to the greatest whose e^x doesn't round to +inf, 0x1.62e42ep6.
+static bool rc_exp_f32_is_ordinary(float x)
 {
-    return rc_bitcast_f32(x) >> 20;
+    return x > -0x1.9fe36ap6f && x < 0x1.62e430p6f;
 }
 
 
-// e^x for x in [-0x1.9fe368p6, 0x1.62e42ep6], from log(2^-150) to log(2^128). We write
-// z = 32 x / ln2 as k + r, with k whole and r in [-1/2, 1/2]: adding the shift rounds z to k, ties
-// to even, and leaves k in the low bits. Then e^x is 2^(k/32) 2^(r/32).
-static float rc_exp_in_range_f32(float x)
+// e^x for an x beyond the main path, or NaN: +inf, +0 or the NaN.
+static float rc_exp_f32_special(float x)
 {
-    double z = rc_exp_data_f32.inv_ln2_scaled * (double)x;
-    double shifted = z + rc_exp_data_f32.shift;
-    double k = shifted - rc_exp_data_f32.shift;
+    if (x != x) {
+        return x + x;
+    }
 
-    return rc_exp_from_reduced_f32(rc_bitcast_f64(shifted), 0, z - k, rc_exp_data_f32.poly_scaled);
+    return x > 0.0f ? rc_bitcast_u32(0x7f800000u) : 0.0f;
 }
 
 
 float rc_exp_f32(float x)
 {
-    uint32_t abs_top = rc_exp_top12_f32(x) & 0x7ffu;
-
-    if (abs_top < rc_exp_top12_f32(88.0f)) {
-        return rc_exp_in_range_f32(x);
-    }
-
-    // |x| >= 88, or x is infinite or NaN
-    if (rc_bitcast_f32(x) == 0xff800000u) {
-        return 0.0f;
-    }
-
-    // +infinity stays as it is, and NaN stays NaN
-    if (abs_top >= 0x7f8u) {
-        return x + x;
-    }
-
-    if (x > 0x1.62e42ep6f) {
-        return rc_exp_overflow_f32(0);
-    }
-
-    if (x < -0x1.9fe368p6f) {
-        return rc_exp_underflow_f32(0);
-    }
-
-    return rc_exp_in_range_f32(x);
+    // The main path first, in a ternary: so gcc and clang (wasm too) both let it fall through
+    return rc_exp_f32_is_ordinary(x) ? (float)rc_exp2_f32_kernel((double)x * 0x1.71547652b82fep+5, 0) : rc_exp_f32_special(x);
 }

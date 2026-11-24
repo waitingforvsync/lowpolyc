@@ -147,10 +147,15 @@ identical.
   [Build and tooling](#build-and-tooling)): `-fno-math-errno` (without it gcc
   adds a compare and a libm call to every sqrt), and SSE4.1 on x86-64 for
   floor/ceil/trunc (`roundss`; without it they become libm calls).
-- Transcendental implementations are ported from MIT-licensed sources (Arm
-  optimized-routines, CORE-MATH, musl), never from glibc (LGPL). Each file's
-  header comment names its source and licence. Where the original uses FMA or
-  target intrinsics, we take its portable path.
+- Transcendental implementations are our own, written from a specification of
+  their results, accuracy and constraints (`tools/math/spec.md`), never ported
+  from another libm. Coefficients come from our own minimax fits (Sollya's
+  `fpminimax`) and constants and tables from arbitrary-precision arithmetic
+  (mpmath), by the tools in `tools/math/`, which also regenerate the golden
+  test values and check speed and that every target gives the same bits. Each
+  file's banner says how it works: the reduction, the approximation and its
+  fitted error, and where the error budget goes. Extra precision comes from
+  error-free transformations (two-sums, Dekker products), never FMA.
 - They are written branch-free where practical, so loops over them can
   vectorise (`-msimd128` on wasm). There is no hardware sin/cos on any target,
   so intrinsics do not help here.

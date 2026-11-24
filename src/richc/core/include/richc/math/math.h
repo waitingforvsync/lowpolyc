@@ -504,11 +504,11 @@ static inline bool rc_is_finite_f64(double x)
 
 // ---- transcendentals ----
 
-// Each is our own C, in a file of its own under src/math, so a program only links the ones it
-// calls. They are ported from musl, which takes them from FreeBSD's msun and Arm's
-// optimized-routines; IEEE 754 doesn't pin these down, so only by computing them ourselves do we
-// get the same bits on every target. Angles are in radians. They are all within an ulp of the true
-// value except atan2, within 1.6; test/math_accuracy.c holds each one's limit and checks it.
+// Each is our own, written from a specification with coefficients we fitted ourselves, in a file
+// of its own under src/math, so a program only links the ones it calls. IEEE 754 doesn't pin these
+// down, so only by computing them ourselves do we get the same bits on every target. Angles are in
+// radians. The f32 ones are within 0.52 ulp of the true value (most within 0.51, all but correctly
+// rounded) and the f64 ones within 0.8; test/math_accuracy.c holds each one's limit and checks it.
 
 // The sine of x.
 float rc_sin_f32(float x);

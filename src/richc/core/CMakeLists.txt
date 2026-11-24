@@ -17,29 +17,27 @@ add_library(richc STATIC
     src/math/atan2_f64.c
     src/math/atan_f32.c
     src/math/atan_f64.c
+    src/math/atan_table.c
     src/math/cbrt_f32.c
     src/math/cbrt_f64.c
     src/math/cos_f32.c
     src/math/cos_f64.c
-    src/math/exp_data_f32.c
-    src/math/exp_data_f64.c
     src/math/exp_f32.c
+    src/math/exp_f32_table.c
     src/math/exp_f64.c
-    src/math/log2_data_f32.c
-    src/math/log2_data_f64.c
+    src/math/exp_f64_kernel.c
     src/math/log2_f32.c
     src/math/log2_f64.c
-    src/math/log_data_f32.c
-    src/math/log_data_f64.c
+    src/math/log2_f64_table.c
     src/math/log_f32.c
+    src/math/log_f32_table.c
     src/math/log_f64.c
+    src/math/log_f64_table.c
     src/math/mat22f.c
     src/math/mat23f.c
     src/math/mat33f.c
     src/math/mat34f.c
     src/math/mat44f.c
-    src/math/pow_data_f32.c
-    src/math/pow_data_f64.c
     src/math/pow_f32.c
     src/math/pow_f64.c
     src/math/quatf.c
@@ -49,11 +47,8 @@ add_library(richc STATIC
     src/math/solve.c
     src/math/tan_f32.c
     src/math/tan_f64.c
-    src/math/trig_kernel_f32.c
-    src/math/trig_kernel_f64.c
-    src/math/trig_reduce_f32.c
-    src/math/trig_reduce_f64.c
-    src/math/trig_reduce_large.c
+    src/math/trig_reduce.c
+    src/math/trig_slow.c
     include/richc/arena.h
     include/richc/array.template.h
     include/richc/bitset.h
@@ -105,6 +100,7 @@ add_library(richc STATIC
     include/richc/math/array/vec4f.h
     src/fs.h
     src/heap.h
+    src/math/arc.h
     src/math/exp_log_f32.h
     src/math/exp_log_f64.h
     src/math/trig.h

@@ -1,475 +1,781 @@
 // test_math_arc.c
 //
-// Tests for the inverse trigonometric functions in richc/math/math.h: asin, acos, atan and atan2.
-// The expected bits are golden values, recorded from the port once it matched musl on every float
-// input and on hundreds of millions of doubles, so every target must give exactly these.
+// Tests for the inverse trigonometric functions of richc/math/math.h, asin, acos, atan and atan2,
+// in both widths: the special values of C17 Annex F bit for bit, the symmetries, a few values for
+// sense, and golden results that pin the exact bits each function gives, so that any change, or
+// any target that computes differently, shows up.
 
 #include "richc/math/math.h"
 
 #include "richc/test.h"
 
+// The nearest floats and doubles to pi/4, pi/2, 3pi/4 and pi, as bits.
+#define PI_4_F32   0x3f490fdbu
+#define PI_2_F32   0x3fc90fdbu
+#define PI_3_4_F32 0x4016cbe4u
+#define PI_F32     0x40490fdbu
+
+#define PI_4_F64   0x3fe921fb54442d18ull
+#define PI_2_F64   0x3ff921fb54442d18ull
+#define PI_3_4_F64 0x4002d97c7f3321d2ull
+#define PI_F64     0x400921fb54442d18ull
+
+#define SIGN_F32 0x80000000u
+#define SIGN_F64 0x8000000000000000ull
+
+// An input and the bits of the result for it, recorded once from our own implementation.
+typedef struct golden_f32 {
+    float x;
+    uint32_t bits;
+} golden_f32;
+
+typedef struct golden_f64 {
+    double x;
+    uint64_t bits;
+} golden_f64;
+
+typedef struct golden2_f32 {
+    float y;
+    float x;
+    uint32_t bits;
+} golden2_f32;
+
+typedef struct golden2_f64 {
+    double y;
+    double x;
+    uint64_t bits;
+} golden2_f64;
+
+// Golden inputs cover every branch: for asin and acos, tiny, the kernel up to 1/2, either side of
+// 1/2, the square root side up to 1, with its root split and whole either side of 0.975, and
+// negatives.
+static const golden_f32 asin_golden_f32[] = {
+    {0x1p-149f, 0x00000001u},
+    {0x1.4484cp-100f, 0x0da24260u},
+    {0x1.4f8b58p-17f, 0x3727c5acu},
+    {0x1.0624dep-10f, 0x3a831270u},
+    {0x1.99999ap-4f, 0x3dcd2494u},
+    {0x1p-2f, 0x3e815f4eu},
+    {0x1.333334p-2f, 0x3e9c00adu},
+    {0x1.ccccccp-2f, 0x3eeefbddu},
+    {0x1.fffffep-2f, 0x3f060a91u},
+    {0x1p-1f, 0x3f060a92u},
+    {0x1.000002p-1f, 0x3f060a93u},
+    {0x1.333334p-1f, 0x3f24bc7eu},
+    {0x1.666666p-1f, 0x3f468073u},
+    {0x1.99999ap-1f, 0x3f6d6339u},
+    {0x1.ccccccp-1f, 0x3f8f549bu},
+    {0x1.e66666p-1f, 0x3fa06a08u},
+    {0x1.fae148p-1f, 0x3fb6f1e4u},
+    {0x1.fff2e4p-1f, 0x3fc74067u},
+    {0x1.fffffep-1f, 0x3fc9048au},
+    {-0x1.99999ap-3f, 0xbe4e30c6u},
+    {-0x1.19999ap-1f, 0xbf1515d3u},
+    {-0x1.8p-1f, 0xbf591a99u},
+    {-0x1.ff7ceep-1f, 0xbfc35650u},
+    {-0x1.fffffep-1f, 0xbfc9048au},
+};
+
+static const golden_f64 asin_golden_f64[] = {
+    {0x0.000000000001p-1022, 0x0000000000000010ull},
+    {0x1.56e1fc2f8f359p-997, 0x01a56e1fc2f8f359ull},
+    {0x1.12e0be826d695p-30, 0x3e112e0be826d695ull},
+    {0x1p-27, 0x3e40000000000000ull},
+    {0x1.0624dd2f1a9fcp-10, 0x3f50624e00c1cb16ull},
+    {0x1.999999999999ap-4, 0x3fb9a49276037884ull},
+    {0x1.999999999999ap-3, 0x3fc9c618aa4ae23dull},
+    {0x1p-2, 0x3fd02be9ce0b87cdull},
+    {0x1.3333333333333p-2, 0x3fd380159e14f6ffull},
+    {0x1.999999999999ap-2, 0x3fda564ac0e73a34ull},
+    {0x1.ccccccccccccdp-2, 0x3fdddf7bba8753cdull},
+    {0x1.ffffffffffffep-2, 0x3fe0c152382d7364ull},
+    {0x1p-1, 0x3fe0c152382d7366ull},
+    {0x1.0000000000001p-1, 0x3fe0c152382d7367ull},
+    {0x1.199999999999ap-1, 0x3fe2a2ba538032f0ull},
+    {0x1.3333333333333p-1, 0x3fe4978fa3269ee1ull},
+    {0x1.6666666666666p-1, 0x3fe8d00e692afd95ull},
+    {0x1.8p-1, 0x3feb235315c680dcull},
+    {0x1.999999999999ap-1, 0x3fedac670561bb50ull},
+    {0x1.bb645a1cac083p-1, 0x3ff0c11cf23983e3ull},
+    {0x1.ccccccccccccdp-1, 0x3ff1ea93705fa172ull},
+    {0x1.e666666666666p-1, 0x3ff40d41159f3409ull},
+    {0x1.f333333333333p-1, 0x3ff58c2b5ce0c3e5ull},
+    {0x1.f333333333334p-1, 0x3ff58c2b5ce0c3e7ull},
+    {0x1.fae147ae147aep-1, 0x3ff6de3c6f33d51dull},
+    {0x1.ff7ced916872bp-1, 0x3ff86ac9ad18f803ull},
+    {0x1.ffffde7210be9p-1, 0x3ff91c306b2c13adull},
+    {0x1.fffffffffffffp-1, 0x3ff921fb50442d18ull},
+    {-0x1.999999999999ap-4, 0xbfb9a49276037884ull},
+    {-0x1.6666666666666p-2, 0xbfd6e271e909bbe4ull},
+    {-0x1p-1, 0xbfe0c152382d7366ull},
+    {-0x1.4cccccccccccdp-1, 0xbfe6a4881ddc9b84ull},
+    {-0x1.ccccccccccccdp-1, 0xbff1ea93705fa172ull},
+    {-0x1.f333333333333p-1, 0xbff58c2b5ce0c3e5ull},
+    {-0x1.fffeb074a771dp-1, 0xbff90fa9f3695aa5ull},
+    {-0x1.fffffffffffffp-1, 0xbff921fb50442d18ull},
+};
+
+static const golden_f32 acos_golden_f32[] = {
+    {0x1p-149f, 0x3fc90fdbu},
+    {0x1.4484cp-100f, 0x3fc90fdbu},
+    {0x1.4f8b58p-17f, 0x3fc90f87u},
+    {0x1.0624dep-10f, 0x3fc8ef16u},
+    {0x1.99999ap-4f, 0x3fbc3d91u},
+    {0x1p-2f, 0x3fa8b807u},
+    {0x1.333334p-2f, 0x3fa20fafu},
+    {0x1.ccccccp-2f, 0x3f8d50e3u},
+    {0x1.fffffep-2f, 0x3f860a92u},
+    {0x1p-1f, 0x3f860a92u},
+    {0x1.000002p-1f, 0x3f860a91u},
+    {0x1.333334p-1f, 0x3f6d6338u},
+    {0x1.666666p-1f, 0x3f4b9f42u},
+    {0x1.99999ap-1f, 0x3f24bc7du},
+    {0x1.ccccccp-1f, 0x3ee6ecfeu},
+    {0x1.e66666p-1f, 0x3ea29749u},
+    {0x1.fae148p-1f, 0x3e10efb5u},
+    {0x1.fff2e4p-1f, 0x3c67b9d5u},
+    {0x1.fffffep-1f, 0x39b504f3u},
+    {-0x1.99999ap-3f, 0x3fe2d5f3u},
+    {-0x1.19999ap-1f, 0x4009cd62u},
+    {-0x1.8p-1f, 0x401ace93u},
+    {-0x1.ff7ceep-1f, 0x40463315u},
+    {-0x1.fffffep-1f, 0x40490a32u},
+};
+
+static const golden_f64 acos_golden_f64[] = {
+    {0x0.000000000001p-1022, 0x3ff921fb54442d18ull},
+    {0x1.56e1fc2f8f359p-997, 0x3ff921fb54442d18ull},
+    {0x1.12e0be826d695p-30, 0x3ff921fb53ff74e9ull},
+    {0x1p-27, 0x3ff921fb52442d18ull},
+    {0x1.0624dd2f1a9fcp-10, 0x3ff91de2c0c3fca6ull},
+    {0x1.999999999999ap-4, 0x3ff787b22ce3f590ull},
+    {0x1.999999999999ap-3, 0x3ff5e9383efad0d1ull},
+    {0x1p-2, 0x3ff51700e0c14b25ull},
+    {0x1.3333333333333p-2, 0x3ff441f5ecbeef59ull},
+    {0x1.999999999999ap-2, 0x3ff28c68a40a5e8bull},
+    {0x1.ccccccccccccdp-2, 0x3ff1aa1c65a25825ull},
+    {0x1.ffffffffffffep-2, 0x3ff0c152382d7366ull},
+    {0x1p-1, 0x3ff0c152382d7366ull},
+    {0x1.0000000000001p-1, 0x3ff0c152382d7365ull},
+    {0x1.199999999999ap-1, 0x3fefa13c55082740ull},
+    {0x1.3333333333333p-1, 0x3fedac670561bb50ull},
+    {0x1.6666666666666p-1, 0x3fe973e83f5d5c9bull},
+    {0x1.8p-1, 0x3fe720a392c1d955ull},
+    {0x1.999999999999ap-1, 0x3fe4978fa3269ee0ull},
+    {0x1.bb645a1cac083p-1, 0x3fe0c1bcc415526aull},
+    {0x1.ccccccccccccdp-1, 0x3fdcdd9f8f922e98ull},
+    {0x1.e666666666666p-1, 0x3fd452e8fa93e43cull},
+    {0x1.f333333333333p-1, 0x3fccae7fbb1b499aull},
+    {0x1.f333333333334p-1, 0x3fccae7fbb1b4988ull},
+    {0x1.fae147ae147aep-1, 0x3fc21df72882bfd8ull},
+    {0x1.ff7ced916872bp-1, 0x3fa6e634e566a29eull},
+    {0x1.ffffde7210be9p-1, 0x3f572ba46065af16ull},
+    {0x1.fffffffffffffp-1, 0x3e50000000000000ull},
+    {-0x1.999999999999ap-4, 0x3ffabc447ba464a1ull},
+    {-0x1.6666666666666p-2, 0x3ffeda97ce869c11ull},
+    {-0x1p-1, 0x4000c152382d7366ull},
+    {-0x1.4cccccccccccdp-1, 0x40023a1fb1993d6dull},
+    {-0x1.ccccccccccccdp-1, 0x400586476251e745ull},
+    {-0x1.f333333333333p-1, 0x400757135892787full},
+    {-0x1.fffeb074a771dp-1, 0x400918d2a3d6c3dfull},
+    {-0x1.fffffffffffffp-1, 0x400921fb52442d18ull},
+};
+
+// For atan, either side of 2^-27, below the table, each of its binades and edges, beyond 16, and
+// either side of 2^54; for f32, either side of tan(pi/8), tan(3pi/8) and 2^26.
+static const golden_f32 atan_golden_f32[] = {
+    {0x1p-149f, 0x00000001u},
+    {0x1.4484cp-100f, 0x0da24260u},
+    {0x1.4f8b58p-17f, 0x3727c5acu},
+    {0x1.47ae14p-7f, 0x3c23d5a4u},
+    {0x1.99999ap-4f, 0x3dcc1f14u},
+    {0x1.333334p-2f, 0x3e9539d4u},
+    {0x1.a82798p-2f, 0x3ec90fdau},
+    {0x1.a8279ap-2f, 0x3ec90fdbu},
+    {0x1p-1f, 0x3eed6338u},
+    {0x1.8p-1f, 0x3f24bc7du},
+    {0x1.fffffep-1f, 0x3f490fdau},
+    {0x1p0f, 0x3f490fdbu},
+    {0x1.000002p0f, 0x3f490fdcu},
+    {0x1.4p0f, 0x3f6563e3u},
+    {0x1p1f, 0x3f8db70du},
+    {0x1.3504f2p1f, 0x3f96cbe4u},
+    {0x1.3504f4p1f, 0x3f96cbe4u},
+    {0x1.a66666p1f, 0x3fa36660u},
+    {0x1.4p3f, 0x3fbc4de9u},
+    {0x1.9p6f, 0x3fc7c82fu},
+    {0x1.86ap16f, 0x3fc90f87u},
+    {0x1.5af1d8p66f, 0x3fc90fdbu},
+    {0x1.fffffep127f, 0x3fc90fdbu},
+    {-0x1.99999ap-2f, 0xbec2d1bcu},
+    {-0x1.a8279ap-2f, 0xbec90fdbu},
+    {-0x1.cp2f, 0xbfb6e62cu},
+    {-0x1.2a05f2p33f, 0xbfc90fdbu},
+    {0x1.fffffep25f, 0x3fc90fdbu},
+    {0x1p26f, 0x3fc90fdbu},
+    {-0x1p26f, 0xbfc90fdbu},
+};
+
+static const golden_f64 atan_golden_f64[] = {
+    {0x0.000000000001p-1022, 0x0000000000000010ull},
+    {0x1.56e1fc2f8f359p-997, 0x01a56e1fc2f8f359ull},
+    {0x1.12e0be826d695p-30, 0x3e112e0be826d695ull},
+    {0x1.fffffffffffffp-28, 0x3e3fffffffffffffull},
+    {0x1p-27, 0x3e40000000000000ull},
+    {0x1.47ae147ae147bp-7, 0x3f847ab48b1efb5dull},
+    {0x1.fffffffffffffp-5, 0x3faff55bb72cfde9ull},
+    {0x1p-4, 0x3faff55bb72cfdeaull},
+    {0x1.1eb851eb851ecp-4, 0x3fb1e40c8b780fdeull},
+    {0x1.999999999999ap-4, 0x3fb983e282e2cc4dull},
+    {0x1.999999999999ap-3, 0x3fc94441f8f7260cull},
+    {0x1.3333333333333p-2, 0x3fd2a73a661eaf06ull},
+    {0x1.ccccccccccccdp-2, 0x3fdb1009e9ee79bcull},
+    {0x1.3333333333333p-1, 0x3fe14b1dd5f90ce1ull},
+    {0x1.b333333333333p-1, 0x3fe68b3722c4afb4ull},
+    {0x1p0, 0x3fe921fb54442d18ull},
+    {0x1.4cccccccccccdp0, 0x3fed488143ad8c44ull},
+    {0x1.4p1, 0x3ff30b6d796a4da8ull},
+    {0x1.d99999999999ap1, 0x3ff4e8c94dbf54e5ull},
+    {0x1.8p2, 0x3ff67d8863bc99bdull},
+    {0x1.6p3, 0x3ff7aea38c1acbd1ull},
+    {0x1.fffffffffffffp3, 0x3ff82250768ac529ull},
+    {0x1p4, 0x3ff82250768ac529ull},
+    {0x1.18p4, 0x3ff8382dca698943ull},
+    {0x1.9p6, 0x3ff8f905eb2def22ull},
+    {0x1.81c8p13, 0x3ff921a663cc691dull},
+    {0x1.2a05f2p33, 0x3ff921fb543d4de0ull},
+    {0x1.fffffffffffffp53, 0x3ff921fb54442d18ull},
+    {0x1p54, 0x3ff921fb54442d18ull},
+    {0x1.5af1d78b58c4p66, 0x3ff921fb54442d18ull},
+    {0x1.7e43c8800759cp996, 0x3ff921fb54442d18ull},
+    {-0x1p-2, 0xbfcf5b75f92c80ddull},
+    {-0x1.4p2, 0xbff5f97315254857ull},
+    {-0x1.e848p19, 0xbff921fa47d4b30dull},
+    {-0x1.93e5939a08ceap99, 0xbff921fb54442d18ull},
+};
+
+// For atan2, every octant with y either sign, the table and the small ratio with and without its
+// correction, either side of 2^-30 (for f32, either side of tan(pi/8) and of |u| = 2^-15), and
+// pairs that need scaling or whose ratio is subnormal or underflows.
+static const golden2_f32 atan2_golden_f32[] = {
+    {0x1p0f, 0x1p1f, 0x3eed6338u},
+    {0x1p1f, 0x1p0f, 0x3f8db70du},
+    {0x1p1f, -0x1p0f, 0x40023454u},
+    {0x1p0f, -0x1p1f, 0x402b6374u},
+    {-0x1p0f, 0x1p1f, 0xbeed6338u},
+    {-0x1p1f, -0x1p0f, 0xc0023454u},
+    {0x1p0f, 0x1p0f, 0x3f490fdbu},
+    {0x1p0f, -0x1p0f, 0x4016cbe4u},
+    {0x1.333334p-1f, 0x1.99999ap-1f, 0x3f24bc7du},
+    {0x1.8p1f, 0x1.cp2f, 0x3ecf4dfau},
+    {0x1.cp2f, -0x1.8p1f, 0x3ffce359u},
+    {0x1.4f8b58p-17f, 0x1.8p1f, 0x365fb23bu},
+    {0x1.8p1f, 0x1.4f8b58p-17f, 0x3fc90fbfu},
+    {0x1.4484cp-100f, 0x1.93e594p99f, 0x00000000u},
+    {0x1p-149f, 0x1p0f, 0x00000001u},
+    {0x1p-149f, 0x1p-148f, 0x3eed6338u},
+    {0x1.2ced32p126f, 0x1.c363ccp127f, 0x3ea4bc7du},
+    {-0x1.2ced32p126f, -0x1.b38fb8p-127f, 0xbfc90fdbu},
+    {0x1.edd2f2p6f, -0x1.472916p9f, 0x403d2079u},
+    {-0x1.0624dep-10f, 0x1.f4p9f, 0xb58637bdu},
+    {0x1p-126f, 0x1.8p-120f, 0x3c2aa916u},
+    {0x1.a82798p-2f, 0x1p0f, 0x3ec90fdau},
+    {0x1.a8279ap-2f, -0x1p0f, 0x402feddfu},
+    {-0x1.8p1f, 0x1.3504f4p1f, 0xbf64a6feu},
+    {0x1p-15f, 0x1p0f, 0x38000000u},
+    {0x1.fffffep-16f, -0x1p0f, 0x40490f5bu},
+    {-0x1.0c6f7ap-20f, -0x1p1f, 0xc0490fd9u},
+    {-0x1p1f, 0x1.0c6f7ap-20f, 0xbfc90fd6u},
+};
+
+static const golden2_f64 atan2_golden_f64[] = {
+    {0x1p0, 0x1p1, 0x3fddac670561bb4full},
+    {0x1p1, 0x1p0, 0x3ff1b6e192ebbe44ull},
+    {0x1p1, -0x1p0, 0x4000468a8ace4df6ull},
+    {0x1p0, -0x1p1, 0x40056c6e7397f5aeull},
+    {-0x1p0, 0x1p1, 0xbfddac670561bb4full},
+    {-0x1p1, -0x1p0, 0xc000468a8ace4df6ull},
+    {0x1p0, 0x1p0, 0x3fe921fb54442d18ull},
+    {0x1p0, -0x1p0, 0x4002d97c7f3321d2ull},
+    {0x1.3333333333333p-1, 0x1.999999999999ap-1, 0x3fe4978fa3269ee1ull},
+    {0x1.8p1, 0x1.cp2, 0x3fd9e9bf3d20dc71ull},
+    {0x1.cp2, -0x1.8p1, 0x3fff9c6b238c6434ull},
+    {0x1.47ae147ae147bp-7, 0x1p0, 0x3f847ab48b1efb5dull},
+    {0x1.4f8b588e368f1p-17, 0x1.8p1, 0x3ecbf647612ec4b8ull},
+    {0x1.8p1, 0x1.4f8b588e368f1p-17, 0x3ff921f7d57b40f2ull},
+    {-0x1.4f8b588e368f1p-17, -0x1.8p1, 0xc00921f994dfb705ull},
+    {0x1.19799812dea11p-40, 0x1p0, 0x3d719799812dea11ull},
+    {0x1p0, -0x1.19799812dea11p-40, 0x3ff921fb54443eb0ull},
+    {0x1p-4, 0x1p0, 0x3faff55bb72cfdeaull},
+    {0x1p0, 0x1.0000000000001p4, 0x3faff55bb72cfde8ull},
+    {0x0.012688b70e62bp-1022, 0x0.03739a252b281p-1022, 0x3fd4978fa3269ee1ull},
+    {0x0.0000000000001p-1022, 0x0.00000000007e8p-1022, 0x3f4030919f057214ull},
+    {0x1.7e43c8800759cp996, 0x1.7e43c8800759cp997, 0x3fddac670561bb4full},
+    {-0x1.e42d130773b76p1023, 0x1.1ccf385ebc8ap1023, 0xbff0a00a3bce369full},
+    {0x1.56e1fc2f8f359p-997, 0x1.7e43c8800759cp996, 0x0000000000000000ull},
+    {0x0.0000000000001p-1022, 0x1p0, 0x0000000000000001ull},
+    {0x0.012688b70e62bp-1022, 0x1p1, 0x0000093445b87316ull},
+    {0x1.edd2f1a9fbe77p6, -0x1.472916872b021p9, 0x4007a40f18fca979ull},
+    {-0x1.0624dd2f1a9fcp-10, 0x1.f4p9, 0xbeb0c6f7a0b5e767ull},
+    {0x1p-30, 0x1p0, 0x3e10000000000000ull},
+    {0x1.fffffffffffffp-31, 0x1p0, 0x3e0fffffffffffffull},
+    {-0x1p-31, -0x1p0, 0xc00921fb54342d18ull},
+    {-0x1.8p1, -0x1.79ca10c924223p-67, 0xbff921fb54442d18ull},
+    {-0x1.3333333333333p-1, -0x1.999999999999ap-1, 0xc003fc176b7a8560ull},
+    {-0x1.cp2, 0x1.8p1, 0xbff2a78b84fbf5fcull},
+};
+
+
+// The infinities and a quiet NaN, built from their bits.
+static float infinity_f32(void)
+{
+    return rc_bitcast_u32(0x7f800000u);
+}
+
+
+static double infinity_f64(void)
+{
+    return rc_bitcast_u64(0x7ff0000000000000ull);
+}
+
+
+static float nan_f32(void)
+{
+    return rc_bitcast_u32(0x7fc00000u);
+}
+
+
+static double nan_f64(void)
+{
+    return rc_bitcast_u64(0x7ff8000000000000ull);
+}
+
+
+// True if x is a NaN, of any payload or sign.
+static bool is_nan_f32(float x)
+{
+    return !rc_is_finite_f32(x) && x != x;
+}
+
+
+static bool is_nan_f64(double x)
+{
+    return !rc_is_finite_f64(x) && x != x;
+}
+
+
+// How many the spreads below hold: six mantissas for each finite exponent, then infinity.
+enum {
+    SPREAD_COUNT_F32 = 255 * 6 + 1,
+    SPREAD_COUNT_F64 = 2047 * 6 + 1
+};
+
+
+// The ith of a spread of floats or doubles across every binade, infinity included: each exponent
+// with a few mantissas.
+static float spread_f32(uint32_t i)
+{
+    static const uint32_t mantissas[] = {0x000000u, 0x000001u, 0x2aaaabu, 0x400000u, 0x5a827au, 0x7fffffu};
+    uint32_t exponent = i / RC_COUNT(mantissas);
+
+    return rc_bitcast_u32((exponent << 23) | mantissas[i % RC_COUNT(mantissas)]);
+}
+
+
+static double spread_f64(uint32_t i)
+{
+    static const uint64_t mantissas[] = {0x0ull, 0x1ull, 0x5555555555555ull, 0x8000000000000ull, 0xb504f333f9de6ull, 0xfffffffffffffull};
+    uint64_t exponent = i / RC_COUNT(mantissas);
+
+    return rc_bitcast_u64((exponent << 52) | mantissas[i % RC_COUNT(mantissas)]);
+}
+
+
 // ---- asin ----
 
-RC_TEST(math_asin, known_values)
+RC_TEST(math_asin, special_values)
 {
-    RC_CHECK(rc_asin_f32(0.0f), ==, 0.0f);
-    RC_CHECK(rc_asin_f64(0.0), ==, 0.0);
+    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.0f)), ==, 0u);
+    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0.0f)), ==, SIGN_F32);
+    RC_CHECK(rc_bitcast_f32(rc_asin_f32(1.0f)), ==, PI_2_F32);
+    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-1.0f)), ==, PI_2_F32 | SIGN_F32);
+    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.0)), ==, 0u);
+    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0.0)), ==, SIGN_F64);
+    RC_CHECK(rc_bitcast_f64(rc_asin_f64(1.0)), ==, PI_2_F64);
+    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-1.0)), ==, PI_2_F64 | SIGN_F64);
 
-    // asin(1) is pi/2, rounded to each precision
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(1.0f)), ==, 0x3fc90fdbu);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(1.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_asin_f32(-1.0f), ==, -rc_asin_f32(1.0f));
-    RC_CHECK(rc_asin_f64(-1.0), ==, -rc_asin_f64(1.0));
+    // Beyond [-1, 1], however little, and NaN
+    RC_CHECK_TRUE(is_nan_f32(rc_asin_f32(0x1.000002p0f)));
+    RC_CHECK_TRUE(is_nan_f32(rc_asin_f32(-2.0f)));
+    RC_CHECK_TRUE(is_nan_f32(rc_asin_f32(infinity_f32())));
+    RC_CHECK_TRUE(is_nan_f32(rc_asin_f32(-infinity_f32())));
+    RC_CHECK_TRUE(is_nan_f32(rc_asin_f32(nan_f32())));
+    RC_CHECK_TRUE(is_nan_f64(rc_asin_f64(0x1.0000000000001p0)));
+    RC_CHECK_TRUE(is_nan_f64(rc_asin_f64(-1e300)));
+    RC_CHECK_TRUE(is_nan_f64(rc_asin_f64(infinity_f64())));
+    RC_CHECK_TRUE(is_nan_f64(rc_asin_f64(-infinity_f64())));
+    RC_CHECK_TRUE(is_nan_f64(rc_asin_f64(nan_f64())));
 }
 
 
-RC_TEST(math_asin, f32)
+RC_TEST(math_asin, odd)
 {
-    // Zeros keep their sign, and below 2^-12 asin(x) is x
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.0f)), ==, 0x00000000u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0.0f)), ==, 0x80000000u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0x1p-149f)), ==, 0x00000001u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0x1p-149f)), ==, 0x80000001u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0x1p-126f)), ==, 0x00800000u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0x1.fffffep-13f)), ==, 0x397fffffu);
+    for (uint32_t i = 0; i < SPREAD_COUNT_F32; i++) {
+        float x = spread_f32(i);
 
-    // The series below 0.5
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0x1p-12f)), ==, 0x39800000u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.1f)), ==, 0x3dcd2494u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0.25f)), ==, 0xbe815f4eu);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.3f)), ==, 0x3e9c00adu);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0x1.fffffep-2f)), ==, 0x3f060a91u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0x1.fffffep-2f)), ==, 0xbf060a91u);
+        RC_CHECK(rc_bitcast_f32(rc_asin_f32(-x)), ==, rc_bitcast_f32(rc_asin_f32(x)) ^ SIGN_F32);
+    }
 
-    // From 0.5 to 1, through the square root
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.5f)), ==, 0x3f060a92u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0.5f)), ==, 0xbf060a92u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.6f)), ==, 0x3f24bc7eu);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.75f)), ==, 0x3f591a99u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0.9f)), ==, 0xbf8f549bu);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0.99f)), ==, 0x3fb6f1e4u);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(0x1.fffffep-1f)), ==, 0x3fc9048au);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-0x1.fffffep-1f)), ==, 0xbfc9048au);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(1.0f)), ==, 0x3fc90fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_asin_f32(-1.0f)), ==, 0xbfc90fdbu);
+    for (uint32_t i = 0; i < SPREAD_COUNT_F64; i++) {
+        double x = spread_f64(i);
+
+        RC_CHECK(rc_bitcast_f64(rc_asin_f64(-x)), ==, rc_bitcast_f64(rc_asin_f64(x)) ^ SIGN_F64);
+    }
 }
 
 
-RC_TEST(math_asin, f64)
+RC_TEST(math_asin, values)
 {
-    // Zeros keep their sign, and below 2^-26 asin(x) is x
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.0)), ==, 0x0000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0.0)), ==, 0x8000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1p-1074)), ==, 0x0000000000000001ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0x1p-1074)), ==, 0x8000000000000001ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1p-1022)), ==, 0x0010000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1.fffffffffffffp-27)), ==, 0x3e4fffffffffffffull);
+    RC_CHECK(rc_asin_f32(0.5f), ~=, 0.5235988f);
+    RC_CHECK(rc_asin_f32(-0.8660254f), ~=, -1.0471976f);
+    RC_CHECK(rc_asin_f64(0.5), ~=, 0.5235987755982989);
+    RC_CHECK(rc_asin_f64(0.7071067811865476), ~=, 0.7853981633974483);
 
-    // The series below 0.5
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1p-26)), ==, 0x3e50000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.1)), ==, 0x3fb9a49276037884ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0.25)), ==, 0xbfd02be9ce0b87cdull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.3)), ==, 0x3fd380159e14f6ffull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1.fffffffffffffp-2)), ==, 0x3fe0c152382d7365ull);
-
-    // From 0.5 to 0.975, with the split root
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.5)), ==, 0x3fe0c152382d7366ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0.5)), ==, 0xbfe0c152382d7366ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.6)), ==, 0x3fe4978fa3269ee1ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0.9)), ==, 0xbff1ea93705fa172ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1.f3332ffffffffp-1)), ==, 0x3ff58c2ae9ab49e8ull);
-
-    // From 0.975 to 1, with the plain root
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1.f3333p-1)), ==, 0x3ff58c2ae9ab49eaull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0.99)), ==, 0x3ff6de3c6f33d51dull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0.999)), ==, 0xbff86ac9ad18f803ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(0x1.fffffffffffffp-1)), ==, 0x3ff921fb50442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-0x1.fffffffffffffp-1)), ==, 0xbff921fb50442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(1.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_asin_f64(-1.0)), ==, 0xbff921fb54442d18ull);
+    // Small enough that the cube term is lost in the rounding
+    RC_CHECK(rc_asin_f32(1e-5f), ==, 1e-5f);
+    RC_CHECK(rc_asin_f64(1e-9), ==, 1e-9);
 }
 
 
-RC_TEST(math_asin, nan)
+RC_TEST(math_asin, golden)
 {
-    float infinity_f32 = rc_bitcast_u32(0x7f800000u);
-    float nan_f32 = rc_bitcast_u32(0x7fc00000u);
-    double infinity_f64 = rc_bitcast_u64(0x7ff0000000000000ull);
-    double nan_f64 = rc_bitcast_u64(0x7ff8000000000000ull);
-    float above_one_f32 = rc_asin_f32(0x1.000002p0f);
-    float nan_result_f32 = rc_asin_f32(nan_f32);
-    double above_one_f64 = rc_asin_f64(0x1.0000000000001p0);
-    double nan_result_f64 = rc_asin_f64(nan_f64);
+    for (uint32_t i = 0; i < RC_COUNT(asin_golden_f32); i++) {
+        RC_CHECK(rc_bitcast_f32(rc_asin_f32(asin_golden_f32[i].x)), ==, asin_golden_f32[i].bits);
+    }
 
-    // Outside [-1, 1] there is no answer
-    RC_CHECK_TRUE(above_one_f32 != above_one_f32);
-    RC_CHECK_TRUE(nan_result_f32 != nan_result_f32);
-    RC_CHECK_TRUE(above_one_f64 != above_one_f64);
-    RC_CHECK_TRUE(nan_result_f64 != nan_result_f64);
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_asin_f32(-2.0f)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_asin_f32(infinity_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_asin_f32(-infinity_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_asin_f64(-2.0)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_asin_f64(infinity_f64)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_asin_f64(-infinity_f64)));
+    for (uint32_t i = 0; i < RC_COUNT(asin_golden_f64); i++) {
+        RC_CHECK(rc_bitcast_f64(rc_asin_f64(asin_golden_f64[i].x)), ==, asin_golden_f64[i].bits);
+    }
 }
-
 
 // ---- acos ----
 
-RC_TEST(math_acos, known_values)
+RC_TEST(math_acos, special_values)
 {
-    RC_CHECK(rc_acos_f32(1.0f), ==, 0.0f);
-    RC_CHECK(rc_acos_f64(1.0), ==, 0.0);
+    RC_CHECK(rc_bitcast_f32(rc_acos_f32(1.0f)), ==, 0u);
+    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-1.0f)), ==, PI_F32);
+    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.0f)), ==, PI_2_F32);
+    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0.0f)), ==, PI_2_F32);
+    RC_CHECK(rc_bitcast_f64(rc_acos_f64(1.0)), ==, 0u);
+    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-1.0)), ==, PI_F64);
+    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.0)), ==, PI_2_F64);
+    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0.0)), ==, PI_2_F64);
 
-    // acos(0) is pi/2 and acos(-1) is pi. In float they come from the high half of pi/2, a float
-    // below the nearest, as in musl
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.0f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-1.0f)), ==, 0x40490fdau);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-1.0)), ==, 0x400921fb54442d18ull);
+    // Beyond [-1, 1], however little, and NaN
+    RC_CHECK_TRUE(is_nan_f32(rc_acos_f32(0x1.000002p0f)));
+    RC_CHECK_TRUE(is_nan_f32(rc_acos_f32(-0x1.000002p0f)));
+    RC_CHECK_TRUE(is_nan_f32(rc_acos_f32(infinity_f32())));
+    RC_CHECK_TRUE(is_nan_f32(rc_acos_f32(-infinity_f32())));
+    RC_CHECK_TRUE(is_nan_f32(rc_acos_f32(nan_f32())));
+    RC_CHECK_TRUE(is_nan_f64(rc_acos_f64(0x1.0000000000001p0)));
+    RC_CHECK_TRUE(is_nan_f64(rc_acos_f64(-0x1.0000000000001p0)));
+    RC_CHECK_TRUE(is_nan_f64(rc_acos_f64(infinity_f64())));
+    RC_CHECK_TRUE(is_nan_f64(rc_acos_f64(-infinity_f64())));
+    RC_CHECK_TRUE(is_nan_f64(rc_acos_f64(nan_f64())));
 }
 
 
-RC_TEST(math_acos, f32)
+RC_TEST(math_acos, values)
 {
-    // At or below 2^-26 acos(x) is pi/2, whatever the sign
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.0f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0.0f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0x1p-149f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0x1p-126f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0x1p-26f)), ==, 0x3fc90fdau);
+    RC_CHECK(rc_acos_f32(0.5f), ~=, 1.0471976f);
+    RC_CHECK(rc_acos_f32(-0.5f), ~=, 2.0943951f);
+    RC_CHECK(rc_acos_f64(0.5), ~=, 1.0471975511965979);
+    RC_CHECK(rc_acos_f64(-0.7071067811865476), ~=, 2.356194490192345);
 
-    // The series below 0.5
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0x1.000002p-26f)), ==, 0x3fc90fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0x1.000002p-26f)), ==, 0x3fc90fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0x1p-12f)), ==, 0x3fc907dbu);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.1f)), ==, 0x3fbc3d91u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0.3f)), ==, 0x3ff01006u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0x1.fffffep-2f)), ==, 0x3f860a92u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0x1.fffffep-2f)), ==, 0x40060a92u);
+    // acos(-x) is pi - acos(x), to within the rounding
+    for (uint32_t i = 0; i <= 20; i++) {
+        float x_f32 = (float)i / 20.0f;
+        double x_f64 = (double)i / 20.0;
 
-    // From -1 to -0.5
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0.5f)), ==, 0x40060a92u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0.75f)), ==, 0x401ace94u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0.99f)), ==, 0x404000dfu);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-0x1.fffffep-1f)), ==, 0x40490a32u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(-1.0f)), ==, 0x40490fdau);
-
-    // From 0.5 to 1, with the split root
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.5f)), ==, 0x3f860a92u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.75f)), ==, 0x3f39051du);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0.99f)), ==, 0x3e10efb5u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(0x1.fffffep-1f)), ==, 0x39b504f3u);
-    RC_CHECK(rc_bitcast_f32(rc_acos_f32(1.0f)), ==, 0x00000000u);
+        RC_CHECK(rc_acos_f32(-x_f32) + rc_acos_f32(x_f32), ~=, 3.14159265f);
+        RC_CHECK(rc_acos_f64(-x_f64) + rc_acos_f64(x_f64), ~=, 3.141592653589793);
+    }
 }
 
 
-RC_TEST(math_acos, f64)
+RC_TEST(math_acos, golden)
 {
-    // At or below 2^-57 acos(x) is pi/2, whatever the sign
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0x1p-1074)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0x1p-1022)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0x1.00000ffffffffp-57)), ==, 0x3ff921fb54442d18ull);
+    for (uint32_t i = 0; i < RC_COUNT(acos_golden_f32); i++) {
+        RC_CHECK(rc_bitcast_f32(rc_acos_f32(acos_golden_f32[i].x)), ==, acos_golden_f32[i].bits);
+    }
 
-    // The series below 0.5
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0x1.00001p-57)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0x1.00001p-57)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0x1p-26)), ==, 0x3ff921fb50442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.1)), ==, 0x3ff787b22ce3f590ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0.3)), ==, 0x3ffe0200bbc96ad8ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0x1.fffffffffffffp-2)), ==, 0x3ff0c152382d7366ull);
-
-    // From -1 to -0.5
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0.5)), ==, 0x4000c152382d7366ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0.75)), ==, 0x400359d26f93b6c3ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0.999)), ==, 0x4008c66280ae928eull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-0x1.fffffffffffffp-1)), ==, 0x400921fb52442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(-1.0)), ==, 0x400921fb54442d18ull);
-
-    // From 0.5 to 1, with the split root
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.5)), ==, 0x3ff0c152382d7366ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.75)), ==, 0x3fe720a392c1d955ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0.999)), ==, 0x3fa6e634e566a29eull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(0x1.fffffffffffffp-1)), ==, 0x3e50000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_acos_f64(1.0)), ==, 0x0000000000000000ull);
+    for (uint32_t i = 0; i < RC_COUNT(acos_golden_f64); i++) {
+        RC_CHECK(rc_bitcast_f64(rc_acos_f64(acos_golden_f64[i].x)), ==, acos_golden_f64[i].bits);
+    }
 }
-
-
-RC_TEST(math_acos, nan)
-{
-    float infinity_f32 = rc_bitcast_u32(0x7f800000u);
-    float nan_f32 = rc_bitcast_u32(0x7fc00000u);
-    double infinity_f64 = rc_bitcast_u64(0x7ff0000000000000ull);
-    double nan_f64 = rc_bitcast_u64(0x7ff8000000000000ull);
-    float below_minus_one_f32 = rc_acos_f32(-0x1.000002p0f);
-    float nan_result_f32 = rc_acos_f32(nan_f32);
-    double below_minus_one_f64 = rc_acos_f64(-0x1.0000000000001p0);
-    double nan_result_f64 = rc_acos_f64(nan_f64);
-
-    // Outside [-1, 1] there is no answer
-    RC_CHECK_TRUE(below_minus_one_f32 != below_minus_one_f32);
-    RC_CHECK_TRUE(nan_result_f32 != nan_result_f32);
-    RC_CHECK_TRUE(below_minus_one_f64 != below_minus_one_f64);
-    RC_CHECK_TRUE(nan_result_f64 != nan_result_f64);
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_acos_f32(2.0f)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_acos_f32(infinity_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_acos_f32(-infinity_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_acos_f64(2.0)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_acos_f64(infinity_f64)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_acos_f64(-infinity_f64)));
-}
-
 
 // ---- atan ----
 
-RC_TEST(math_atan, known_values)
+RC_TEST(math_atan, special_values)
 {
-    float infinity_f32 = rc_bitcast_u32(0x7f800000u);
-    double infinity_f64 = rc_bitcast_u64(0x7ff0000000000000ull);
+    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0.0f)), ==, 0u);
+    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-0.0f)), ==, SIGN_F32);
+    RC_CHECK(rc_bitcast_f32(rc_atan_f32(infinity_f32())), ==, PI_2_F32);
+    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-infinity_f32())), ==, PI_2_F32 | SIGN_F32);
+    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0.0)), ==, 0u);
+    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-0.0)), ==, SIGN_F64);
+    RC_CHECK(rc_bitcast_f64(rc_atan_f64(infinity_f64())), ==, PI_2_F64);
+    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-infinity_f64())), ==, PI_2_F64 | SIGN_F64);
+    RC_CHECK_TRUE(is_nan_f32(rc_atan_f32(nan_f32())));
+    RC_CHECK_TRUE(is_nan_f64(rc_atan_f64(nan_f64())));
 
-    RC_CHECK(rc_atan_f32(0.0f), ==, 0.0f);
-    RC_CHECK(rc_atan_f64(0.0), ==, 0.0);
-
-    // atan(1) is pi/4 and atan(infinity) pi/2. The float pi/2 is the high half of the tabled one, a
-    // float below the nearest, as in musl
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(1.0f)), ==, 0x3f490fdbu);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(1.0)), ==, 0x3fe921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(infinity_f32)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(infinity_f64)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_atan_f32(-1.0f), ==, -rc_atan_f32(1.0f));
-    RC_CHECK(rc_atan_f64(-1.0), ==, -rc_atan_f64(1.0));
+    // The largest finite numbers are as good as infinite
+    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1.fffffep127f)), ==, PI_2_F32);
+    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1.fffffffffffffp1023)), ==, PI_2_F64);
 }
 
 
-RC_TEST(math_atan, f32)
+RC_TEST(math_atan, odd)
 {
-    float infinity = rc_bitcast_u32(0x7f800000u);
+    for (uint32_t i = 0; i < SPREAD_COUNT_F32; i++) {
+        float x = spread_f32(i);
 
-    // Zeros keep their sign, and below 2^-12 atan(x) is x
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0.0f)), ==, 0x00000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-0.0f)), ==, 0x80000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1p-149f)), ==, 0x00000001u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-0x1p-126f)), ==, 0x80800000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1.fffffep-13f)), ==, 0x397fffffu);
+        RC_CHECK(rc_bitcast_f32(rc_atan_f32(-x)), ==, rc_bitcast_f32(rc_atan_f32(x)) ^ SIGN_F32);
+    }
 
-    // The series alone below 7/16
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1p-12f)), ==, 0x39800000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0.1f)), ==, 0x3dcc1f14u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-0.25f)), ==, 0xbe7adbb0u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1.bffffep-2f)), ==, 0x3ed32775u);
+    for (uint32_t i = 0; i < SPREAD_COUNT_F64; i++) {
+        double x = spread_f64(i);
 
-    // Offset from atan(1/2), atan(1), atan(3/2) and atan(infinity) in turn
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0.4375f)), ==, 0x3ed32776u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0.5f)), ==, 0x3eed6338u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-0.6f)), ==, 0xbf0a58efu);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0.6875f)), ==, 0x3f1a2f81u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(1.0f)), ==, 0x3f490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-1.1f)), ==, 0xbf553e43u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(1.1875f)), ==, 0x3f5ef387u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(2.0f)), ==, 0x3f8db70du);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(2.4375f)), ==, 0x3f973ab9u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-10.0f)), ==, 0xbfbc4de9u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(1000000.0f)), ==, 0x3fc90fd2u);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1.fffffep25f)), ==, 0x3fc90fdbu);
-
-    // From 2^26 up, +-pi/2
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1p26f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-0x1p26f)), ==, 0xbfc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(0x1.fffffep127f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(infinity)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_atan_f32(-infinity)), ==, 0xbfc90fdau);
+        RC_CHECK(rc_bitcast_f64(rc_atan_f64(-x)), ==, rc_bitcast_f64(rc_atan_f64(x)) ^ SIGN_F64);
+    }
 }
 
 
-RC_TEST(math_atan, f64)
+RC_TEST(math_atan, values)
 {
-    double infinity = rc_bitcast_u64(0x7ff0000000000000ull);
+    RC_CHECK(rc_bitcast_f32(rc_atan_f32(1.0f)), ==, PI_4_F32);
+    RC_CHECK(rc_bitcast_f64(rc_atan_f64(1.0)), ==, PI_4_F64);
+    RC_CHECK(rc_atan_f32(1.7320508f), ~=, 1.0471976f);
+    RC_CHECK(rc_atan_f32(-0.57735027f), ~=, -0.5235988f);
+    RC_CHECK(rc_atan_f64(1.7320508075688772), ~=, 1.0471975511965979);
+    RC_CHECK(rc_atan_f64(1e6), ~=, 1.5707953267948966);
 
-    // Zeros keep their sign, and below 2^-27 atan(x) is x
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0.0)), ==, 0x0000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-0.0)), ==, 0x8000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1p-1074)), ==, 0x0000000000000001ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-0x1p-1022)), ==, 0x8010000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1.fffffffffffffp-28)), ==, 0x3e3fffffffffffffull);
-
-    // The series alone below 7/16
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1p-27)), ==, 0x3e40000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0.1)), ==, 0x3fb983e282e2cc4dull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-0.25)), ==, 0xbfcf5b75f92c80ddull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1.bffffffffffffp-2)), ==, 0x3fda64eec3cc23fcull);
-
-    // Offset from atan(1/2), atan(1), atan(3/2) and atan(infinity) in turn
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0.4375)), ==, 0x3fda64eec3cc23fdull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0.5)), ==, 0x3fddac670561bb4full);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-0.6)), ==, 0xbfe14b1dd5f90ce1ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0.6875)), ==, 0x3fe345f01cce37bbull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(1.0)), ==, 0x3fe921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-1.1)), ==, 0xbfeaa7c8545183cdull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(1.1875)), ==, 0x3febde70ed439fe7ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(2.0)), ==, 0x3ff1b6e192ebbe44ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(2.4375)), ==, 0x3ff2e75728833a54ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-10.0)), ==, 0xbff789bd2c160054ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(1e10)), ==, 0x3ff921fb543d4de0ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1.fffffffffffffp65)), ==, 0x3ff921fb54442d18ull);
-
-    // From 2^66 up, +-pi/2
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1p66)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-0x1p66)), ==, 0xbff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(0x1.fffffffffffffp1023)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(infinity)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan_f64(-infinity)), ==, 0xbff921fb54442d18ull);
+    // Small enough that the cube term is lost in the rounding
+    RC_CHECK(rc_atan_f32(1e-5f), ==, 1e-5f);
+    RC_CHECK(rc_atan_f64(1e-9), ==, 1e-9);
 }
 
 
-RC_TEST(math_atan, nan)
+RC_TEST(math_atan, golden)
 {
-    float nan_f32 = rc_atan_f32(rc_bitcast_u32(0x7fc00000u));
-    double nan_f64 = rc_atan_f64(rc_bitcast_u64(0x7ff8000000000000ull));
+    for (uint32_t i = 0; i < RC_COUNT(atan_golden_f32); i++) {
+        RC_CHECK(rc_bitcast_f32(rc_atan_f32(atan_golden_f32[i].x)), ==, atan_golden_f32[i].bits);
+    }
 
-    RC_CHECK_TRUE(nan_f32 != nan_f32);
-    RC_CHECK_TRUE(nan_f64 != nan_f64);
-    RC_CHECK_FALSE(rc_is_finite_f32(nan_f32));
-    RC_CHECK_FALSE(rc_is_finite_f64(nan_f64));
+    for (uint32_t i = 0; i < RC_COUNT(atan_golden_f64); i++) {
+        RC_CHECK(rc_bitcast_f64(rc_atan_f64(atan_golden_f64[i].x)), ==, atan_golden_f64[i].bits);
+    }
 }
-
 
 // ---- atan2 ----
 
-RC_TEST(math_atan2, known_values)
+// atan2(y, x) gives the bits expected, and atan2(-y, x) the same with the sign flipped.
+static void check_atan2_f32(float y, float x, uint32_t expected)
 {
-    // atan2(y, 1) is atan(y), and the diagonal is pi/4
-    RC_CHECK(rc_atan2_f32(0.5f, 1.0f), ==, rc_atan_f32(0.5f));
-    RC_CHECK(rc_atan2_f64(0.5, 1.0), ==, rc_atan_f64(0.5));
-    RC_CHECK(rc_atan2_f32(1.0f, 1.0f), ==, rc_atan_f32(1.0f));
-    RC_CHECK(rc_atan2_f64(3.0, 3.0), ==, rc_atan_f64(1.0));
-
-    // Straight left is pi, straight up pi/2
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(0.0, -1.0)), ==, 0x400921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1.0, 0.0)), ==, 0x3ff921fb54442d18ull);
+    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(y, x)), ==, expected);
+    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-y, x)), ==, expected ^ SIGN_F32);
 }
 
 
-RC_TEST(math_atan2, f32)
+static void check_atan2_f64(double y, double x, uint64_t expected)
 {
-    float infinity = rc_bitcast_u32(0x7f800000u);
-
-    // One in each quadrant, and x = 1 as plain atan
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(3.0f, 4.0f)), ==, 0x3f24bc7du);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(3.0f, -4.0f)), ==, 0x401fe0bcu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-3.0f, -4.0f)), ==, 0xc01fe0bcu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-3.0f, 4.0f)), ==, 0xbf24bc7du);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-0.7f, 1.0f)), ==, 0xbf1c5889u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(1e-3f, -2.5f)), ==, 0x4049094du);
-
-    // Both zeros against both zeros, and zero y against finite x
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(0.0f, 0.0f)), ==, 0x00000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-0.0f, 0.0f)), ==, 0x80000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(0.0f, -0.0f)), ==, 0x40490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-0.0f, -0.0f)), ==, 0xc0490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(0.0f, 5.0f)), ==, 0x00000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-0.0f, -5.0f)), ==, 0xc0490fdbu);
-
-    // Zero x, +-pi/2
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(3.0f, 0.0f)), ==, 0x3fc90fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-3.0f, -0.0f)), ==, 0xbfc90fdbu);
-
-    // Infinities against infinities, and against finite values
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(infinity, infinity)), ==, 0x3f490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-infinity, infinity)), ==, 0xbf490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(infinity, -infinity)), ==, 0x4016cbe4u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-infinity, -infinity)), ==, 0xc016cbe4u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(1.0f, infinity)), ==, 0x00000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-1.0f, infinity)), ==, 0x80000000u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(1.0f, -infinity)), ==, 0x40490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-1.0f, -infinity)), ==, 0xc0490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(infinity, 1.0f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-infinity, -1.0f)), ==, 0xbfc90fdbu);
-
-    // Steep, beyond 2^26, and shallow, below 2^-26, on each side
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(1e30f, 1.0f)), ==, 0x3fc90fdau);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-1e30f, -1.0f)), ==, 0xbfc90fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(1e-30f, 1.0f)), ==, 0x0da24260u);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(1e-30f, -1.0f)), ==, 0x40490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-1e-30f, -1.0f)), ==, 0xc0490fdbu);
-    RC_CHECK(rc_bitcast_f32(rc_atan2_f32(0x1p-149f, 0x1p-149f)), ==, 0x3f490fdbu);
+    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(y, x)), ==, expected);
+    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-y, x)), ==, expected ^ SIGN_F64);
 }
 
 
-RC_TEST(math_atan2, f64)
+RC_TEST(math_atan2, zero_y)
 {
-    double infinity = rc_bitcast_u64(0x7ff0000000000000ull);
+    // (+-0, -0) is +-pi, (+-0, +0) is +-0
+    check_atan2_f32(0.0f, -0.0f, PI_F32);
+    check_atan2_f32(0.0f, 0.0f, 0u);
+    check_atan2_f64(0.0, -0.0, PI_F64);
+    check_atan2_f64(0.0, 0.0, 0u);
 
-    // One in each quadrant, and x = 1 as plain atan
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(3.0, 4.0)), ==, 0x3fe4978fa3269ee1ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(3.0, -4.0)), ==, 0x4003fc176b7a8560ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-3.0, -4.0)), ==, 0xc003fc176b7a8560ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-3.0, 4.0)), ==, 0xbfe4978fa3269ee1ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-0.7, 1.0)), ==, 0xbfe38b112d7bd4adull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1e-3, -2.5)), ==, 0x400921299d2d8fddull);
+    // (+-0, x < 0) is +-pi, (+-0, x > 0) is +-0, however small or large x
+    check_atan2_f32(0.0f, -1.0f, PI_F32);
+    check_atan2_f32(0.0f, -0x1p-149f, PI_F32);
+    check_atan2_f32(0.0f, -infinity_f32(), PI_F32);
+    check_atan2_f32(0.0f, 1.0f, 0u);
+    check_atan2_f32(0.0f, 0x1p-149f, 0u);
+    check_atan2_f32(0.0f, infinity_f32(), 0u);
+    check_atan2_f64(0.0, -1.0, PI_F64);
+    check_atan2_f64(0.0, -0x1p-1074, PI_F64);
+    check_atan2_f64(0.0, -infinity_f64(), PI_F64);
+    check_atan2_f64(0.0, 1.0, 0u);
+    check_atan2_f64(0.0, 0x1p-1074, 0u);
+    check_atan2_f64(0.0, infinity_f64(), 0u);
+}
 
-    // Both zeros against both zeros, and zero y against finite x
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(0.0, 0.0)), ==, 0x0000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-0.0, 0.0)), ==, 0x8000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(0.0, -0.0)), ==, 0x400921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-0.0, -0.0)), ==, 0xc00921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(0.0, 5.0)), ==, 0x0000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-0.0, -5.0)), ==, 0xc00921fb54442d18ull);
 
-    // Zero x, +-pi/2
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(3.0, 0.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-3.0, -0.0)), ==, 0xbff921fb54442d18ull);
+RC_TEST(math_atan2, zero_x)
+{
+    // (y < 0, +-0) is -pi/2 and (y > 0, +-0) is pi/2, however small or large y
+    check_atan2_f32(1.0f, 0.0f, PI_2_F32);
+    check_atan2_f32(1.0f, -0.0f, PI_2_F32);
+    check_atan2_f32(0x1p-149f, 0.0f, PI_2_F32);
+    check_atan2_f32(0x1.fffffep127f, -0.0f, PI_2_F32);
+    check_atan2_f64(1.0, 0.0, PI_2_F64);
+    check_atan2_f64(1.0, -0.0, PI_2_F64);
+    check_atan2_f64(0x1p-1074, 0.0, PI_2_F64);
+    check_atan2_f64(0x1.fffffffffffffp1023, -0.0, PI_2_F64);
+}
 
-    // Infinities against infinities, and against finite values
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(infinity, infinity)), ==, 0x3fe921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-infinity, infinity)), ==, 0xbfe921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(infinity, -infinity)), ==, 0x4002d97c7f3321d2ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-infinity, -infinity)), ==, 0xc002d97c7f3321d2ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1.0, infinity)), ==, 0x0000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-1.0, infinity)), ==, 0x8000000000000000ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1.0, -infinity)), ==, 0x400921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-1.0, -infinity)), ==, 0xc00921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(infinity, 1.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-infinity, -1.0)), ==, 0xbff921fb54442d18ull);
 
-    // Steep, beyond 2^64, and shallow, below 2^-64, on each side
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1e30, 1.0)), ==, 0x3ff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-1e30, -1.0)), ==, 0xbff921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1e-30, 1.0)), ==, 0x39b4484bfeebc2a0ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(1e-30, -1.0)), ==, 0x400921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-1e-30, -1.0)), ==, 0xc00921fb54442d18ull);
-    RC_CHECK(rc_bitcast_f64(rc_atan2_f64(0x1p-1074, 0x1p-1074)), ==, 0x3fe921fb54442d18ull);
+RC_TEST(math_atan2, infinite_x)
+{
+    // (+-y, -inf) is +-pi and (+-y, +inf) is +-0, for finite y > 0
+    check_atan2_f32(1.0f, -infinity_f32(), PI_F32);
+    check_atan2_f32(0x1.fffffep127f, -infinity_f32(), PI_F32);
+    check_atan2_f32(0x1p-149f, -infinity_f32(), PI_F32);
+    check_atan2_f32(1.0f, infinity_f32(), 0u);
+    check_atan2_f32(0x1.fffffep127f, infinity_f32(), 0u);
+    check_atan2_f64(1.0, -infinity_f64(), PI_F64);
+    check_atan2_f64(0x1.fffffffffffffp1023, -infinity_f64(), PI_F64);
+    check_atan2_f64(0x1p-1074, -infinity_f64(), PI_F64);
+    check_atan2_f64(1.0, infinity_f64(), 0u);
+    check_atan2_f64(0x1.fffffffffffffp1023, infinity_f64(), 0u);
+}
+
+
+RC_TEST(math_atan2, infinite_y)
+{
+    // (+-inf, finite x) is +-pi/2
+    check_atan2_f32(infinity_f32(), 1.0f, PI_2_F32);
+    check_atan2_f32(infinity_f32(), -1.0f, PI_2_F32);
+    check_atan2_f32(infinity_f32(), 0.0f, PI_2_F32);
+    check_atan2_f32(infinity_f32(), -0x1.fffffep127f, PI_2_F32);
+    check_atan2_f64(infinity_f64(), 1.0, PI_2_F64);
+    check_atan2_f64(infinity_f64(), -1.0, PI_2_F64);
+    check_atan2_f64(infinity_f64(), -0.0, PI_2_F64);
+    check_atan2_f64(infinity_f64(), 0x1.fffffffffffffp1023, PI_2_F64);
+
+    // (+-inf, -inf) is +-3pi/4 and (+-inf, +inf) is +-pi/4
+    check_atan2_f32(infinity_f32(), -infinity_f32(), PI_3_4_F32);
+    check_atan2_f32(infinity_f32(), infinity_f32(), PI_4_F32);
+    check_atan2_f64(infinity_f64(), -infinity_f64(), PI_3_4_F64);
+    check_atan2_f64(infinity_f64(), infinity_f64(), PI_4_F64);
 }
 
 
 RC_TEST(math_atan2, nan)
 {
-    float infinity_f32 = rc_bitcast_u32(0x7f800000u);
-    float nan_f32 = rc_bitcast_u32(0x7fc00000u);
-    double infinity_f64 = rc_bitcast_u64(0x7ff0000000000000ull);
-    double nan_f64 = rc_bitcast_u64(0x7ff8000000000000ull);
-    float nan_y_f32 = rc_atan2_f32(nan_f32, 1.0f);
-    float nan_x_f32 = rc_atan2_f32(1.0f, nan_f32);
-    float nan_both_f32 = rc_atan2_f32(nan_f32, nan_f32);
-    double nan_y_f64 = rc_atan2_f64(nan_f64, 1.0);
-    double nan_x_f64 = rc_atan2_f64(1.0, nan_f64);
-    double nan_both_f64 = rc_atan2_f64(nan_f64, nan_f64);
+    float values_f32[] = {0.0f, -0.0f, 1.0f, -1.0f, infinity_f32(), -infinity_f32(), nan_f32()};
+    double values_f64[] = {0.0, -0.0, 1.0, -1.0, infinity_f64(), -infinity_f64(), nan_f64()};
 
-    // NaN in either argument wins over everything, zeros and infinities included
-    RC_CHECK_TRUE(nan_y_f32 != nan_y_f32);
-    RC_CHECK_TRUE(nan_x_f32 != nan_x_f32);
-    RC_CHECK_TRUE(nan_both_f32 != nan_both_f32);
-    RC_CHECK_TRUE(nan_y_f64 != nan_y_f64);
-    RC_CHECK_TRUE(nan_x_f64 != nan_x_f64);
-    RC_CHECK_TRUE(nan_both_f64 != nan_both_f64);
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_atan2_f32(nan_f32, 0.0f)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_atan2_f32(-0.0f, nan_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_atan2_f32(nan_f32, -infinity_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f32(rc_atan2_f32(infinity_f32, nan_f32)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_atan2_f64(nan_f64, 0.0)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_atan2_f64(-0.0, nan_f64)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_atan2_f64(nan_f64, -infinity_f64)));
-    RC_CHECK_FALSE(rc_is_finite_f64(rc_atan2_f64(infinity_f64, nan_f64)));
+    for (uint32_t i = 0; i < RC_COUNT(values_f32); i++) {
+        RC_CHECK_TRUE(is_nan_f32(rc_atan2_f32(nan_f32(), values_f32[i])));
+        RC_CHECK_TRUE(is_nan_f32(rc_atan2_f32(values_f32[i], nan_f32())));
+        RC_CHECK_TRUE(is_nan_f64(rc_atan2_f64(nan_f64(), values_f64[i])));
+        RC_CHECK_TRUE(is_nan_f64(rc_atan2_f64(values_f64[i], nan_f64())));
+    }
+}
+
+
+RC_TEST(math_atan2, quadrants)
+{
+    // The diagonals are exactly the nearest pi/4 and 3pi/4
+    check_atan2_f32(1.0f, 1.0f, PI_4_F32);
+    check_atan2_f32(1.0f, -1.0f, PI_3_4_F32);
+    check_atan2_f32(1e30f, 1e30f, PI_4_F32);
+    check_atan2_f64(1.0, 1.0, PI_4_F64);
+    check_atan2_f64(1.0, -1.0, PI_3_4_F64);
+    check_atan2_f64(1e-300, -1e-300, PI_3_4_F64);
+
+    // A 3-4-5 triangle in each quadrant
+    RC_CHECK(rc_atan2_f32(3.0f, 4.0f), ~=, 0.6435011f);
+    RC_CHECK(rc_atan2_f32(3.0f, -4.0f), ~=, 2.4980915f);
+    RC_CHECK(rc_atan2_f32(-3.0f, -4.0f), ~=, -2.4980915f);
+    RC_CHECK(rc_atan2_f32(-3.0f, 4.0f), ~=, -0.6435011f);
+    RC_CHECK(rc_atan2_f64(4.0, 3.0), ~=, 0.9272952180016122);
+    RC_CHECK(rc_atan2_f64(4.0, -3.0), ~=, 2.214297435588181);
+    RC_CHECK(rc_atan2_f64(-4.0, -3.0), ~=, -2.214297435588181);
+    RC_CHECK(rc_atan2_f64(-4.0, 3.0), ~=, -0.9272952180016122);
+
+    // Agrees with atan where x > 0
+    RC_CHECK(rc_atan2_f32(3.0f, 4.0f), ~=, rc_atan_f32(0.75f));
+    RC_CHECK(rc_atan2_f64(3.0, 4.0), ~=, rc_atan_f64(0.75));
+}
+
+
+RC_TEST(math_atan2, steep_and_shallow)
+{
+    // Shallow: the angle is the slope, whose cube is lost in the rounding
+    check_atan2_f32(1e-5f, 1.0f, rc_bitcast_f32(1e-5f));
+    check_atan2_f64(1e-9, 1.0, rc_bitcast_f64(1e-9));
+    check_atan2_f64(3e-300, 3e10, rc_bitcast_f64(1e-310));
+
+    // Steep: just short of pi/2, or just past it for x < 0
+    RC_CHECK(rc_atan2_f32(1e5f, 1.0f), <, rc_bitcast_u32(PI_2_F32));
+    RC_CHECK(rc_atan2_f32(1e5f, 1.0f), ~=, 1.5707863f);
+    RC_CHECK(rc_atan2_f32(1e5f, -1.0f), ~=, 1.5708063f);
+    RC_CHECK(rc_atan2_f64(1e9, 1.0), <, rc_bitcast_u64(PI_2_F64));
+    RC_CHECK(rc_atan2_f64(1e9, 1.0), ~=, 1.5707963257948966);
+    RC_CHECK(rc_atan2_f64(1e9, -1.0), ~=, 1.5707963277948966);
+
+    // So steep or shallow that the other side vanishes
+    check_atan2_f32(1e30f, 1e-30f, PI_2_F32);
+    check_atan2_f32(1e-30f, -1e30f, PI_F32);
+    check_atan2_f64(1e300, 1e-300, PI_2_F64);
+    check_atan2_f64(1e-300, -1e300, PI_F64);
+}
+
+
+RC_TEST(math_atan2, subnormal_ratios)
+{
+    // A ratio among the subnormals is the result, rounded once: atan adds nothing it can hold
+    check_atan2_f32(0x1p-149f, 1.0f, 1u);
+    check_atan2_f32(0x1p-138f, 0x1p10f, 2u);
+    check_atan2_f32(3e-39f, 3.0f, rc_bitcast_f32(1e-39f));
+    check_atan2_f64(0x1p-1074, 1.0, 1u);
+    check_atan2_f64(0x1p-1000, 0x1p70, 16u);
+    check_atan2_f64(5e-300, 5e10, rc_bitcast_f64(1e-310));
+
+    // Too small even for those, it rounds to zero, or to pi for x < 0
+    check_atan2_f32(0x1p-149f, 4.0f, 0u);
+    check_atan2_f32(0x1p-149f, -4.0f, PI_F32);
+    check_atan2_f64(0x1p-1074, 4.0, 0u);
+    check_atan2_f64(0x1p-1074, -4.0, PI_F64);
+}
+
+
+RC_TEST(math_atan2, odd_in_y)
+{
+    float values_f32[] = {0.0f, 0x1p-149f, 1e-20f, 0.3f, 1.0f, 2.5f, 1e20f, 0x1.fffffep127f, infinity_f32()};
+    double values_f64[] = {0.0, 0x1p-1074, 1e-200, 0.3, 1.0, 2.5, 1e200, 0x1.fffffffffffffp1023, infinity_f64()};
+
+    // Every pair, with x of both signs, zeros and infinities included
+    for (uint32_t i = 0; i < RC_COUNT(values_f32); i++) {
+        for (uint32_t j = 0; j < 2 * RC_COUNT(values_f32); j++) {
+            float y_f32 = values_f32[i];
+            float x_f32 = j % 2 == 0 ? values_f32[j / 2] : -values_f32[j / 2];
+            double y_f64 = values_f64[i];
+            double x_f64 = j % 2 == 0 ? values_f64[j / 2] : -values_f64[j / 2];
+
+            RC_CHECK(rc_bitcast_f32(rc_atan2_f32(-y_f32, x_f32)), ==, rc_bitcast_f32(rc_atan2_f32(y_f32, x_f32)) ^ SIGN_F32);
+            RC_CHECK(rc_bitcast_f64(rc_atan2_f64(-y_f64, x_f64)), ==, rc_bitcast_f64(rc_atan2_f64(y_f64, x_f64)) ^ SIGN_F64);
+        }
+    }
+}
+
+
+RC_TEST(math_atan2, golden)
+{
+    for (uint32_t i = 0; i < RC_COUNT(atan2_golden_f32); i++) {
+        RC_CHECK(rc_bitcast_f32(rc_atan2_f32(atan2_golden_f32[i].y, atan2_golden_f32[i].x)), ==, atan2_golden_f32[i].bits);
+    }
+
+    for (uint32_t i = 0; i < RC_COUNT(atan2_golden_f64); i++) {
+        RC_CHECK(rc_bitcast_f64(rc_atan2_f64(atan2_golden_f64[i].y, atan2_golden_f64[i].x)), ==, atan2_golden_f64[i].bits);
+    }
 }

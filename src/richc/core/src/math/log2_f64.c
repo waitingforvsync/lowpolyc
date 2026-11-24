@@ -1,106 +1,77 @@
 // math/log2_f64.c
 //
-// The base 2 logarithm of a double. Ported from musl 1.2.5 (MIT), src/math/log2.c, which is Arm's
-// optimized-routines. Its notice:
+// rc_log2_f64: the base 2 logarithm. We write x = 2^k m and take c, near 1 / m, from a table of
+// 256, so that log2(x) = k - log2(c) + log1p(r) / ln2 with r = m c - 1 found exactly and
+// |r| < 2^-8 (the reduction in exp_log_f64.h), and log1p(r) / ln2 - r / ln2 from a degree 7
+// polynomial within 2^-64.7 |r|. k and the head of -log2(c) sum exactly. We work on 2^61 r, which
+// the reduction leaves as an integer, rather than r, saving a multiplication.
 //
-// Copyright (c) 2018, Arm Limited.
-// SPDX-License-Identifier: MIT
+// Outside [1/2, 2), |log2(x)| is at least 1, so the rest can join that sum rounded: r / ln2,
+// rounded with 1 / ln2, and the sum it joins each add under 2^-61, and before the final rounding
+// we are within 2^-59.9 of log2(x), under 0.005 ulp. Inside, where log2(x) can be as small as
+// r / ln2, a 26-bit head of r times a 27-bit head of 1 / ln2 is exact, and adding it keeps its
+// error, so only small terms round: the rest of r / ln2, the tail of the table and the polynomial.
+// There we are within about 2^-59.5 of log2(x), under 0.01 ulp. An exact power of 2 lands on k
+// exactly either way. The worst error we have found is 0.504 ulp.
 
 #include "richc/math/math.h"
 
-#include "exp_log_f64.h"
+#include "math/exp_log_f64.h"
 
-// The start of the range [offset, 2 offset) of z, which x's bits are reduced to by taking away k.
-#define RC_LOG2_OFFSET_F64 0x3fe6000000000000ull
+// The bits of 1/2, and the width of [1/2, 2) in bits.
+#define RC_LOG2_F64_NEAR_BITS  0x3fe0000000000000ull
+#define RC_LOG2_F64_NEAR_WIDTH 0x0020000000000000ull
 
-// True for an x in [1 - 0x1.5b51p-5, 1 + 0x1.6ab2p-5), given its bits.
-static bool rc_log2_is_near_one_f64(uint64_t bits)
+// log2(x) for the bits of a positive normal x outside [1/2, 2), with the k_bias that finds its k.
+// r is 2^61 times the r above, and the constants are scaled to match. The polynomial comes in two
+// parts, its terms to r^3 and r^4 times the rest, to keep the chain from r to the result short.
+static double rc_log2_f64_far(uint64_t bits, double k_bias)
 {
-    return bits - rc_bitcast_f64(1.0 - 0x1.5b51p-5) < rc_bitcast_f64(1.0 + 0x1.6ab2p-5) - rc_bitcast_f64(1.0 - 0x1.5b51p-5);
-}
-
-
-// x with the low 32 bits of its significand cleared, for splitting a product in two.
-static double rc_log2_high_part_f64(double x)
-{
-    return rc_bitcast_u64(rc_bitcast_f64(x) & (UINT64_MAX << 32));
-}
-
-
-// log2(x) for an x near 1 but not 1, from log2(1 + r) as a polynomial in r = x - 1. The
-// worst-case error is less than 0.55 ulp.
-static double rc_log2_near_one_f64(double x)
-{
-    const double *b = rc_log2_data_f64.poly_near_one;
-    double r = x - 1.0;
-    double r_hi = rc_log2_high_part_f64(r);
-    double r_lo = r - r_hi;
-
-    // r/ln2 in two parts
-    double hi = r_hi * rc_log2_data_f64.inv_ln2_hi;
-    double lo = r_lo * rc_log2_data_f64.inv_ln2_hi + r * rc_log2_data_f64.inv_ln2_lo;
-
-    // r2 has a rounding error of 2^-62
+    const rc_log2_f64_constants *c = &rc_log2_f64_data;
+    rc_log_f64_reduced reduced = rc_log_f64_reduce(bits, 8, rc_log2_f64_inverse, k_bias);
+    rc_exp_log_f64_pair log2_c = rc_log2_f64_table[reduced.index];
+    double r = rc_log_f64_scaled_r(reduced.scaled, 8);
+    double head = reduced.k + log2_c.hi;
     double r2 = r * r;
-    double r4 = r2 * r2;
-    double p = r2 * (b[0] + r * b[1]);
-    double y = hi + p;
-    double tail = r4 * (b[2] + r * b[3] + r2 * (b[4] + r * b[5]) + r4 * (b[6] + r * b[7] + r2 * (b[8] + r * b[9])));
-    double lo_sum = lo + (hi - y + p) + tail;
+    double upper = (c->poly[2] + r * c->poly[3]) + r2 * (c->poly[4] + r * c->poly[5]);
+    double lower = log2_c.lo + r2 * (c->poly[0] + r * c->poly[1]);
 
-    return y + lo_sum;
+    return head + (r * c->inv_ln2 + (lower + (r2 * r2) * upper));
 }
 
 
-// log2(x) for a positive normal x, given its bits: log2(x) = k + log2(c) + log2(z/c).
-static double rc_log2_normal_f64(uint64_t bits)
+// log2(x) for the bits of an x in [1/2, 2), r and the constants scaled as for the far path. The
+// large terms sum to head + scaled, and scaled less its rounding error is exact (a fast two-sum:
+// head is 0 or at least as big a power of 2 as any scaled of its interval).
+static double rc_log2_f64_near(uint64_t bits)
 {
-    rc_log_reduction_f64 reduced = rc_log_reduce_f64(bits, RC_LOG2_OFFSET_F64, RC_LOG2_TABLE_BITS_F64);
-    rc_log_centre_f64 centre = rc_log2_data_f64.centres[reduced.index];
-    rc_log_centre_split_f64 split = rc_log2_data_f64.centre_splits[reduced.index];
-    const double *a = rc_log2_data_f64.poly;
-
-    // r ~= z/c - 1, with |r| < 1/2N, and a rounding error of 2^-55/N + 2^-65
-    double r = (reduced.z - split.c_hi - split.c_lo) * centre.inv_c;
-    double r_hi = rc_log2_high_part_f64(r);
-    double r_lo = r - r_hi;
-    double t1 = r_hi * rc_log2_data_f64.inv_ln2_hi;
-    double t2 = r_lo * rc_log2_data_f64.inv_ln2_hi + r * rc_log2_data_f64.inv_ln2_lo;
-
-    // hi + lo = r/ln2 + log2(c) + k
-    double t3 = reduced.k + centre.log_c;
-    double hi = t3 + t1;
-    double lo = t3 - hi + t1 + t2;
-
-    // log2(1 + r) = r/ln2 + r^2 poly(r), where r2 has a rounding error of 2^-54/N^2. The
-    // worst-case error is 0.550 ulp for |log2(x)| > 2^-4: ~ 0.5 + 2/N/ln2 + abs poly error 2^56
-    // ulp (+ 0.003 ulp without fma).
+    const rc_log2_f64_constants *c = &rc_log2_f64_data;
+    rc_log_f64_reduced reduced = rc_log_f64_reduce(bits, 8, rc_log2_f64_inverse, c->k_bias);
+    rc_exp_log_f64_pair log2_c = rc_log2_f64_table[reduced.index];
+    double r = rc_log_f64_scaled_r(reduced.scaled, 8);
+    double r_head = rc_exp_log_f64_head(r, 27);
+    double head = reduced.k + log2_c.hi;
+    double scaled = r_head * c->inv_ln2_hi;
+    double sum = head + scaled;
     double r2 = r * r;
-    double r4 = r2 * r2;
-    double p = a[0] + r * a[1] + r2 * (a[2] + r * a[3]) + r4 * (a[4] + r * a[5]);
+    double upper = (c->poly[2] + r * c->poly[3]) + r2 * (c->poly[4] + r * c->poly[5]);
+    double lower = r2 * (c->poly[0] + r * c->poly[1]);
+    double tail = ((r - r_head) * c->inv_ln2_hi + r * c->inv_ln2_lo) + log2_c.lo;
 
-    return lo + r2 * p + hi;
+    return sum + (((scaled - (sum - head)) + tail) + (lower + (r2 * r2) * upper));
 }
 
 
-// log2(x) for an x below 2^-1022 (zero, subnormal or negative), infinite or NaN.
-static double rc_log2_unusual_f64(double x)
+// log2(x) for the bits of an x zero, negative, subnormal, infinite or NaN. A subnormal's bits, as
+// an integer, are x 2^1074, and converting them makes a normal double with no arithmetic on a
+// subnormal, which some processors take a slow path for.
+static double rc_log2_f64_outside(uint64_t bits)
 {
-    uint64_t bits = rc_bitcast_f64(x);
-
-    if ((bits << 1) == 0) {
-        return rc_bitcast_u64(0xfff0000000000000ull);
+    if (rc_exp_log_f64_is_positive_subnormal(bits)) {
+        return rc_log2_f64_far(rc_bitcast_f64((double)(int64_t)bits), rc_log2_f64_data.k_bias + 1074.0);
     }
 
-    if (bits == 0x7ff0000000000000ull) {
-        return x;
-    }
-
-    if (rc_log_is_negative_or_nan_f64(bits)) {
-        return (x - x) / (x - x);
-    }
-
-    return rc_log2_normal_f64(rc_log_normalised_bits_f64(x));
+    return rc_exp_log_f64_log_special(bits);
 }
 
 
@@ -108,13 +79,13 @@ double rc_log2_f64(double x)
 {
     uint64_t bits = rc_bitcast_f64(x);
 
-    if (rc_log2_is_near_one_f64(bits)) {
-        return x == 1.0 ? 0.0 : rc_log2_near_one_f64(x);
+    if (!rc_exp_log_f64_is_positive_normal(bits)) {
+        return rc_log2_f64_outside(bits);
     }
 
-    if (rc_log_is_unusual_f64(bits)) {
-        return rc_log2_unusual_f64(x);
+    if (bits - RC_LOG2_F64_NEAR_BITS < RC_LOG2_F64_NEAR_WIDTH) {
+        return rc_log2_f64_near(bits);
     }
 
-    return rc_log2_normal_f64(bits);
+    return rc_log2_f64_far(bits, rc_log2_f64_data.k_bias);
 }

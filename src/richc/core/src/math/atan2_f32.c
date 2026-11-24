@@ -1,115 +1,116 @@
 // math/atan2_f32.c
 //
-// The angle of a point, in floats. Ported from musl 1.2.5 (MIT), src/math/atan2f.c, which is
-// FreeBSD's e_atan2f.c. Its notice:
+// rc_atan2_f32: the angle of the point (x, y) from the +x axis, in floats, worked in double. We
+// work on |y| and give the result y's sign, so atan2(-y, x) is exactly -atan2(y, x).
 //
-// Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
-//
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
-//
-// Developed at SunPro, a Sun Microsystems, Inc. business.
-// Permission to use, copy, modify, and distribute this
-// software is freely granted, provided that this notice
-// is preserved.
+// The angle from the nearer axis is atan(r) for r, the smaller of |x| and |y| over the larger, in
+// [0, 1]. Up to tan(pi/8), that is atan(u) for u = r, and beyond, pi/4 + atan(u) for
+// u = (near - far) / (near + far). Either way |u| is at most tan(pi/8), but for a rounding, and u
+// costs one rounding, as the sum and difference of two floats so close are exact in double.
+// atan(u) = u (1 + u^2 Q(u^2)) for Q a quartic, fitted to 2^-30.5, as atan_f32 has it. The octant
+// turns that into the result: 0 + a, pi/2 - a, pi - a or pi/2 + a, and the reduction adds pi/4
+// for u beyond tan(pi/8). Rounding that double result to float adds little to the half ulp the
+// rounding itself costs: about 0.51 ulp at worst. Below 2^-15 in size, atan(u) is u to a relative
+// 2^-31.6, and we skip the polynomial; the test for that catches a NaN u too, from 0/0 and inf/inf,
+// which take the special cases. The numerator caps far at 2^200 before the shift of 0 or 1
+// multiplies it, so an infinite far doesn't make a NaN there. The octant's table holds y's sign as
+// well, so no copysign is needed, and we read the signs off the doubles, not the floats.
 
 #include "richc/math/math.h"
 
-// pi split in two, hi + lo, for the extra precision.
-static const float rc_atan2_pi_f32 = 3.1415927410e+00f;     // 0x40490fdb
-static const float rc_atan2_pi_lo_f32 = -8.7422776573e-08f; // 0xb3bbbd2e
+#include "math/arc.h"
+
+// The angle the octant and the reduction add to, and the sign the octant gives atan(u).
+typedef struct rc_atan2_octant {
+    double offset;
+    double sign;
+} rc_atan2_octant;
+
+// By y's sign bit, then x's, then whether |y| > |x|, then whether the reduction is past tan(pi/8).
+// y's sign is in the offset and sign too.
+static const rc_atan2_octant rc_atan2_octants[16] = {
+    {.offset = 0.0, .sign = 1.0},
+    {.offset = RC_ARC_PI_4, .sign = 1.0},
+    {.offset = RC_ARC_PI_2_HI, .sign = -1.0},
+    {.offset = RC_ARC_PI_4, .sign = -1.0},
+    {.offset = RC_ARC_PI_HI, .sign = -1.0},
+    {.offset = RC_ARC_PI_3_4, .sign = -1.0},
+    {.offset = RC_ARC_PI_2_HI, .sign = 1.0},
+    {.offset = RC_ARC_PI_3_4, .sign = 1.0},
+    {.offset = -0.0, .sign = -1.0},
+    {.offset = -RC_ARC_PI_4, .sign = -1.0},
+    {.offset = -RC_ARC_PI_2_HI, .sign = 1.0},
+    {.offset = -RC_ARC_PI_4, .sign = 1.0},
+    {.offset = -RC_ARC_PI_HI, .sign = 1.0},
+    {.offset = -RC_ARC_PI_3_4, .sign = 1.0},
+    {.offset = -RC_ARC_PI_2_HI, .sign = -1.0},
+    {.offset = -RC_ARC_PI_3_4, .sign = -1.0}
+};
 
 
-// The angle, negated when y is negative.
-static float rc_atan2_signed_f32(float angle, bool y_negative)
+// atan2 where u is NaN, from y and x as doubles: a NaN, both zero, or both infinite.
+static float rc_atan2_special(double y, double x)
 {
-    return y_negative ? -angle : angle;
+    bool x_negative = (rc_bitcast_f64(x) >> 63) != 0;
+
+    if (y != y || x != x) {
+        return (float)(x + y);
+    }
+
+    if (y == 0.0) {
+        return (float)rc_copysign_f64(x_negative ? RC_ARC_PI_HI : 0.0, y);
+    }
+
+    return (float)rc_copysign_f64(x_negative ? RC_ARC_PI_3_4 : RC_ARC_PI_4, y);
 }
 
 
-// The angle when x is infinite: +-pi/4 or +-3pi/4 if y is too, and otherwise +-0 or +-pi.
-static float rc_atan2_infinite_x_f32(uint32_t y_magnitude, bool x_negative, bool y_negative)
+// The result from u, by the octant's index.
+static double rc_atan2_in_octant(uint64_t index, double u)
 {
-    float pi = rc_atan2_pi_f32;
+    rc_atan2_octant octant = rc_atan2_octants[index];
 
-    if (y_magnitude == 0x7f800000u) {
-        return rc_atan2_signed_f32(x_negative ? 3.0f * pi / 4.0f : pi / 4.0f, y_negative);
-    }
-
-    return rc_atan2_signed_f32(x_negative ? pi : 0.0f, y_negative);
+    return (octant.offset + octant.sign * u) + octant.sign * (u * rc_arc_atan_ratio_f32(u));
 }
 
 
-// True if y is infinite or |y / x| > 2^26, so the angle is +-pi/2 to float precision.
-static bool rc_atan2_is_steep_f32(uint32_t x_magnitude, uint32_t y_magnitude)
+// Whether |u| is at least 2^-15, which is false for NaN.
+static bool rc_atan2_is_ordinary(double u)
 {
-    return x_magnitude + (26u << 23) < y_magnitude || y_magnitude == 0x7f800000u;
+    return rc_abs_f64(u) >= 0x1p-15;
 }
 
 
-// atan(|y / x|), taken as 0 when x is negative and |y / x| < 2^-26, where it vanishes beside pi.
-static float rc_atan2_slope_f32(float y, float x, uint32_t x_magnitude, uint32_t y_magnitude)
+// atan2 where |u| is below 2^-15, so that atan(u) is u to a relative 2^-31.6, or NaN.
+static float rc_atan2_tiny(double y, double x, uint64_t index, double u)
 {
-    bool x_negative = x < 0.0f;
-    bool tiny = y_magnitude + (26u << 23) < x_magnitude;
+    rc_atan2_octant octant = rc_atan2_octants[index];
 
-    if (x_negative && tiny) {
-        return 0.0f;
+    if (u != u) {
+        return rc_atan2_special(y, x);
     }
 
-    return rc_atan_f32(rc_abs_f32(y / x));
-}
-
-
-// The angle from z = atan(|y / x|), moved into the quadrant of (x, y).
-static float rc_atan2_from_slope_f32(float z, bool x_negative, bool y_negative)
-{
-    if (!x_negative) {
-        return y_negative ? -z : z;
-    }
-
-    if (y_negative) {
-        return (z - rc_atan2_pi_lo_f32) - rc_atan2_pi_f32;
-    }
-
-    return rc_atan2_pi_f32 - (z - rc_atan2_pi_lo_f32);
+    return (float)(octant.offset + octant.sign * u);
 }
 
 
 float rc_atan2_f32(float y, float x)
 {
-    uint32_t x_bits = rc_bitcast_f32(x);
-    uint32_t y_bits = rc_bitcast_f32(y);
-    uint32_t x_magnitude = x_bits & 0x7fffffffu;
-    uint32_t y_magnitude = y_bits & 0x7fffffffu;
-    bool x_negative = (x_bits >> 31) != 0;
-    bool y_negative = (y_bits >> 31) != 0;
+    double dy = (double)y;
+    double dx = (double)x;
+    double ay = rc_abs_f64(dy);
+    double ax = rc_abs_f64(dx);
+    bool steep = ay > ax;
+    double near = steep ? ax : ay;
+    double far = steep ? ay : ax;
+    bool diagonal = near > far * RC_ARC_TAN_PI_8;
+    double shift = diagonal ? 1.0 : 0.0;
+    double u = (near - rc_min_f64(0x1p200, far) * shift) / (far + near * shift);
+    uint64_t index = (rc_bitcast_f64(dy) >> 63) * 8 + (rc_bitcast_f64(dx) >> 63) * 4 + steep * 2 + diagonal;
 
-    // NaN in either gives NaN, and x = 1 is plain atan
-    if (x != x || y != y) {
-        return x + y;
+    if (!rc_atan2_is_ordinary(u)) {
+        return rc_atan2_tiny(dy, dx, index, u);
     }
 
-    if (x_bits == 0x3f800000u) {
-        return rc_atan_f32(y);
-    }
-
-    // On the x axis, +-0 to the right and +-pi to the left
-    if (y_magnitude == 0) {
-        return x_negative ? rc_atan2_signed_f32(rc_atan2_pi_f32, y_negative) : y;
-    }
-
-    // On the y axis, +-pi/2
-    if (x_magnitude == 0) {
-        return rc_atan2_signed_f32(rc_atan2_pi_f32 / 2.0f, y_negative);
-    }
-
-    if (x_magnitude == 0x7f800000u) {
-        return rc_atan2_infinite_x_f32(y_magnitude, x_negative, y_negative);
-    }
-
-    if (rc_atan2_is_steep_f32(x_magnitude, y_magnitude)) {
-        return rc_atan2_signed_f32(rc_atan2_pi_f32 / 2.0f, y_negative);
-    }
-
-    return rc_atan2_from_slope_f32(rc_atan2_slope_f32(y, x, x_magnitude, y_magnitude), x_negative, y_negative);
+    return (float)rc_atan2_in_octant(index, u);
 }

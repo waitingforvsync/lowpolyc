@@ -1,547 +1,498 @@
 // test_math_trig.c
 //
-// Tests for rc_sin, rc_cos and rc_tan. The golden bit patterns come from our port, which gives
-// musl's bits on every float and on a large sample of doubles; checking them pins down the same
-// bits on every target. Inputs and outputs are written as bit patterns.
+// Tests for rc_sin, rc_cos and rc_tan: the special values, the symmetries, values anyone can check,
+// and golden bit patterns. The golden inputs take every path: tiny numbers whose results need no
+// work, small doubles that skip the reduction, ones near multiples of pi/2, the short reductions to
+// their limit and the huge ones past them, with the hardest arguments to reduce of each width
+// (tools/math/trig/hardest.py) and the largest finite numbers. Every golden result was checked
+// against mpmath (tools/math/trig/golden.py): all but one are correctly rounded, so these bits are
+// right as well as fixed. The odd one out, the tangent of the double below pi/4, is 0.55 ulp out.
 
 #include "richc/math/math.h"
 
 #include "richc/test.h"
 
-// True if x is of the given type, to see which width a dispatcher picked.
-#define IS_TYPE(x, type) _Generic((x), type: true, default: false)
+// An input and its sine, cosine and tangent, as bits.
+typedef struct trig_golden_f64 {
+    uint64_t x;
+    uint64_t sine;
+    uint64_t cosine;
+    uint64_t tangent;
+} trig_golden_f64;
 
-// The bits of sin(x), for x given by its bits.
-static uint32_t sin_f32_bits(uint32_t x)
+// The same for floats.
+typedef struct trig_golden_f32 {
+    uint32_t x;
+    uint32_t sine;
+    uint32_t cosine;
+    uint32_t tangent;
+} trig_golden_f32;
+
+static const trig_golden_f64 trig_goldens_f64[] = {
+    // Tiny, given at once: subnormal and tiny; then no reduction, up to just below pi/4
+    {0x0000000000000001ull, 0x0000000000000001ull, 0x3ff0000000000000ull, 0x0000000000000001ull},
+    {0x01a56e1fc2f8f359ull, 0x01a56e1fc2f8f359ull, 0x3ff0000000000000ull, 0x01a56e1fc2f8f359ull},
+    {0x3e10000000000000ull, 0x3e10000000000000ull, 0x3ff0000000000000ull, 0x3e10000000000000ull},
+    {0x3e45798ee2308c3aull, 0x3e45798ee2308c3aull, 0x3ff0000000000000ull, 0x3e45798ee2308c3aull},
+    {0x3fb999999999999aull, 0x3fb98eaecb8bcb2cull, 0x3fefd712f9a817c1ull, 0x3fb9af8877430b80ull},
+    {0x3fe0000000000000ull, 0x3fdeaee8744b05f0ull, 0x3fec1528065b7d50ull, 0x3fe17b4f5bf3474aull},
+    {0x3fe921fb54442d17ull, 0x3fe6a09e667f3bccull, 0x3fe6a09e667f3bcdull, 0x3feffffffffffffeull},
+
+    // The short reduction: pi/4 rounded down, ordinary angles and multiples of pi/2
+    {0x3fe921fb54442d18ull, 0x3fe6a09e667f3bccull, 0x3fe6a09e667f3bcdull, 0x3fefffffffffffffull},
+    {0x3ff0000000000000ull, 0x3feaed548f090ceeull, 0x3fe14a280fb5068cull, 0x3ff8eb245cbee3a6ull},
+    {0x3ff921fb54442d18ull, 0x3ff0000000000000ull, 0x3c91a62633145c07ull, 0x434d02967c31cdb5ull},
+    {0x4000000000000000ull, 0x3fed18f6ead1b446ull, 0xbfdaa22657537205ull, 0xc0017af62e0950f8ull},
+    {0x400921fb54442d18ull, 0x3ca1a62633145c07ull, 0xbff0000000000000ull, 0xbca1a62633145c07ull},
+    {0x4012d97c7f3321d2ull, 0xbff0000000000000ull, 0xbcaa79394c9e8a0aull, 0x4333570efd768923ull},
+    {0x401921fb54442d18ull, 0xbcb1a62633145c07ull, 0x3ff0000000000000ull, 0xbcb1a62633145c07ull},
+    {0x4024000000000000ull, 0xbfe1689ef5f34f52ull, 0xbfead9ac890c6b1full, 0x3fe4bf5f34be3782ull},
+    {0x4059000000000000ull, 0xbfe03425b78c4db8ull, 0x3feb981dbf665fdfull, 0xbfe2ca74d62b5d38ull},
+
+    // Its hardest argument, 45.55, 2^-60.5 from 29 pi/2, and that doubled; 1e5; and its last
+    {0x4046c6cbc45dc8deull, 0x3ff0000000000000ull, 0xbc26d61b58c99c43ull, 0xc3b66b9ebc4850c6ull},
+    {0x4056c6cbc45dc8deull, 0xbc36d61b58c99c43ull, 0xbff0000000000000ull, 0x3c36d61b58c99c43ull},
+    {0x40f86a0000000000ull, 0x3fa24daa9c527e96ull, 0xbfeffac3841b3da7ull, 0xbfa250a9d503313dull},
+    {0x412fffff80000000ull, 0x3fb633156c9d2a04ull, 0x3fefe12400c920a8ull, 0x3fb64892a87f593dull},
+
+    // The huge reduction: its first; 1.4e7, 2^-59.0 from a multiple of pi/2; 1e22; two 2^-57.4
+    // and 2^-58.9 away; 1e300; the hardest double (2^-60.9 away); one 2^-58.8 away; and DBL_MAX
+    {0x4130000000000000ull, 0x3fd526ccb2fc8656ull, 0x3fee33ada92fe2aeull, 0x3fd6692e5779206full},
+    {0x416b951f1572eba5ull, 0xbff0000000000000ull, 0xbc3f54f5227a4e84ull, 0x43a057584c429b3aull},
+    {0x4480f0cf064dd592ull, 0xbfeb453ab76bf397ull, 0x3fe0be2cef01c8f4ull, 0xbffa0f79c1b6b257ull},
+    {0x442782b7a20df6d4ull, 0xbff0000000000000ull, 0xbc57a6500ca6d83bull, 0x4385a63c82b6dae2ull},
+    {0x482504cac51f1eafull, 0xbff0000000000000ull, 0xbc40cb604d34f341ull, 0x439e7c7d0f43f81eull},
+    {0x7e37e43c8800759cull, 0xbfea2c16b010e385ull, 0xbfe2699022adc4c1ull, 0x3ff6be411f37ac77ull},
+    {0x7506ac5b262ca1ffull, 0x3ff0000000000000ull, 0xbc214ae72e6ba22full, 0xc3bd9ba9a7975636ull},
+    {0x7dee009c53148be1ull, 0x3ff0000000000000ull, 0x3c4295a3b0a64b1dull, 0x439b8cbf7ecfaffaull},
+    {0x7fefffffffffffffull, 0x3f7452fc98b34e97ull, 0xbfefffe62ecfab75ull, 0xbf74530cfe729484ull}
+};
+
+static const trig_golden_f32 trig_goldens_f32[] = {
+    // Tiny, given at once: subnormal and tiny; then small enough that the reduction leaves them as
+    // they are, up to just below pi/4
+    {0x00000001u, 0x00000001u, 0x3f800000u, 0x00000001u},
+    {0x0da24260u, 0x0da24260u, 0x3f800000u, 0x0da24260u},
+    {0x35800000u, 0x35800000u, 0x3f800000u, 0x35800000u},
+    {0x3dcccccdu, 0x3dcc7577u, 0x3f7eb898u, 0x3dcd7c44u},
+    {0x3f000000u, 0x3ef57744u, 0x3f60a940u, 0x3f0bda7bu},
+    {0x3f490fdau, 0x3f3504f3u, 0x3f3504f4u, 0x3f7fffffu},
+
+    // The short reduction: pi/4 rounded up, ordinary angles and multiples of pi/2
+    {0x3f490fdbu, 0x3f3504f3u, 0x3f3504f3u, 0x3f800000u},
+    {0x3f800000u, 0x3f576aa4u, 0x3f0a5140u, 0x3fc75923u},
+    {0x3fc90fdbu, 0x3f800000u, 0xb33bbd2eu, 0xcbae8a4au},
+    {0x40000000u, 0x3f68c7b7u, 0xbed51133u, 0xc00bd7b1u},
+    {0x40490fdbu, 0xb3bbbd2eu, 0xbf800000u, 0x33bbbd2eu},
+    {0x4096cbe4u, 0xbf800000u, 0x324cde2eu, 0xcc9ff26du},
+    {0x41200000u, 0xbf0b44f8u, 0xbf56cd64u, 0x3f25fafau},
+    {0x42c80000u, 0xbf01a12eu, 0x3f5cc0eeu, 0xbf1653a7u},
+
+    // Its hardest argument, 252.9, 2^-27.8 from 161 pi/2; 1e5; and its last
+    {0x437ce5f1u, 0x3f800000u, 0xb18fd1deu, 0xcd63d737u},
+    {0x47c35000u, 0x3d126d55u, 0xbf7fd61cu, 0xbd12854fu},
+    {0x497fffffu, 0x3e8ab32cu, 0x3f766d7au, 0x3e90166eu},
+
+    // The huge reduction: its first, one 2^-26.3 from a multiple of pi/2, and the float below 2^27
+    {0x49800000u, 0x3ea93666u, 0x3f719d6du, 0x3eb34973u},
+    {0x4c2332e9u, 0xbf800000u, 0x32493de6u, 0xcca2d439u},
+    {0x4cffffffu, 0xbf072942u, 0xbf59692bu, 0x3f1f26c9u},
+
+    // Further on: 2^27, 1e9, arguments 2^-28.9, 2^-27.0 and 2^-27.2 from a multiple of pi/2, the
+    // hardest float (2^-29.2 away), one 2^-26.5 away, and FLT_MAX
+    {0x4d000000u, 0xbf436e65u, 0x3f255b29u, 0xbf9747e1u},
+    {0x4e6e6b28u, 0x3f0bbc65u, 0x3f567fc6u, 0x3f26c592u},
+    {0x50a3e87fu, 0x3f800000u, 0xb10a4ed8u, 0xcdeceba8u},
+    {0x65898498u, 0x3f800000u, 0xb1fbf026u, 0xcd02104fu},
+    {0x6a1976f1u, 0x3f800000u, 0xb1de3bdfu, 0xcd1372c2u},
+    {0x6f79be45u, 0x3f800000u, 0xb0ddeea9u, 0xce13a60eu},
+    {0x77584625u, 0xbf800000u, 0xb22fa975u, 0x4cba8a45u},
+    {0x7f7fffffu, 0xbf0599b3u, 0x3f5a5f96u, 0xbf1c9ecau}
+};
+
+typedef double (*trig_fn_f64)(double);
+typedef float (*trig_fn_f32)(float);
+
+
+// The i-th of a spread of bit patterns: splitmix64's mix of i, so every exponent turns up.
+static uint64_t trig_spread_bits(uint64_t i)
 {
-    return rc_bitcast_f32(rc_sin_f32(rc_bitcast_u32(x)));
+    uint64_t z = (i + 1) * 0x9e3779b97f4a7c15ull;
+
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    return z ^ (z >> 31);
 }
 
-// The bits of sin(x), for x given by its bits.
-static uint64_t sin_f64_bits(uint64_t x)
-{
-    return rc_bitcast_f64(rc_sin_f64(rc_bitcast_u64(x)));
-}
 
-// The bits of cos(x), for x given by its bits.
-static uint32_t cos_f32_bits(uint32_t x)
+// The i-th double of the spread, finite and positive, from every binade.
+static double trig_spread_f64(uint32_t i)
 {
-    return rc_bitcast_f32(rc_cos_f32(rc_bitcast_u32(x)));
-}
+    uint64_t bits = trig_spread_bits(i) & 0x7fffffffffffffffull;
 
-// The bits of cos(x), for x given by its bits.
-static uint64_t cos_f64_bits(uint64_t x)
-{
-    return rc_bitcast_f64(rc_cos_f64(rc_bitcast_u64(x)));
-}
-
-// The bits of tan(x), for x given by its bits.
-static uint32_t tan_f32_bits(uint32_t x)
-{
-    return rc_bitcast_f32(rc_tan_f32(rc_bitcast_u32(x)));
-}
-
-// The bits of tan(x), for x given by its bits.
-static uint64_t tan_f64_bits(uint64_t x)
-{
-    return rc_bitcast_f64(rc_tan_f64(rc_bitcast_u64(x)));
+    return rc_is_finite_f64(rc_bitcast_u64(bits)) ? rc_bitcast_u64(bits) : (double)i;
 }
 
 
-// ---- sin ----
-
-RC_TEST(math_sin, values)
+// The i-th float of the spread, finite and positive, from every binade.
+static float trig_spread_f32(uint32_t i)
 {
-    RC_CHECK(rc_sin_f32(0.0f), ==, 0.0f);
-    RC_CHECK(rc_sin_f64(0.0), ==, 0.0);
-    RC_CHECK(rc_bitcast_f32(rc_sin_f32(-0.0f)), ==, 0x80000000u);
+    uint32_t bits = (uint32_t)(trig_spread_bits(i) >> 33);
+
+    return rc_is_finite_f32(rc_bitcast_u32(bits)) ? rc_bitcast_u32(bits) : (float)i;
+}
+
+
+// The i-th of a spread of ordinary angles, up to about 1160.
+static double trig_angle_f64(uint32_t i)
+{
+    return (double)i * 0.29;
+}
+
+
+// True if f(-x) is exactly -f(x), sign bit and all, over the spread and the ordinary angles.
+static bool trig_is_odd_f64(trig_fn_f64 f)
+{
+    for (uint32_t i = 0; i < 4000; i++) {
+        double x = (i & 1) != 0 ? trig_spread_f64(i) : trig_angle_f64(i);
+
+        if (rc_bitcast_f64(f(-x)) != (rc_bitcast_f64(f(x)) ^ 0x8000000000000000ull)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+// True if f(-x) is exactly -f(x) for floats.
+static bool trig_is_odd_f32(trig_fn_f32 f)
+{
+    for (uint32_t i = 0; i < 4000; i++) {
+        float x = (i & 1) != 0 ? trig_spread_f32(i) : (float)trig_angle_f64(i);
+
+        if (rc_bitcast_f32(f(-x)) != (rc_bitcast_f32(f(x)) ^ 0x80000000u)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+// True if x is NaN, by the two tests that don't lean on its payload.
+static bool trig_is_nan_f64(double x)
+{
+    return !rc_is_finite_f64(x) && x != x;
+}
+
+
+// True if x is NaN.
+static bool trig_is_nan_f32(float x)
+{
+    return !rc_is_finite_f32(x) && x != x;
+}
+
+
+// The double k pi/2 comes to, which for k up to 201 is within 2^-44 of it.
+static double trig_half_pi_times(uint32_t k)
+{
+    return (double)k * 1.5707963267948966;
+}
+
+// ---- sine ----
+
+RC_TEST(math_sin, zeros_keep_their_sign)
+{
+    RC_CHECK(rc_bitcast_f64(rc_sin_f64(0.0)), ==, 0x0000000000000000ull);
     RC_CHECK(rc_bitcast_f64(rc_sin_f64(-0.0)), ==, 0x8000000000000000ull);
+    RC_CHECK(rc_bitcast_f32(rc_sin_f32(0.0f)), ==, 0x00000000u);
+    RC_CHECK(rc_bitcast_f32(rc_sin_f32(-0.0f)), ==, 0x80000000u);
+}
 
-    // Tiny angles are their own sine
-    RC_CHECK(rc_sin_f32(1e-5f), ==, 1e-5f);
+
+RC_TEST(math_sin, infinity_and_nan)
+{
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_sin_f64(rc_bitcast_u64(0x7ff0000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_sin_f64(rc_bitcast_u64(0xfff0000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_sin_f64(rc_bitcast_u64(0x7ff8000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_sin_f32(rc_bitcast_u32(0x7f800000u))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_sin_f32(rc_bitcast_u32(0xff800000u))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_sin_f32(rc_bitcast_u32(0x7fc00000u))));
+}
+
+
+RC_TEST(math_sin, readable_values)
+{
+    RC_CHECK(rc_abs_f64(rc_sin_f64(0.5235987755982988) - 0.5), <, 1e-15);
+    RC_CHECK(rc_abs_f64(rc_sin_f64(1.0) - 0.8414709848078965), <, 1e-15);
+    RC_CHECK(rc_abs_f64(rc_sin_f64(-2.0) + 0.9092974268256817), <, 1e-15);
+    RC_CHECK(rc_abs_f32(rc_sin_f32(0.52359878f) - 0.5f), <, 1e-7f);
+    RC_CHECK(rc_abs_f32(rc_sin_f32(1.0f) - 0.84147098f), <, 1e-7f);
+
+    // pi/2 rounds to a double 6e-17 short, whose sine is 1 to far more places than a double has
+    RC_CHECK(rc_sin_f64(1.5707963267948966), ==, 1.0);
+    RC_CHECK(rc_sin_f32(1.5707964f), ==, 1.0f);
+
+    // A double's pi falls short of the real one by 1.2246e-16, which is therefore its sine
+    RC_CHECK(rc_sin_f64(3.141592653589793), ==, 1.2246467991473532e-16);
+}
+
+
+RC_TEST(math_sin, small_arguments_are_themselves)
+{
+    // Below 2^-26 the cube is lost past the last bit, subnormals included
     RC_CHECK(rc_sin_f64(1e-10), ==, 1e-10);
-
-    // sin(pi/6) is a half, give or take the rounding of pi/6
-    RC_CHECK_TRUE(rc_abs_f64(rc_sin_f64(0.52359877559829887) - 0.5) < 1e-15);
-    RC_CHECK_TRUE(rc_abs_f32(rc_sin_f32(0.52359878f) - 0.5f) < 1e-7f);
-
-    // Odd, exactly
-    RC_CHECK(rc_sin_f32(-2.5f), ==, -rc_sin_f32(2.5f));
-    RC_CHECK(rc_sin_f64(-2.5), ==, -rc_sin_f64(2.5));
-    RC_CHECK(rc_sin_f64(-1e30), ==, -rc_sin_f64(1e30));
-
-    // The dispatcher picks the width of its argument
-    RC_CHECK_TRUE(IS_TYPE(rc_sin(1.0f), float));
-    RC_CHECK_TRUE(IS_TYPE(rc_sin(1.0), double));
-    RC_CHECK(rc_sin(2.5f), ==, rc_sin_f32(2.5f));
-    RC_CHECK(rc_sin(2.5), ==, rc_sin_f64(2.5));
+    RC_CHECK(rc_sin_f64(-1e-300), ==, -1e-300);
+    RC_CHECK(rc_sin_f64(rc_bitcast_u64(0x0000000000000001ull)), ==, rc_bitcast_u64(0x0000000000000001ull));
+    RC_CHECK(rc_sin_f32(1e-5f), ==, 1e-5f);
+    RC_CHECK(rc_sin_f32(rc_bitcast_u32(0x80000001u)), ==, rc_bitcast_u32(0x80000001u));
 }
 
 
-RC_TEST(math_sin, f32_bits)
+RC_TEST(math_sin, near_multiples_of_half_pi)
 {
-    // Zeros keep their sign, and below 2^-12 sin and tan give x back and cos 1
-    RC_CHECK(sin_f32_bits(0x00000000u), ==, 0x00000000u);
-    RC_CHECK(sin_f32_bits(0x80000000u), ==, 0x80000000u);
-    RC_CHECK(sin_f32_bits(0x00000001u), ==, 0x00000001u);
-    RC_CHECK(sin_f32_bits(0x80800000u), ==, 0x80800000u);
-    RC_CHECK(sin_f32_bits(0x397fffffu), ==, 0x397fffffu);
-    RC_CHECK(sin_f32_bits(0x39800000u), ==, 0x39800000u);
+    // Near an odd multiple the sine rounds to +-1, and near an even one it is tiny
+    for (uint32_t k = 1; k <= 200; k += 2) {
+        double odd = trig_half_pi_times(k);
+        double even = trig_half_pi_times(k + 1);
 
-    // Within pi/4, and ordinary values
-    RC_CHECK(sin_f32_bits(0x3f000000u), ==, 0x3ef57744u);
-    RC_CHECK(sin_f32_bits(0x3f800000u), ==, 0x3f576aa4u);
-    RC_CHECK(sin_f32_bits(0xbf800000u), ==, 0xbf576aa4u);
-    RC_CHECK(sin_f32_bits(0x3f490fdau), ==, 0x3f3504f3u);
-    RC_CHECK(sin_f32_bits(0x3f490fdbu), ==, 0x3f3504f3u);
-
-    // Up to 9pi/4, reduced right there: near pi/2, pi, 3pi/2 and 2pi, and between
-    RC_CHECK(sin_f32_bits(0x3fc90fdbu), ==, 0x3f800000u);
-    RC_CHECK(sin_f32_bits(0xbfc90fdbu), ==, 0xbf800000u);
-    RC_CHECK(sin_f32_bits(0x40000000u), ==, 0x3f68c7b7u);
-    RC_CHECK(sin_f32_bits(0x40490fdbu), ==, 0xb3bbbd2eu);
-    RC_CHECK(sin_f32_bits(0xc0400000u), ==, 0xbe1081c3u);
-    RC_CHECK(sin_f32_bits(0x4096cbe4u), ==, 0xbf800000u);
-    RC_CHECK(sin_f32_bits(0x40a00000u), ==, 0xbf757c10u);
-    RC_CHECK(sin_f32_bits(0xc0a00000u), ==, 0x3f757c10u);
-    RC_CHECK(sin_f32_bits(0x40c90fdbu), ==, 0x343bbd2eu);
-    RC_CHECK(sin_f32_bits(0x40c00000u), ==, 0xbe8f0f8cu);
-    RC_CHECK(sin_f32_bits(0xc0c00000u), ==, 0x3e8f0f8cu);
-
-    // The medium reduction, up to just under 2^28 pi/2
-    RC_CHECK(sin_f32_bits(0x41200000u), ==, 0xbf0b44f8u);
-    RC_CHECK(sin_f32_bits(0x42c80000u), ==, 0xbf01a12eu);
-    RC_CHECK(sin_f32_bits(0xc47a0000u), ==, 0xbf53ae61u);
-    RC_CHECK(sin_f32_bits(0x4640e6b7u), ==, 0xbf341d93u);
-    RC_CHECK(sin_f32_bits(0x4dc90fdau), ==, 0xbf7cf804u);
-
-    // The large reduction, including one that brings in more of 2/pi, one rounded up from the
-    // fraction, and ones whose quadrant bits sit in the chunks
-    RC_CHECK(sin_f32_bits(0x4dc90fdbu), ==, 0xbf3d5f98u);
-    RC_CHECK(sin_f32_bits(0x4dc943edu), ==, 0xb63d5d7fu);
-    RC_CHECK(sin_f32_bits(0x4dc90fdcu), ==, 0xbe7bf669u);
-    RC_CHECK(sin_f32_bits(0x57000000u), ==, 0xbd84e24au);
-    RC_CHECK(sin_f32_bits(0x57800000u), ==, 0x3e049a9bu);
-    RC_CHECK(sin_f32_bits(0x501502f9u), ==, 0xbef99a64u);
-    RC_CHECK(sin_f32_bits(0x7149f2cau), ==, 0xbf4a89b0u);
-    RC_CHECK(sin_f32_bits(0x7f7fffffu), ==, 0xbf0599b3u);
-    RC_CHECK(sin_f32_bits(0xff7fffffu), ==, 0x3f0599b3u);
-}
-
-
-RC_TEST(math_sin, f64_bits)
-{
-    // Zeros keep their sign, and below 2^-26 (sin), 2^-27 sqrt(2) (cos) and 2^-27 (tan) we skip
-    // the kernel
-    RC_CHECK(sin_f64_bits(0x0000000000000000ull), ==, 0x0000000000000000ull);
-    RC_CHECK(sin_f64_bits(0x8000000000000000ull), ==, 0x8000000000000000ull);
-    RC_CHECK(sin_f64_bits(0x0000000000000001ull), ==, 0x0000000000000001ull);
-    RC_CHECK(sin_f64_bits(0x3e4fffffffffffffull), ==, 0x3e4fffffffffffffull);
-    RC_CHECK(sin_f64_bits(0x3e50000000000000ull), ==, 0x3e50000000000000ull);
-    RC_CHECK(sin_f64_bits(0x3e46a09dffffffffull), ==, 0x3e46a09dffffffffull);
-    RC_CHECK(sin_f64_bits(0x3e46a09e00000000ull), ==, 0x3e46a09e00000000ull);
-    RC_CHECK(sin_f64_bits(0x3e3fffffffffffffull), ==, 0x3e3fffffffffffffull);
-    RC_CHECK(sin_f64_bits(0x3e40000000000000ull), ==, 0x3e40000000000000ull);
-
-    // Within pi/4, including either side of 0.6744, where the tan kernel changes formula
-    RC_CHECK(sin_f64_bits(0x3fe0000000000000ull), ==, 0x3fdeaee8744b05f0ull);
-    RC_CHECK(sin_f64_bits(0x3ff0000000000000ull), ==, 0x3feaed548f090ceeull);
-    RC_CHECK(sin_f64_bits(0x3fe6666666666666ull), ==, 0x3fe49d6e694619b8ull);
-    RC_CHECK(sin_f64_bits(0xbfe6666666666666ull), ==, 0xbfe49d6e694619b8ull);
-    RC_CHECK(sin_f64_bits(0x3fe921fb54442d18ull), ==, 0x3fe6a09e667f3bccull);
-    RC_CHECK(sin_f64_bits(0x3fe921fc00000000ull), ==, 0x3fe6a09edfee58baull);
-
-    // Multiples of pi/2 up to 2pi, which need the medium reduction (pi/2 three rounds of it), and
-    // the one-step reductions between them
-    RC_CHECK(sin_f64_bits(0x3ff921fb54442d18ull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(sin_f64_bits(0xbff921fb54442d18ull), ==, 0xbff0000000000000ull);
-    RC_CHECK(sin_f64_bits(0x400921fb54442d18ull), ==, 0x3ca1a62633145c07ull);
-    RC_CHECK(sin_f64_bits(0x4012d97c7f3321d2ull), ==, 0xbff0000000000000ull);
-    RC_CHECK(sin_f64_bits(0x401921fb54442d18ull), ==, 0xbcb1a62633145c07ull);
-    RC_CHECK(sin_f64_bits(0x4000000000000000ull), ==, 0x3fed18f6ead1b446ull);
-    RC_CHECK(sin_f64_bits(0x4008000000000000ull), ==, 0x3fc210386db6d55bull);
-    RC_CHECK(sin_f64_bits(0x4014000000000000ull), ==, 0xbfeeaf81f5e09933ull);
-    RC_CHECK(sin_f64_bits(0x401c000000000000ull), ==, 0x3fe50608c26d0a08ull);
-    RC_CHECK(sin_f64_bits(0xc01c000000000000ull), ==, 0xbfe50608c26d0a08ull);
-
-    // The medium reduction, up to just under 2^20 pi/2
-    RC_CHECK(sin_f64_bits(0x4024000000000000ull), ==, 0xbfe1689ef5f34f52ull);
-    RC_CHECK(sin_f64_bits(0x40f86a0000000000ull), ==, 0x3fa24daa9c527e96ull);
-    RC_CHECK(sin_f64_bits(0xc0fe240c9fbe76c9ull), ==, 0x3feff50e60ab53f9ull);
-    RC_CHECK(sin_f64_bits(0x413921faffffffffull), ==, 0xbfd4b02e5c25af00ull);
-
-    // The large reduction, including the double closest to a multiple of pi/2, one that brings in
-    // more of 2/pi, one rounded up from the fraction, ones whose quadrant bits sit in the chunks,
-    // and one whose remainder spills into a second chunk
-    RC_CHECK(sin_f64_bits(0x413921fb00000000ull), ==, 0xbfd4b02e5be91e9eull);
-    RC_CHECK(sin_f64_bits(0x41413db55a439968ull), ==, 0x3fed2bdce3b7cbbbull);
-    RC_CHECK(sin_f64_bits(0x4480f0cf064dd592ull), ==, 0xbfeb453ab76bf397ull);
-    RC_CHECK(sin_f64_bits(0x46293e5939a08ceaull), ==, 0x3f831c608f107767ull);
-    RC_CHECK(sin_f64_bits(0x7506ac5b262ca1ffull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(sin_f64_bits(0x69efe333b266f103ull), ==, 0xbfed223d4db96e8eull);
-    RC_CHECK(sin_f64_bits(0x6f525307d4673f9full), ==, 0xbfeab07a58c25de8ull);
-    RC_CHECK(sin_f64_bits(0x7bf741acd442110dull), ==, 0x3f9e236aeafc1375ull);
-    RC_CHECK(sin_f64_bits(0x7d6ce98dd00116fcull), ==, 0x3fef466aa1c97d5eull);
-    RC_CHECK(sin_f64_bits(0x7fefffffffffffffull), ==, 0x3f7452fc98b34e97ull);
-    RC_CHECK(sin_f64_bits(0xffefffffffffffffull), ==, 0xbf7452fc98b34e97ull);
-}
-
-
-// Infinities and NaN all give NaN
-RC_TEST(math_sin, not_finite)
-{
-    float values_f32[] = {
-        rc_sin_f32(rc_bitcast_u32(0x7f800000u)),
-        rc_sin_f32(rc_bitcast_u32(0xff800000u)),
-        rc_sin_f32(rc_bitcast_u32(0x7fc00000u)),
-        rc_sin_f32(rc_bitcast_u32(0xffc00001u))
-    };
-    double values_f64[] = {
-        rc_sin_f64(rc_bitcast_u64(0x7ff0000000000000ull)),
-        rc_sin_f64(rc_bitcast_u64(0xfff0000000000000ull)),
-        rc_sin_f64(rc_bitcast_u64(0x7ff8000000000000ull)),
-        rc_sin_f64(rc_bitcast_u64(0xfff8000000000001ull))
-    };
-
-    for (uint32_t i = 0; i < RC_COUNT(values_f32); i++) {
-        RC_CHECK_FALSE(rc_is_finite_f32(values_f32[i]));
-        RC_CHECK_TRUE(values_f32[i] != values_f32[i]);
-    }
-
-    for (uint32_t i = 0; i < RC_COUNT(values_f64); i++) {
-        RC_CHECK_FALSE(rc_is_finite_f64(values_f64[i]));
-        RC_CHECK_TRUE(values_f64[i] != values_f64[i]);
+        RC_CHECK(rc_abs_f64(rc_sin_f64(odd)), ==, 1.0);
+        RC_CHECK(rc_abs_f64(rc_sin_f64(even)), <, 0x1p-40);
+        RC_CHECK(rc_abs_f32(rc_sin_f32((float)odd)), ==, 1.0f);
+        RC_CHECK(rc_abs_f32(rc_sin_f32((float)even)), <, 0x1p-15f);
     }
 }
 
-// ---- cos ----
 
-RC_TEST(math_cos, values)
+RC_TEST(math_sin, odd)
 {
-    RC_CHECK(rc_cos_f32(0.0f), ==, 1.0f);
-    RC_CHECK(rc_cos_f64(0.0), ==, 1.0);
-    RC_CHECK(rc_cos_f32(-0.0f), ==, 1.0f);
-    RC_CHECK(rc_cos_f64(-0.0), ==, 1.0);
-
-    // Tiny angles have a cosine of exactly 1
-    RC_CHECK(rc_cos_f32(1e-5f), ==, 1.0f);
-    RC_CHECK(rc_cos_f64(1e-10), ==, 1.0);
-
-    // cos(pi/3) is a half, give or take the rounding of pi/3
-    RC_CHECK_TRUE(rc_abs_f64(rc_cos_f64(1.0471975511965976) - 0.5) < 1e-15);
-    RC_CHECK_TRUE(rc_abs_f32(rc_cos_f32(1.0471976f) - 0.5f) < 1e-7f);
-
-    // Even, exactly
-    RC_CHECK(rc_cos_f32(-2.5f), ==, rc_cos_f32(2.5f));
-    RC_CHECK(rc_cos_f64(-2.5), ==, rc_cos_f64(2.5));
-    RC_CHECK(rc_cos_f64(-1e30), ==, rc_cos_f64(1e30));
-
-    // The dispatcher picks the width of its argument
-    RC_CHECK_TRUE(IS_TYPE(rc_cos(1.0f), float));
-    RC_CHECK_TRUE(IS_TYPE(rc_cos(1.0), double));
-    RC_CHECK(rc_cos(2.5f), ==, rc_cos_f32(2.5f));
-    RC_CHECK(rc_cos(2.5), ==, rc_cos_f64(2.5));
+    RC_CHECK_TRUE(trig_is_odd_f64(rc_sin_f64));
+    RC_CHECK_TRUE(trig_is_odd_f32(rc_sin_f32));
 }
 
 
-RC_TEST(math_cos, f32_bits)
+RC_TEST(math_sin, golden_f64)
 {
-    // Zeros keep their sign, and below 2^-12 sin and tan give x back and cos 1
-    RC_CHECK(cos_f32_bits(0x00000000u), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x80000000u), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x00000001u), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x80800000u), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x397fffffu), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x39800000u), ==, 0x3f800000u);
+    for (uint32_t i = 0; i < RC_COUNT(trig_goldens_f64); i++) {
+        trig_golden_f64 golden = trig_goldens_f64[i];
 
-    // Within pi/4, and ordinary values
-    RC_CHECK(cos_f32_bits(0x3f000000u), ==, 0x3f60a940u);
-    RC_CHECK(cos_f32_bits(0x3f800000u), ==, 0x3f0a5140u);
-    RC_CHECK(cos_f32_bits(0xbf800000u), ==, 0x3f0a5140u);
-    RC_CHECK(cos_f32_bits(0x3f490fdau), ==, 0x3f3504f4u);
-    RC_CHECK(cos_f32_bits(0x3f490fdbu), ==, 0x3f3504f3u);
-
-    // Up to 9pi/4, reduced right there: near pi/2, pi, 3pi/2 and 2pi, and between
-    RC_CHECK(cos_f32_bits(0x3fc90fdbu), ==, 0xb33bbd2eu);
-    RC_CHECK(cos_f32_bits(0xbfc90fdbu), ==, 0xb33bbd2eu);
-    RC_CHECK(cos_f32_bits(0x40000000u), ==, 0xbed51133u);
-    RC_CHECK(cos_f32_bits(0x40490fdbu), ==, 0xbf800000u);
-    RC_CHECK(cos_f32_bits(0xc0400000u), ==, 0xbf7d7026u);
-    RC_CHECK(cos_f32_bits(0x4096cbe4u), ==, 0x324cde2eu);
-    RC_CHECK(cos_f32_bits(0x40a00000u), ==, 0x3e913c2cu);
-    RC_CHECK(cos_f32_bits(0xc0a00000u), ==, 0x3e913c2cu);
-    RC_CHECK(cos_f32_bits(0x40c90fdbu), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x40c00000u), ==, 0x3f75cdb8u);
-    RC_CHECK(cos_f32_bits(0xc0c00000u), ==, 0x3f75cdb8u);
-
-    // The medium reduction, up to just under 2^28 pi/2
-    RC_CHECK(cos_f32_bits(0x41200000u), ==, 0xbf56cd64u);
-    RC_CHECK(cos_f32_bits(0x42c80000u), ==, 0x3f5cc0eeu);
-    RC_CHECK(cos_f32_bits(0xc47a0000u), ==, 0x3f0ff813u);
-    RC_CHECK(cos_f32_bits(0x4640e6b7u), ==, 0x3f35eb2du);
-    RC_CHECK(cos_f32_bits(0x4dc90fdau), ==, 0x3e1d1cf0u);
-
-    // The large reduction, including one that brings in more of 2/pi, one rounded up from the
-    // fraction, and ones whose quadrant bits sit in the chunks
-    RC_CHECK(cos_f32_bits(0x4dc90fdbu), ==, 0x3f2c42b6u);
-    RC_CHECK(cos_f32_bits(0x4dc943edu), ==, 0x3f800000u);
-    RC_CHECK(cos_f32_bits(0x4dc90fdcu), ==, 0x3f78211eu);
-    RC_CHECK(cos_f32_bits(0x57000000u), ==, 0xbf7f75e6u);
-    RC_CHECK(cos_f32_bits(0x57800000u), ==, 0x3f7dd82fu);
-    RC_CHECK(cos_f32_bits(0x501502f9u), ==, 0x3f5f84c5u);
-    RC_CHECK(cos_f32_bits(0x7149f2cau), ==, 0xbf1c9222u);
-    RC_CHECK(cos_f32_bits(0x7f7fffffu), ==, 0x3f5a5f96u);
-    RC_CHECK(cos_f32_bits(0xff7fffffu), ==, 0x3f5a5f96u);
-}
-
-
-RC_TEST(math_cos, f64_bits)
-{
-    // Zeros keep their sign, and below 2^-26 (sin), 2^-27 sqrt(2) (cos) and 2^-27 (tan) we skip
-    // the kernel
-    RC_CHECK(cos_f64_bits(0x0000000000000000ull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x8000000000000000ull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x0000000000000001ull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x3e4fffffffffffffull), ==, 0x3fefffffffffffffull);
-    RC_CHECK(cos_f64_bits(0x3e50000000000000ull), ==, 0x3fefffffffffffffull);
-    RC_CHECK(cos_f64_bits(0x3e46a09dffffffffull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x3e46a09e00000000ull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x3e3fffffffffffffull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x3e40000000000000ull), ==, 0x3ff0000000000000ull);
-
-    // Within pi/4, including either side of 0.6744, where the tan kernel changes formula
-    RC_CHECK(cos_f64_bits(0x3fe0000000000000ull), ==, 0x3fec1528065b7d50ull);
-    RC_CHECK(cos_f64_bits(0x3ff0000000000000ull), ==, 0x3fe14a280fb5068cull);
-    RC_CHECK(cos_f64_bits(0x3fe6666666666666ull), ==, 0x3fe87996529f9d93ull);
-    RC_CHECK(cos_f64_bits(0xbfe6666666666666ull), ==, 0x3fe87996529f9d93ull);
-    RC_CHECK(cos_f64_bits(0x3fe921fb54442d18ull), ==, 0x3fe6a09e667f3bcdull);
-    RC_CHECK(cos_f64_bits(0x3fe921fc00000000ull), ==, 0x3fe6a09ded101c54ull);
-
-    // Multiples of pi/2 up to 2pi, which need the medium reduction (pi/2 three rounds of it), and
-    // the one-step reductions between them
-    RC_CHECK(cos_f64_bits(0x3ff921fb54442d18ull), ==, 0x3c91a62633145c07ull);
-    RC_CHECK(cos_f64_bits(0xbff921fb54442d18ull), ==, 0x3c91a62633145c07ull);
-    RC_CHECK(cos_f64_bits(0x400921fb54442d18ull), ==, 0xbff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x4012d97c7f3321d2ull), ==, 0xbcaa79394c9e8a0aull);
-    RC_CHECK(cos_f64_bits(0x401921fb54442d18ull), ==, 0x3ff0000000000000ull);
-    RC_CHECK(cos_f64_bits(0x4000000000000000ull), ==, 0xbfdaa22657537205ull);
-    RC_CHECK(cos_f64_bits(0x4008000000000000ull), ==, 0xbfefae04be85e5d2ull);
-    RC_CHECK(cos_f64_bits(0x4014000000000000ull), ==, 0x3fd22785706b4ad9ull);
-    RC_CHECK(cos_f64_bits(0x401c000000000000ull), ==, 0x3fe81ff79ed92017ull);
-    RC_CHECK(cos_f64_bits(0xc01c000000000000ull), ==, 0x3fe81ff79ed92017ull);
-
-    // The medium reduction, up to just under 2^20 pi/2
-    RC_CHECK(cos_f64_bits(0x4024000000000000ull), ==, 0xbfead9ac890c6b1full);
-    RC_CHECK(cos_f64_bits(0x40f86a0000000000ull), ==, 0xbfeffac3841b3da7ull);
-    RC_CHECK(cos_f64_bits(0xc0fe240c9fbe76c9ull), ==, 0x3faa74d27c41b22aull);
-    RC_CHECK(cos_f64_bits(0x413921faffffffffull), ==, 0x3fee483125700ac3ull);
-
-    // The large reduction, including the double closest to a multiple of pi/2, one that brings in
-    // more of 2/pi, one rounded up from the fraction, ones whose quadrant bits sit in the chunks,
-    // and one whose remainder spills into a second chunk
-    RC_CHECK(cos_f64_bits(0x413921fb00000000ull), ==, 0x3fee4831257a62daull);
-    RC_CHECK(cos_f64_bits(0x41413db55a439968ull), ==, 0xbfda4ef33e8901f6ull);
-    RC_CHECK(cos_f64_bits(0x4480f0cf064dd592ull), ==, 0x3fe0be2cef01c8f4ull);
-    RC_CHECK(cos_f64_bits(0x46293e5939a08ceaull), ==, 0xbfefffa4b11f1b45ull);
-    RC_CHECK(cos_f64_bits(0x7506ac5b262ca1ffull), ==, 0xbc214ae72e6ba22full);
-    RC_CHECK(cos_f64_bits(0x69efe333b266f103ull), ==, 0xbfda79788ed302d8ull);
-    RC_CHECK(cos_f64_bits(0x6f525307d4673f9full), ==, 0xbfe1a7867e40ef8eull);
-    RC_CHECK(cos_f64_bits(0x7bf741acd442110dull), ==, 0xbfeffc737ba997deull);
-    RC_CHECK(cos_f64_bits(0x7d6ce98dd00116fcull), ==, 0x3fcb174f8431ba60ull);
-    RC_CHECK(cos_f64_bits(0x7fefffffffffffffull), ==, 0xbfefffe62ecfab75ull);
-    RC_CHECK(cos_f64_bits(0xffefffffffffffffull), ==, 0xbfefffe62ecfab75ull);
-}
-
-
-// Infinities and NaN all give NaN
-RC_TEST(math_cos, not_finite)
-{
-    float values_f32[] = {
-        rc_cos_f32(rc_bitcast_u32(0x7f800000u)),
-        rc_cos_f32(rc_bitcast_u32(0xff800000u)),
-        rc_cos_f32(rc_bitcast_u32(0x7fc00000u)),
-        rc_cos_f32(rc_bitcast_u32(0xffc00001u))
-    };
-    double values_f64[] = {
-        rc_cos_f64(rc_bitcast_u64(0x7ff0000000000000ull)),
-        rc_cos_f64(rc_bitcast_u64(0xfff0000000000000ull)),
-        rc_cos_f64(rc_bitcast_u64(0x7ff8000000000000ull)),
-        rc_cos_f64(rc_bitcast_u64(0xfff8000000000001ull))
-    };
-
-    for (uint32_t i = 0; i < RC_COUNT(values_f32); i++) {
-        RC_CHECK_FALSE(rc_is_finite_f32(values_f32[i]));
-        RC_CHECK_TRUE(values_f32[i] != values_f32[i]);
-    }
-
-    for (uint32_t i = 0; i < RC_COUNT(values_f64); i++) {
-        RC_CHECK_FALSE(rc_is_finite_f64(values_f64[i]));
-        RC_CHECK_TRUE(values_f64[i] != values_f64[i]);
+        RC_CHECK(rc_bitcast_f64(rc_sin_f64(rc_bitcast_u64(golden.x))), ==, golden.sine);
     }
 }
 
-// ---- tan ----
 
-RC_TEST(math_tan, values)
+RC_TEST(math_sin, golden_f32)
 {
-    RC_CHECK(rc_tan_f32(0.0f), ==, 0.0f);
-    RC_CHECK(rc_tan_f64(0.0), ==, 0.0);
-    RC_CHECK(rc_bitcast_f32(rc_tan_f32(-0.0f)), ==, 0x80000000u);
+    for (uint32_t i = 0; i < RC_COUNT(trig_goldens_f32); i++) {
+        trig_golden_f32 golden = trig_goldens_f32[i];
+
+        RC_CHECK(rc_bitcast_f32(rc_sin_f32(rc_bitcast_u32(golden.x))), ==, golden.sine);
+    }
+}
+
+
+RC_TEST(math_sin, picks_the_type)
+{
+    RC_CHECK(rc_sin(0.5f), ==, rc_sin_f32(0.5f));
+    RC_CHECK(rc_sin(0.5), ==, rc_sin_f64(0.5));
+}
+
+// ---- cosine ----
+
+RC_TEST(math_cos, zeros_give_one)
+{
+    RC_CHECK(rc_bitcast_f64(rc_cos_f64(0.0)), ==, 0x3ff0000000000000ull);
+    RC_CHECK(rc_bitcast_f64(rc_cos_f64(-0.0)), ==, 0x3ff0000000000000ull);
+    RC_CHECK(rc_bitcast_f32(rc_cos_f32(0.0f)), ==, 0x3f800000u);
+    RC_CHECK(rc_bitcast_f32(rc_cos_f32(-0.0f)), ==, 0x3f800000u);
+}
+
+
+RC_TEST(math_cos, infinity_and_nan)
+{
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_cos_f64(rc_bitcast_u64(0x7ff0000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_cos_f64(rc_bitcast_u64(0xfff0000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_cos_f64(rc_bitcast_u64(0x7ff8000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_cos_f32(rc_bitcast_u32(0x7f800000u))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_cos_f32(rc_bitcast_u32(0xff800000u))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_cos_f32(rc_bitcast_u32(0x7fc00000u))));
+}
+
+
+RC_TEST(math_cos, readable_values)
+{
+    RC_CHECK(rc_abs_f64(rc_cos_f64(1.0471975511965979) - 0.5), <, 1e-15);
+    RC_CHECK(rc_abs_f64(rc_cos_f64(1.0) - 0.5403023058681398), <, 1e-15);
+    RC_CHECK(rc_abs_f64(rc_cos_f64(4.0) + 0.6536436208636119), <, 1e-15);
+    RC_CHECK(rc_abs_f32(rc_cos_f32(1.0471976f) - 0.5f), <, 1e-7f);
+    RC_CHECK(rc_abs_f32(rc_cos_f32(1.0f) - 0.54030231f), <, 1e-7f);
+
+    // pi and 2 pi are close enough that the cosine rounds to -1 and 1
+    RC_CHECK(rc_cos_f64(3.141592653589793), ==, -1.0);
+    RC_CHECK(rc_cos_f64(6.283185307179586), ==, 1.0);
+    RC_CHECK(rc_cos_f32(3.14159265f), ==, -1.0f);
+
+    // The cosine of pi/2's double is the 6.1232e-17 it falls short by
+    RC_CHECK(rc_cos_f64(1.5707963267948966), ==, 6.123233995736766e-17);
+}
+
+
+RC_TEST(math_cos, small_arguments_give_one)
+{
+    RC_CHECK(rc_cos_f64(1e-9), ==, 1.0);
+    RC_CHECK(rc_cos_f64(rc_bitcast_u64(0x0000000000000001ull)), ==, 1.0);
+    RC_CHECK(rc_cos_f32(1e-4f), ==, 1.0f);
+    RC_CHECK(rc_cos_f32(rc_bitcast_u32(0x00000001u)), ==, 1.0f);
+}
+
+
+RC_TEST(math_cos, near_multiples_of_half_pi)
+{
+    // Near an odd multiple the cosine is tiny, and near an even one it rounds to +-1
+    for (uint32_t k = 1; k <= 200; k += 2) {
+        double odd = trig_half_pi_times(k);
+        double even = trig_half_pi_times(k + 1);
+
+        RC_CHECK(rc_abs_f64(rc_cos_f64(odd)), <, 0x1p-40);
+        RC_CHECK(rc_abs_f64(rc_cos_f64(even)), ==, 1.0);
+        RC_CHECK(rc_abs_f32(rc_cos_f32((float)odd)), <, 0x1p-15f);
+        RC_CHECK(rc_abs_f32(rc_cos_f32((float)even)), ==, 1.0f);
+    }
+}
+
+
+RC_TEST(math_cos, even)
+{
+    for (uint32_t i = 0; i < 4000; i++) {
+        double x = (i & 1) != 0 ? trig_spread_f64(i) : trig_angle_f64(i);
+        float x_f32 = (i & 1) != 0 ? trig_spread_f32(i) : (float)trig_angle_f64(i);
+
+        RC_CHECK(rc_bitcast_f64(rc_cos_f64(-x)), ==, rc_bitcast_f64(rc_cos_f64(x)));
+        RC_CHECK(rc_bitcast_f32(rc_cos_f32(-x_f32)), ==, rc_bitcast_f32(rc_cos_f32(x_f32)));
+    }
+}
+
+
+RC_TEST(math_cos, golden_f64)
+{
+    for (uint32_t i = 0; i < RC_COUNT(trig_goldens_f64); i++) {
+        trig_golden_f64 golden = trig_goldens_f64[i];
+
+        RC_CHECK(rc_bitcast_f64(rc_cos_f64(rc_bitcast_u64(golden.x))), ==, golden.cosine);
+    }
+}
+
+
+RC_TEST(math_cos, golden_f32)
+{
+    for (uint32_t i = 0; i < RC_COUNT(trig_goldens_f32); i++) {
+        trig_golden_f32 golden = trig_goldens_f32[i];
+
+        RC_CHECK(rc_bitcast_f32(rc_cos_f32(rc_bitcast_u32(golden.x))), ==, golden.cosine);
+    }
+}
+
+
+RC_TEST(math_cos, picks_the_type)
+{
+    RC_CHECK(rc_cos(0.5f), ==, rc_cos_f32(0.5f));
+    RC_CHECK(rc_cos(0.5), ==, rc_cos_f64(0.5));
+}
+
+// ---- tangent ----
+
+RC_TEST(math_tan, zeros_keep_their_sign)
+{
+    RC_CHECK(rc_bitcast_f64(rc_tan_f64(0.0)), ==, 0x0000000000000000ull);
     RC_CHECK(rc_bitcast_f64(rc_tan_f64(-0.0)), ==, 0x8000000000000000ull);
+    RC_CHECK(rc_bitcast_f32(rc_tan_f32(0.0f)), ==, 0x00000000u);
+    RC_CHECK(rc_bitcast_f32(rc_tan_f32(-0.0f)), ==, 0x80000000u);
+}
 
-    // Tiny angles are their own tangent
-    RC_CHECK(rc_tan_f32(1e-5f), ==, 1e-5f);
+
+RC_TEST(math_tan, infinity_and_nan)
+{
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_tan_f64(rc_bitcast_u64(0x7ff0000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_tan_f64(rc_bitcast_u64(0xfff0000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f64(rc_tan_f64(rc_bitcast_u64(0x7ff8000000000000ull))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_tan_f32(rc_bitcast_u32(0x7f800000u))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_tan_f32(rc_bitcast_u32(0xff800000u))));
+    RC_CHECK_TRUE(trig_is_nan_f32(rc_tan_f32(rc_bitcast_u32(0x7fc00000u))));
+}
+
+
+RC_TEST(math_tan, readable_values)
+{
+    RC_CHECK(rc_abs_f64(rc_tan_f64(0.4636476090008061) - 0.5), <, 1e-15);
+    RC_CHECK(rc_abs_f64(rc_tan_f64(1.0) - 1.5574077246549023), <, 1e-15);
+    RC_CHECK(rc_abs_f64(rc_tan_f64(2.0) + 2.185039863261519), <, 1e-15);
+    RC_CHECK(rc_abs_f32(rc_tan_f32(1.0f) - 1.5574077f), <, 2e-7f);
+
+    // pi/4's double is a hair short, so its tangent is the double just below 1
+    RC_CHECK(rc_tan_f64(0.7853981633974483), ==, 1.0 - 0x1p-53);
+
+    // Just short of pi/2 the tangent is huge, and just past it hugely negative
+    RC_CHECK(rc_tan_f64(1.5707963267948966), ==, 1.633123935319537e16);
+    RC_CHECK(rc_tan_f32(1.5707962f), ==, 13245402.0f);
+    RC_CHECK(rc_tan_f32(1.5707964f), ==, -22877332.0f);
+}
+
+
+RC_TEST(math_tan, small_arguments_are_themselves)
+{
     RC_CHECK(rc_tan_f64(1e-10), ==, 1e-10);
-
-    // tan(pi/4) is 1, give or take the rounding of pi/4
-    RC_CHECK_TRUE(rc_abs_f64(rc_tan_f64(0.78539816339744831) - 1.0) < 1e-15);
-    RC_CHECK_TRUE(rc_abs_f32(rc_tan_f32(0.78539819f) - 1.0f) < 1e-6f);
-
-    // Odd, exactly
-    RC_CHECK(rc_tan_f32(-2.5f), ==, -rc_tan_f32(2.5f));
-    RC_CHECK(rc_tan_f64(-2.5), ==, -rc_tan_f64(2.5));
-    RC_CHECK(rc_tan_f64(-1e30), ==, -rc_tan_f64(1e30));
-
-    // The dispatcher picks the width of its argument
-    RC_CHECK_TRUE(IS_TYPE(rc_tan(1.0f), float));
-    RC_CHECK_TRUE(IS_TYPE(rc_tan(1.0), double));
-    RC_CHECK(rc_tan(2.5f), ==, rc_tan_f32(2.5f));
-    RC_CHECK(rc_tan(2.5), ==, rc_tan_f64(2.5));
+    RC_CHECK(rc_tan_f64(-1e-300), ==, -1e-300);
+    RC_CHECK(rc_tan_f64(rc_bitcast_u64(0x0000000000000001ull)), ==, rc_bitcast_u64(0x0000000000000001ull));
+    RC_CHECK(rc_tan_f32(1e-5f), ==, 1e-5f);
+    RC_CHECK(rc_tan_f32(rc_bitcast_u32(0x80000001u)), ==, rc_bitcast_u32(0x80000001u));
 }
 
 
-RC_TEST(math_tan, f32_bits)
+RC_TEST(math_tan, near_multiples_of_half_pi)
 {
-    // Zeros keep their sign, and below 2^-12 sin and tan give x back and cos 1
-    RC_CHECK(tan_f32_bits(0x00000000u), ==, 0x00000000u);
-    RC_CHECK(tan_f32_bits(0x80000000u), ==, 0x80000000u);
-    RC_CHECK(tan_f32_bits(0x00000001u), ==, 0x00000001u);
-    RC_CHECK(tan_f32_bits(0x80800000u), ==, 0x80800000u);
-    RC_CHECK(tan_f32_bits(0x397fffffu), ==, 0x397fffffu);
-    RC_CHECK(tan_f32_bits(0x39800000u), ==, 0x39800000u);
+    // Near an odd multiple the tangent is huge, and near an even one tiny
+    for (uint32_t k = 1; k <= 200; k += 2) {
+        double odd = trig_half_pi_times(k);
+        double even = trig_half_pi_times(k + 1);
 
-    // Within pi/4, and ordinary values
-    RC_CHECK(tan_f32_bits(0x3f000000u), ==, 0x3f0bda7bu);
-    RC_CHECK(tan_f32_bits(0x3f800000u), ==, 0x3fc75923u);
-    RC_CHECK(tan_f32_bits(0xbf800000u), ==, 0xbfc75923u);
-    RC_CHECK(tan_f32_bits(0x3f490fdau), ==, 0x3f7ffffeu);
-    RC_CHECK(tan_f32_bits(0x3f490fdbu), ==, 0x3f800000u);
-
-    // Up to 9pi/4, reduced right there: near pi/2, pi, 3pi/2 and 2pi, and between
-    RC_CHECK(tan_f32_bits(0x3fc90fdbu), ==, 0xcbae8a4au);
-    RC_CHECK(tan_f32_bits(0xbfc90fdbu), ==, 0x4bae8a4au);
-    RC_CHECK(tan_f32_bits(0x40000000u), ==, 0xc00bd7b1u);
-    RC_CHECK(tan_f32_bits(0x40490fdbu), ==, 0x33bbbd2fu);
-    RC_CHECK(tan_f32_bits(0xc0400000u), ==, 0x3e11f7b8u);
-    RC_CHECK(tan_f32_bits(0x4096cbe4u), ==, 0xcc9ff26du);
-    RC_CHECK(tan_f32_bits(0x40a00000u), ==, 0xc0585a5bu);
-    RC_CHECK(tan_f32_bits(0xc0a00000u), ==, 0x40585a5bu);
-    RC_CHECK(tan_f32_bits(0x40c90fdbu), ==, 0x343bbd2fu);
-    RC_CHECK(tan_f32_bits(0x40c00000u), ==, 0xbe94fec4u);
-    RC_CHECK(tan_f32_bits(0xc0c00000u), ==, 0x3e94fec4u);
-
-    // The medium reduction, up to just under 2^28 pi/2
-    RC_CHECK(tan_f32_bits(0x41200000u), ==, 0x3f25fafau);
-    RC_CHECK(tan_f32_bits(0x42c80000u), ==, 0xbf1653a7u);
-    RC_CHECK(tan_f32_bits(0xc47a0000u), ==, 0xbfbc3395u);
-    RC_CHECK(tan_f32_bits(0x4640e6b7u), ==, 0xbf7d766du);
-    RC_CHECK(tan_f32_bits(0x4dc90fdau), ==, 0xc0ce17fdu);
-
-    // The large reduction, including one that brings in more of 2/pi, one rounded up from the
-    // fraction, and ones whose quadrant bits sit in the chunks
-    RC_CHECK(tan_f32_bits(0x4dc90fdbu), ==, 0xbf8cb742u);
-    RC_CHECK(tan_f32_bits(0x4dc943edu), ==, 0xb63d5d7fu);
-    RC_CHECK(tan_f32_bits(0x4dc90fdcu), ==, 0xbe81fa36u);
-    RC_CHECK(tan_f32_bits(0x57000000u), ==, 0x3d852a20u);
-    RC_CHECK(tan_f32_bits(0x57800000u), ==, 0x3e05baddu);
-    RC_CHECK(tan_f32_bits(0x501502f9u), ==, 0xbf0ef000u);
-    RC_CHECK(tan_f32_bits(0x7149f2cau), ==, 0x3fa5943bu);
-    RC_CHECK(tan_f32_bits(0x7f7fffffu), ==, 0xbf1c9ecau);
-    RC_CHECK(tan_f32_bits(0xff7fffffu), ==, 0x3f1c9ecau);
-}
-
-
-RC_TEST(math_tan, f64_bits)
-{
-    // Zeros keep their sign, and below 2^-26 (sin), 2^-27 sqrt(2) (cos) and 2^-27 (tan) we skip
-    // the kernel
-    RC_CHECK(tan_f64_bits(0x0000000000000000ull), ==, 0x0000000000000000ull);
-    RC_CHECK(tan_f64_bits(0x8000000000000000ull), ==, 0x8000000000000000ull);
-    RC_CHECK(tan_f64_bits(0x0000000000000001ull), ==, 0x0000000000000001ull);
-    RC_CHECK(tan_f64_bits(0x3e4fffffffffffffull), ==, 0x3e50000000000000ull);
-    RC_CHECK(tan_f64_bits(0x3e50000000000000ull), ==, 0x3e50000000000000ull);
-    RC_CHECK(tan_f64_bits(0x3e46a09dffffffffull), ==, 0x3e46a09dffffffffull);
-    RC_CHECK(tan_f64_bits(0x3e46a09e00000000ull), ==, 0x3e46a09e00000000ull);
-    RC_CHECK(tan_f64_bits(0x3e3fffffffffffffull), ==, 0x3e3fffffffffffffull);
-    RC_CHECK(tan_f64_bits(0x3e40000000000000ull), ==, 0x3e40000000000000ull);
-
-    // Within pi/4, including either side of 0.6744, where the tan kernel changes formula
-    RC_CHECK(tan_f64_bits(0x3fe0000000000000ull), ==, 0x3fe17b4f5bf3474aull);
-    RC_CHECK(tan_f64_bits(0x3ff0000000000000ull), ==, 0x3ff8eb245cbee3a6ull);
-    RC_CHECK(tan_f64_bits(0x3fe6666666666666ull), ==, 0x3feaf406c2fc78aeull);
-    RC_CHECK(tan_f64_bits(0xbfe6666666666666ull), ==, 0xbfeaf406c2fc78aeull);
-    RC_CHECK(tan_f64_bits(0x3fe921fb54442d18ull), ==, 0x3fefffffffffffffull);
-    RC_CHECK(tan_f64_bits(0x3fe921fc00000000ull), ==, 0x3ff00000abbbd681ull);
-
-    // Multiples of pi/2 up to 2pi, which need the medium reduction (pi/2 three rounds of it), and
-    // the one-step reductions between them
-    RC_CHECK(tan_f64_bits(0x3ff921fb54442d18ull), ==, 0x434d02967c31cdb5ull);
-    RC_CHECK(tan_f64_bits(0xbff921fb54442d18ull), ==, 0xc34d02967c31cdb5ull);
-    RC_CHECK(tan_f64_bits(0x400921fb54442d18ull), ==, 0xbca1a62633145c07ull);
-    RC_CHECK(tan_f64_bits(0x4012d97c7f3321d2ull), ==, 0x4333570efd768923ull);
-    RC_CHECK(tan_f64_bits(0x401921fb54442d18ull), ==, 0xbcb1a62633145c07ull);
-    RC_CHECK(tan_f64_bits(0x4000000000000000ull), ==, 0xc0017af62e0950f8ull);
-    RC_CHECK(tan_f64_bits(0x4008000000000000ull), ==, 0xbfc23ef71254b86full);
-    RC_CHECK(tan_f64_bits(0x4014000000000000ull), ==, 0xc00b0b4b739bbb07ull);
-    RC_CHECK(tan_f64_bits(0x401c000000000000ull), ==, 0x3febe2e6e13eea78ull);
-    RC_CHECK(tan_f64_bits(0xc01c000000000000ull), ==, 0xbfebe2e6e13eea78ull);
-
-    // The medium reduction, up to just under 2^20 pi/2
-    RC_CHECK(tan_f64_bits(0x4024000000000000ull), ==, 0x3fe4bf5f34be3782ull);
-    RC_CHECK(tan_f64_bits(0x40f86a0000000000ull), ==, 0xbfa250a9d503313dull);
-    RC_CHECK(tan_f64_bits(0xc0fe240c9fbe76c9ull), ==, 0x403353a85fe8d6d5ull);
-    RC_CHECK(tan_f64_bits(0x413921faffffffffull), ==, 0xbfd5dca6bd5e8435ull);
-
-    // The large reduction, including the double closest to a multiple of pi/2, one that brings in
-    // more of 2/pi, one rounded up from the fraction, ones whose quadrant bits sit in the chunks,
-    // and one whose remainder spills into a second chunk
-    RC_CHECK(tan_f64_bits(0x413921fb00000000ull), ==, 0xbfd5dca6bd170c6full);
-    RC_CHECK(tan_f64_bits(0x41413db55a439968ull), ==, 0xc001bdbc7013ebf7ull);
-    RC_CHECK(tan_f64_bits(0x4480f0cf064dd592ull), ==, 0xbffa0f79c1b6b258ull);
-    RC_CHECK(tan_f64_bits(0x46293e5939a08ceaull), ==, 0xbf831c97177a2330ull);
-    RC_CHECK(tan_f64_bits(0x7506ac5b262ca1ffull), ==, 0xc3bd9ba9a7975636ull);
-    RC_CHECK(tan_f64_bits(0x69efe333b266f103ull), ==, 0x40019b6d100b6482ull);
-    RC_CHECK(tan_f64_bits(0x6f525307d4673f9full), ==, 0x3ff8303497c03470ull);
-    RC_CHECK(tan_f64_bits(0x7bf741acd442110dull), ==, 0xbf9e26c2f389203full);
-    RC_CHECK(tan_f64_bits(0x7d6ce98dd00116fcull), ==, 0x401278989462aa70ull);
-    RC_CHECK(tan_f64_bits(0x7fefffffffffffffull), ==, 0xbf74530cfe729484ull);
-    RC_CHECK(tan_f64_bits(0xffefffffffffffffull), ==, 0x3f74530cfe729484ull);
-}
-
-
-// Infinities and NaN all give NaN
-RC_TEST(math_tan, not_finite)
-{
-    float values_f32[] = {
-        rc_tan_f32(rc_bitcast_u32(0x7f800000u)),
-        rc_tan_f32(rc_bitcast_u32(0xff800000u)),
-        rc_tan_f32(rc_bitcast_u32(0x7fc00000u)),
-        rc_tan_f32(rc_bitcast_u32(0xffc00001u))
-    };
-    double values_f64[] = {
-        rc_tan_f64(rc_bitcast_u64(0x7ff0000000000000ull)),
-        rc_tan_f64(rc_bitcast_u64(0xfff0000000000000ull)),
-        rc_tan_f64(rc_bitcast_u64(0x7ff8000000000000ull)),
-        rc_tan_f64(rc_bitcast_u64(0xfff8000000000001ull))
-    };
-
-    for (uint32_t i = 0; i < RC_COUNT(values_f32); i++) {
-        RC_CHECK_FALSE(rc_is_finite_f32(values_f32[i]));
-        RC_CHECK_TRUE(values_f32[i] != values_f32[i]);
+        RC_CHECK(rc_abs_f64(rc_tan_f64(odd)), >, 0x1p40);
+        RC_CHECK(rc_abs_f64(rc_tan_f64(even)), <, 0x1p-40);
+        RC_CHECK(rc_abs_f32(rc_tan_f32((float)odd)), >, 0x1p15f);
+        RC_CHECK(rc_abs_f32(rc_tan_f32((float)even)), <, 0x1p-15f);
     }
+}
 
-    for (uint32_t i = 0; i < RC_COUNT(values_f64); i++) {
-        RC_CHECK_FALSE(rc_is_finite_f64(values_f64[i]));
-        RC_CHECK_TRUE(values_f64[i] != values_f64[i]);
+
+RC_TEST(math_tan, odd)
+{
+    RC_CHECK_TRUE(trig_is_odd_f64(rc_tan_f64));
+    RC_CHECK_TRUE(trig_is_odd_f32(rc_tan_f32));
+}
+
+
+RC_TEST(math_tan, golden_f64)
+{
+    for (uint32_t i = 0; i < RC_COUNT(trig_goldens_f64); i++) {
+        trig_golden_f64 golden = trig_goldens_f64[i];
+
+        RC_CHECK(rc_bitcast_f64(rc_tan_f64(rc_bitcast_u64(golden.x))), ==, golden.tangent);
     }
+}
+
+
+RC_TEST(math_tan, golden_f32)
+{
+    for (uint32_t i = 0; i < RC_COUNT(trig_goldens_f32); i++) {
+        trig_golden_f32 golden = trig_goldens_f32[i];
+
+        RC_CHECK(rc_bitcast_f32(rc_tan_f32(rc_bitcast_u32(golden.x))), ==, golden.tangent);
+    }
+}
+
+
+RC_TEST(math_tan, picks_the_type)
+{
+    RC_CHECK(rc_tan(0.5f), ==, rc_tan_f32(0.5f));
+    RC_CHECK(rc_tan(0.5), ==, rc_tan_f64(0.5));
 }

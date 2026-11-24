@@ -1,31 +1,30 @@
 // math/log2_f32.c
 //
-// The base 2 logarithm of a float. Ported from musl 1.2.5 (MIT), src/math/log2f.c, which is Arm's
-// optimized-routines. Its notice:
-//
-// Copyright (c) 2017-2018, Arm Limited.
-// SPDX-License-Identifier: MIT
-//
-// The error is at most 0.752 ulp. Before rounding, the relative error is 1.9 x 2^-26.
+// The base 2 log of a float, from the log2 kernel in exp_log_f32.h, which works in double. Its
+// error of 2^-36.3 relative adds under 0.001 ulp to the rounding to float. A power of 2, 2^k,
+// has a mantissa of exactly 1 and a log2 of exactly k. Zeros, subnormals, negatives, infinities
+// and NaNs all fail one unsigned comparison on the bits, and take the slow path.
 
-#include "exp_log_f32.h"
+#include "richc/math/math.h"
 
-// log2(x) for the bits of a normal x, or a normalised subnormal one. With x = 2^k z and c the
-// centre nearest z, log2(x) = log1p(z/c - 1) / ln2 + log2(c) + k, and the polynomial gives the
-// first term.
-static float rc_log2_of_normal_f32(uint32_t x_bits)
+#include "math/exp_log_f32.h"
+
+// The base 2 log of a float that isn't positive and normal: -inf for a zero, +inf for +inf, and
+// NaN for the negatives and NaN. A subnormal is scaled up for the kernel, and is checked for first
+// on the bits, as the only one of these that needs real work.
+static float rc_log2_f32_special(float x)
 {
-    rc_log_parts_f32 parts = rc_log_parts_of_f32(x_bits);
-    rc_log_centre_f32 centre = rc_log2_data_f32.centres[parts.index];
-    const double *poly = rc_log2_data_f32.poly;
-    double r = parts.z * centre.inv_c - 1.0;
-    double y0 = centre.log_c + (double)parts.exponent;
-    double r2 = r * r;
-    double low = poly[1] * r + poly[2];
-    double terms = poly[0] * r2 + low;
-    double linear = poly[3] * r + y0;
+    uint32_t bits = rc_bitcast_f32(x);
 
-    return (float)(terms * r2 + linear);
+    if (bits - 1u < 0x007fffffu) {
+        return (float)rc_log2_f32_kernel(rc_log_f32_subnormal_bits(bits));
+    }
+
+    if (x == 0.0f) {
+        return rc_bitcast_u32(0xff800000u);
+    }
+
+    return x > 0.0f ? x : rc_bitcast_u32(0x7fc00000u);
 }
 
 
@@ -33,26 +32,6 @@ float rc_log2_f32(float x)
 {
     uint32_t bits = rc_bitcast_f32(x);
 
-    if (!rc_log_is_special_f32(bits)) {
-        return rc_log2_of_normal_f32(bits);
-    }
-
-    if ((bits << 1) == 0) {
-        return rc_bitcast_u32(0xff800000u);
-    }
-
-    if (bits == 0x7f800000u) {
-        return x;
-    }
-
-    // Below zero, or NaN
-    if ((bits & 0x80000000u) != 0) {
-        return (x - x) / (x - x);
-    }
-
-    if (bits > 0x7f800000u) {
-        return (x - x) / (x - x);
-    }
-
-    return rc_log2_of_normal_f32(rc_log_normalise_subnormal_f32(x));
+    // The main path first, in a ternary: so gcc and clang (wasm too) both let it fall through
+    return !rc_log_f32_is_special(bits) ? (float)rc_log2_f32_kernel(bits) : rc_log2_f32_special(x);
 }

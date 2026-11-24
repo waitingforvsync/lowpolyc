@@ -469,8 +469,8 @@ The headers keep their names under `richc/math/`, and their arrays under
 - **New in `richc/math/math.h`:** richc's own transcendentals, `rc_sin`,
   `rc_cos`, `rc_tan`, `rc_asin`, `rc_acos`, `rc_atan`, `rc_atan2`, `rc_exp`,
   `rc_log`, `rc_log2`, `rc_pow` and `rc_cbrt`, in `_f32` and `_f64` forms.
-  They are ported from musl, so they give the same bits on every target; they
-  can differ from the platform's libm in the last place, so results that used
+  They are richc's own, so they give the same bits on every target; they can
+  differ from the platform's libm in the last place, so results that used
   `sinf` and friends may change by an ulp.
 - **More functions are out of line** (same names and behaviour, now in `.c`
   files): the matrix inverses, `rc_mat33f_mul`, `rc_mat44f_mul`,

@@ -1,142 +1,140 @@
 // math/exp_log_f32.h
 //
-// The tables behind the float exp, log, log2 and pow, and the steps they share. Private to core.
-// Ported from musl 1.2.5 (MIT), src/math/exp2f_data.h, logf_data.h, log2f_data.h and powf_data.h,
-// which are Arm's optimized-routines. Their notice:
-//
-// Copyright (c) 2017-2018, Arm Limited.
-// SPDX-License-Identifier: MIT
-//
-// exp works in powers of 2^(1/32): it splits x into k/32 + r, takes 2^(k/32) from a table and
-// 2^r from a cubic. The logs split x into 2^k z, with z near one of 16 table centres c, and add
-// log(c) to a polynomial for log1p(z/c - 1). pow is 2^(y log2(x)), from both halves.
+// The kernels shared by the f32 exp, log, log2 and pow, all worked in double: 2^(n / 32), and the
+// logs of a float. Double carries 29 more bits than the float answers need, so the kernels only
+// have to be good to about 2^-30 relative for the double we round to float to land on the right
+// side of the halfway point nearly always. Private to core.
 
 #ifndef RC_MATH_EXP_LOG_F32_H_
 #define RC_MATH_EXP_LOG_F32_H_
 
 #include "richc/math/math.h"
 
-// The exp table has 2^5 entries, for steps of 2^(1/32).
-#define RC_EXP_TABLE_BITS_F32 5
-#define RC_EXP_TABLE_SIZE_F32 (1 << RC_EXP_TABLE_BITS_F32)
+enum {
+    RC_EXP2_F32_TABLE_BITS = 5,
+    RC_EXP2_F32_TABLE_SIZE = 1 << RC_EXP2_F32_TABLE_BITS,
+    RC_LOG_F32_TABLE_BITS = 7,
+    RC_LOG_F32_TABLE_SIZE = 1 << RC_LOG_F32_TABLE_BITS
+};
 
-// The log tables have 2^4 entries, splitting [RC_LOG_OFFSET_F32, 2 RC_LOG_OFFSET_F32) into 16.
-#define RC_LOG_TABLE_BITS_F32 4
-#define RC_LOG_TABLE_SIZE_F32 (1 << RC_LOG_TABLE_BITS_F32)
+// 1.5 x 2^52: adding it to a double below 2^51 in size rounds that to a whole number, which lands
+// in the low bits of the sum, with no float to integer conversion for a NaN to upset.
+#define RC_EXP2_F32_SHIFTER 0x1.8p52
 
-// The bits of 0x1.66p-1, the bottom of the range that z is brought into.
-#define RC_LOG_OFFSET_F32 0x3f330000u
+// The bits of the float that starts the first of the log table's intervals, 0.705078125. The
+// intervals are 2^16 apart in bits, and the 76th (index 75) is centred on 1.0.
+#define RC_LOG_F32_OFFSET 0x3f348000u
 
-// The data for exp, shared with pow. exp scales its argument by 32 / ln2, so its polynomial is
-// scaled to match; pow has a power of 2 already, so takes the unscaled one.
-typedef struct rc_exp_table_f32 {
-    // The bits of 2^(i/32), less i << 47, so that adding k << 47 for any k with the same low bits
-    // gives 2^(k/32).
-    uint64_t powers[RC_EXP_TABLE_SIZE_F32];
+// Added to the bits less the offset, 192 binades of headroom keep them positive for every positive
+// float, the parts of subnormals included, so the shifts are on unsigned values.
+#define RC_LOG_F32_HEADROOM 0x60000000u
 
-    // Adding shift, 0x1.8p52, rounds a double to a whole number and leaves it in the low bits;
-    // shift_scaled, a 32nd of it, rounds to a multiple of 1/32 in the same way.
-    double shift_scaled;
-    double poly[3];
-    double shift;
-    double inv_ln2_scaled;
-    double poly_scaled[3];
-} rc_exp_table_f32;
+// A log table entry: scale is near the reciprocal of the middle of its interval, with few enough
+// bits that a float mantissa times it is exact in double, and log2_scale is its base 2 log.
+typedef struct rc_log_f32_entry {
+    double scale;
+    double log2_scale;
+} rc_log_f32_entry;
 
-// A centre c of one of the 16 subintervals, near which log(z) is log(c) + log1p(z/c - 1).
-typedef struct rc_log_centre_f32 {
-    double inv_c;
-    double log_c;
-} rc_log_centre_f32;
+// A float split for the logs: x = 2^base (1 + r), with base = exponent - log2(scale) and r within
+// 1/256, exactly but for the rounding of base.
+typedef struct rc_log_f32_parts {
+    double base;
+    double r;
+} rc_log_f32_parts;
 
-// The data for log. The polynomial approximates log1p(r), less the r term, whose coefficient is 1.
-typedef struct rc_log_table_f32 {
-    rc_log_centre_f32 centres[RC_LOG_TABLE_SIZE_F32];
-    double ln2;
-    double poly[3];
-} rc_log_table_f32;
+// The bits of 2^(i/32), rounded to double, less i << 47. Adding k << 47 to entry k mod 32 then
+// gives the bits of 2^(k/32), for any whole k within 2^16.
+extern const uint64_t rc_exp2_f32_table[RC_EXP2_F32_TABLE_SIZE];
 
-// The data for log2, where log_c is log2(c) and the polynomial approximates log1p(r) / ln2.
-typedef struct rc_log2_table_f32 {
-    rc_log_centre_f32 centres[RC_LOG_TABLE_SIZE_F32];
-    double poly[4];
-} rc_log2_table_f32;
+// The scale for each interval of mantissas, and its log.
+extern const rc_log_f32_entry rc_log_f32_table[RC_LOG_F32_TABLE_SIZE];
 
-// The data for pow's log2, which is as log2's but with one more term.
-typedef struct rc_pow_table_f32 {
-    rc_log_centre_f32 centres[RC_LOG_TABLE_SIZE_F32];
-    double poly[5];
-} rc_pow_table_f32;
+// The coefficients of the polynomials: 2^(r / 32) - 1 from r, log(1 + r) - r from r^2, and
+// log2(1 + r) from r. They live in memory beside the tables, not in the code: a wasm engine builds
+// each double constant in the code with two instructions, where a load from memory takes one.
+extern const double rc_exp2_f32_coefficients[3];
+extern const double rc_log_f32_coefficients[3];
+extern const double rc_log2_f32_coefficients[4];
 
-// x as 2^exponent z, with z exact and in [RC_LOG_OFFSET_F32, 2 RC_LOG_OFFSET_F32), and the
-// subinterval holding z.
-typedef struct rc_log_parts_f32 {
-    double z;
-    int32_t exponent;
-    uint32_t index;
-} rc_log_parts_f32;
-
-extern const rc_exp_table_f32 rc_exp_data_f32;
-extern const rc_log_table_f32 rc_log_data_f32;
-extern const rc_log2_table_f32 rc_log2_data_f32;
-extern const rc_pow_table_f32 rc_pow_data_f32;
-
-// What exp and pow give for a result too big for a float: infinity, negative if sign_bias is set.
-static inline float rc_exp_overflow_f32(uint32_t sign_bias)
+// 2^(n / 32) for |n| < 32 x 1000, with a relative error under 2^-33, and with sign as its sign
+// bit. With k the nearest whole number to n, r = n - k is exact and within 1/2. 2^(k / 32) comes
+// from the table and the exponent, and 2^(r / 32) from a cubic: Sollya's fpminimax, absolute error
+// 2^-33.2. k is rounded twice over, by the shifter for its bits and directly for r, so r doesn't
+// wait on the shifter.
+static inline double rc_exp2_f32_kernel(double n, uint64_t sign)
 {
-    return rc_bitcast_u32(sign_bias != 0 ? 0xff800000u : 0x7f800000u);
-}
-
-// What exp and pow give for a result too small for a float: zero, negative if sign_bias is set.
-static inline float rc_exp_underflow_f32(uint32_t sign_bias)
-{
-    return sign_bias != 0 ? -0.0f : 0.0f;
-}
-
-// 2^(k/32) 2^r ~= s (c0 r^3 + c1 r^2 + c2 r + 1), where s = 2^(k/32) comes from the table and k is
-// the low bits of k_bits. sign_bias, added to k above the bits that reach the exponent, sets the
-// sign of the result.
-static inline float rc_exp_from_reduced_f32(uint64_t k_bits, uint32_t sign_bias, double r, const double *poly)
-{
-    uint64_t scale_bits = rc_exp_data_f32.powers[k_bits % RC_EXP_TABLE_SIZE_F32] + ((k_bits + sign_bias) << (52 - RC_EXP_TABLE_BITS_F32));
-    double scale = rc_bitcast_u64(scale_bits);
-    double high = poly[0] * r + poly[1];
+    double c1 = rc_exp2_f32_coefficients[0];
+    double c2 = rc_exp2_f32_coefficients[1];
+    double c3 = rc_exp2_f32_coefficients[2];
+    uint64_t k = rc_bitcast_f64(n + RC_EXP2_F32_SHIFTER);
+    double r = n - rc_round_even_f64(n);
+    uint64_t scale_bits = rc_exp2_f32_table[k & (RC_EXP2_F32_TABLE_SIZE - 1)] + (k << 47) + sign;
     double r2 = r * r;
-    double low = poly[2] * r + 1.0;
 
-    return (float)((high * r2 + low) * scale);
+    return rc_bitcast_u64(scale_bits) * ((c3 * r + c2) * r2 + (c1 * r + 1.0));
 }
 
-// True if the x with these bits is below 2^-126, negative, infinite or NaN, which the logs' main
-// path can't take as it is.
-static inline bool rc_log_is_special_f32(uint32_t bits)
+
+// True for the bits of anything but a positive normal float: the logs' rare inputs.
+static inline bool rc_log_f32_is_special(uint32_t bits)
 {
     return bits - 0x00800000u >= 0x7f800000u - 0x00800000u;
 }
 
-// The bits of a positive subnormal x scaled up to a normal, then with 23 taken off the exponent,
-// which leaves it below zero.
-static inline uint32_t rc_log_normalise_subnormal_f32(float x)
+
+// The bits of a positive subnormal, given its bits, as the parts of a float scaled up by 2^149 to
+// a normal one, less 149 binades: the parts of the subnormal itself. They wrap below zero, which
+// the headroom undoes. Converting the bits, a whole number below 2^23, is exact, and no arithmetic
+// touches the subnormal, which some processors take many cycles over.
+static inline uint32_t rc_log_f32_subnormal_bits(uint32_t bits)
 {
-    return (rc_bitcast_f32(x * 0x1p23f) & 0x7fffffffu) - (23u << 23);
+    return rc_bitcast_f32((float)(int32_t)bits) - (149u << 23);
 }
 
-// The top 9 bits of bits as a signed number, as an arithmetic shift right by 23 would give.
-static inline int32_t rc_log_top_bits_signed_f32(uint32_t bits)
-{
-    return (int32_t)(bits >> 23) - (int32_t)((bits >> 31) << 9);
-}
 
-// x_bits, the bits of a normal x or a normalised subnormal one, split into its parts.
-static inline rc_log_parts_f32 rc_log_parts_of_f32(uint32_t x_bits)
+// The bits of a positive normal float, or of a subnormal from rc_log_f32_subnormal_bits, split
+// into its parts. Taking the offset from the bits leaves the exponent in the top bits and the
+// table index below them, and the mantissa m in [0.705078125, 1.41015625) is the offset plus the
+// low bits. m times its interval's scale is 1 + r, exactly. A power of 2 has m = 1, r = 0 and a
+// scale of exactly 1.
+static inline rc_log_f32_parts rc_log_f32_split(uint32_t bits)
 {
-    uint32_t offset = x_bits - RC_LOG_OFFSET_F32;
+    uint32_t from_offset = bits - RC_LOG_F32_OFFSET + RC_LOG_F32_HEADROOM;
+    int32_t exponent = (int32_t)(from_offset >> 23) - (int32_t)(RC_LOG_F32_HEADROOM >> 23);
+    float mantissa = rc_bitcast_u32((from_offset & 0x007fffffu) + RC_LOG_F32_OFFSET);
+    uint32_t index = (from_offset >> (23 - RC_LOG_F32_TABLE_BITS)) & (RC_LOG_F32_TABLE_SIZE - 1);
+    rc_log_f32_entry entry = rc_log_f32_table[index];
 
-    return (rc_log_parts_f32) {
-        .z = (double)rc_bitcast_u32(x_bits - (offset & 0xff800000u)),
-        .exponent = rc_log_top_bits_signed_f32(offset),
-        .index = (offset >> (23 - RC_LOG_TABLE_BITS_F32)) % RC_LOG_TABLE_SIZE_F32
+    return (rc_log_f32_parts) {
+        .base = (double)exponent - entry.log2_scale,
+        .r = (double)mantissa * entry.scale - 1.0
     };
+}
+
+
+// base + log2(1 + r) for r in [-0.003876, 0.00390625]: Sollya's fpminimax with b1 = 1 / ln 2,
+// relative error 2^-36.3, falling towards 0 with r. Split as (base + b1 r + b2 r^2) +
+// r^3 (b3 + b4 r), the two halves are ready together.
+static inline double rc_log2_f32_poly(double base, double r)
+{
+    double b1 = rc_log2_f32_coefficients[0];
+    double b2 = rc_log2_f32_coefficients[1];
+    double b3 = rc_log2_f32_coefficients[2];
+    double b4 = rc_log2_f32_coefficients[3];
+    double r2 = r * r;
+    double r3 = r2 * r;
+
+    return ((base + b1 * r) + b2 * r2) + r3 * (b3 + b4 * r);
+}
+
+
+// The base 2 log of a float, from its parts, with a relative error under 2^-36.
+static inline double rc_log2_f32_kernel(uint32_t bits)
+{
+    rc_log_f32_parts parts = rc_log_f32_split(bits);
+
+    return rc_log2_f32_poly(parts.base, parts.r);
 }
 
 #endif // RC_MATH_EXP_LOG_F32_H_

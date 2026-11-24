@@ -1,0 +1,4 @@
+# Each tool's binaries and outputs
+out/
+# Python's bytecode caches
+__pycache__/

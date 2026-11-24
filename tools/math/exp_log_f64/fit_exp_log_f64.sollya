@@ -1,0 +1,47 @@
+// fit_exp_log_f64.sollya
+//
+// The polynomials of the f64 exp, log, log2 and pow, fitted by fpminimax with double coefficients
+// and absolute error to the Taylor series of what is left once their leading terms are taken out.
+// I is the range of the reduced argument r of log and log2, as gen_tables.py reports it, and J a
+// little over exp's: ln2 / 256, plus the 2^-14 that pow's low part can add. Prints each fit's
+// error and its coefficients in hex, log2's scaled for the 2^61 r it works on.
+//
+//   sollya fit_exp_log_f64.sollya    (or: ./run.sh fits)
+
+prec = 400;
+I = [-0.0028534; 0.0039063];
+J = [-0.0027687; 0.0027687];
+
+// (log1p(r) - r + r^2/2) / r and (log1p(r) - r) / (r ln2), from their Taylor series
+gr = 0;
+for k from 3 to 40 do { gr = gr + (-1)^(k+1) * x^(k-1) / k; };
+g2 = 0;
+for k from 2 to 40 do { g2 = g2 + (-1)^(k+1) * x^(k-1) / k; };
+g2 = g2 / log(2);
+
+// (expm1(x) - x) / x^2
+f = 0; fact = 2;
+for k from 2 to 30 do { f = f + x^(k-2) / fact; fact = fact * (k+1); };
+
+// log: log1p(r) = r - r^2/2 + r^3 (L3 + L4 r + ... + L7 r^4)
+pg = fpminimax(gr, [|2,...,6|], [|D...|], I, floating, absolute);
+// pow: log1p(r) = r - r^2/2 + r^3 (P3 + P4 r + ... + P8 r^5)
+ph = fpminimax(gr, [|2,...,7|], [|D...|], I, floating, absolute);
+// log2: log1p(r) / ln2 = r / ln2 + r^2 (Q2 + Q3 r + ... + Q7 r^5)
+p2 = fpminimax(g2, [|1,...,6|], [|D...|], I, floating, absolute);
+// exp: expm1(x) = x + x^2 (E2 + E3 x + E4 x^2 + E5 x^3)
+pe = fpminimax(f, 3, [|D...|], J, floating, absolute);
+
+display = decimal;
+print("log  error / r: 2^", round(log2(dirtyinfnorm(pg - gr, I)), 16, RN));
+print("pow  error / r: 2^", round(log2(dirtyinfnorm(ph - gr, I)), 16, RN));
+print("log2 error / r: 2^", round(log2(dirtyinfnorm(p2 - g2, I)), 16, RN));
+print("exp  error:     2^", round(log2(dirtyinfnorm(x^2 * (pe - f), J)), 16, RN));
+display = hexadecimal;
+print("log:"); for k from 2 to 6 do print("   ", coeff(pg, k));
+print("pow:"); for k from 2 to 7 do print("   ", coeff(ph, k));
+// log2 works on 2^61 r, so each coefficient is scaled by 2^-61 for each power of r it multiplies
+print("log2, scaled:"); for k from 1 to 6 do print("   ", coeff(p2, k) * 2^(-61 * (k + 1)));
+print("exp:"); for k from 0 to 3 do print("   ", coeff(pe, k));
+
+quit;

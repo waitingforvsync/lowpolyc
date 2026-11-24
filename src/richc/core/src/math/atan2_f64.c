@@ -1,116 +1,190 @@
 // math/atan2_f64.c
 //
-// The angle of a point, in doubles. Ported from musl 1.2.5 (MIT), src/math/atan2.c, which is
-// FreeBSD's e_atan2.c. Its notice:
+// rc_atan2_f64: the angle of the point (x, y) from the +x axis, in doubles. We work on |y| and give
+// the result y's sign, so atan2(-y, x) is exactly -atan2(y, x).
 //
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+// The smaller of |x| and |y| over the larger, near / far, is a ratio in [0, 1] whose arctangent a
+// is the angle from the nearer axis, and the octant makes that a, pi/2 - a, pi - a or pi/2 + a.
+// From 1/16 up, the rounded ratio picks a cell of the atan table, a quarter of a binade, with
+// middle c, and a = atan(c) + atan(u) for u = (near - c far) / (far + c near). That comes from near
+// and far themselves, so the ratio's rounding never enters, and splitting far makes c far exact,
+// so the numerator, which cancels, is exact but for one rounding. Below 1/16, u is the ratio, and
+// we add back what its rounding lost, but below 2^-30 the ratio alone will do. atan(u) is u plus
+// u^3 times a quartic in u^2, fitted to 2^-62.5. Every sum is exact but the last: 0.66 ulp at worst
+// in testing.
 //
-// Developed at SunSoft, a Sun Microsystems, Inc. business.
-// Permission to use, copy, modify, and distribute this
-// software is freely granted, provided that this notice
-// is preserved.
+// The ranges branch: working out each and choosing costs more than the odd misprediction. The test
+// for the table's range catches a NaN ratio too, from 0/0 and inf/inf, which take the special
+// cases. The octant's table holds y's sign as well, so no copysign is needed.
 
 #include "richc/math/math.h"
 
-// pi split in two, hi + lo, for the extra precision.
-static const double rc_atan2_pi_f64 = 3.1415926535897931160e+00;    // 0x400921fb 54442d18
-static const double rc_atan2_pi_lo_f64 = 1.2246467991473531772e-16; // 0x3ca1a626 33145c07
+#include "math/arc.h"
+
+// The angle the octant adds to, and the sign it gives the angle from the nearer axis.
+typedef struct rc_atan2_octant {
+    rc_arc_sum offset;
+    double sign;
+} rc_atan2_octant;
+
+// The two sides of the angle: the smaller of |x| and |y| and the larger.
+typedef struct rc_atan2_sides {
+    double near;
+    double far;
+} rc_atan2_sides;
+
+// The angle from the nearer axis as base + u + correction: an arctangent from the table, or 0, to
+// twice double precision, then u, then a correction much smaller than u.
+typedef struct rc_atan2_parts {
+    rc_arc_sum base;
+    double u;
+    double correction;
+} rc_atan2_parts;
+
+// By y's sign bit, then x's, then whether |y| > |x|: y's sign is in the offset and sign too.
+static const rc_atan2_octant rc_atan2_octants[8] = {
+    {.offset = {.hi = 0.0, .lo = 0.0}, .sign = 1.0},
+    {.offset = {.hi = RC_ARC_PI_2_HI, .lo = RC_ARC_PI_2_LO}, .sign = -1.0},
+    {.offset = {.hi = RC_ARC_PI_HI, .lo = RC_ARC_PI_LO}, .sign = -1.0},
+    {.offset = {.hi = RC_ARC_PI_2_HI, .lo = RC_ARC_PI_2_LO}, .sign = 1.0},
+    {.offset = {.hi = -0.0, .lo = -0.0}, .sign = -1.0},
+    {.offset = {.hi = -RC_ARC_PI_2_HI, .lo = -RC_ARC_PI_2_LO}, .sign = 1.0},
+    {.offset = {.hi = -RC_ARC_PI_HI, .lo = -RC_ARC_PI_LO}, .sign = 1.0},
+    {.offset = {.hi = -RC_ARC_PI_2_HI, .lo = -RC_ARC_PI_2_LO}, .sign = -1.0}
+};
 
 
-// The angle, negated when y is negative.
-static double rc_atan2_signed_f64(double angle, bool y_negative)
+// atan2 where |y| / |x| is NaN: a NaN, both zero, or both infinite.
+static double rc_atan2_special(double y, double x)
 {
-    return y_negative ? -angle : angle;
+    bool x_negative = (rc_bitcast_f64(x) >> 63) != 0;
+
+    if (y != y || x != x) {
+        return x + y;
+    }
+
+    if (y == 0.0) {
+        return rc_copysign_f64(x_negative ? RC_ARC_PI_HI : 0.0, y);
+    }
+
+    return rc_copysign_f64(x_negative ? RC_ARC_PI_3_4 : RC_ARC_PI_4, y);
 }
 
 
-// The angle when x is infinite: +-pi/4 or +-3pi/4 if y is too, and otherwise +-0 or +-pi.
-static double rc_atan2_infinite_x_f64(uint32_t y_top, bool x_negative, bool y_negative)
+// near and far, both scaled by 2^-512 if far is beyond 2^1000 and by 2^512 if below 2^-900.
+static rc_atan2_sides rc_atan2_rescaled(rc_atan2_sides sides)
 {
-    double pi = rc_atan2_pi_f64;
+    double scale = sides.far > 1.0 ? 0x1p-512 : 0x1p512;
 
-    if (y_top == 0x7ff00000u) {
-        return rc_atan2_signed_f64(x_negative ? 3.0 * pi / 4.0 : pi / 4.0, y_negative);
-    }
-
-    return rc_atan2_signed_f64(x_negative ? pi : 0.0, y_negative);
+    return (rc_atan2_sides) {.near = sides.near * scale, .far = sides.far * scale};
 }
 
 
-// True if y is infinite or |y / x| > 2^64, so the angle is +-pi/2 to double precision. Each top is
-// the high word of the magnitude.
-static bool rc_atan2_is_steep_f64(uint32_t x_top, uint32_t y_top)
+// Whether far is from 2^-900 to 2^1000, where no product of near and far overflows or underflows.
+// We test its bits, in one go.
+static bool rc_atan2_is_moderate(double far)
 {
-    return x_top + (64u << 20) < y_top || y_top == 0x7ff00000u;
+    return rc_bitcast_f64(far) - 0x07b0000000000000ull <= 0x7e70000000000000ull - 0x07b0000000000000ull;
 }
 
 
-// atan(|y / x|), taken as 0 when x is negative and |y / x| < 2^-64, where it vanishes beside pi.
-static double rc_atan2_slope_f64(double y, double x, uint32_t x_top, uint32_t y_top)
+// near and far, scaled if need be so that no product of theirs overflows or underflows.
+static rc_atan2_sides rc_atan2_scaled(rc_atan2_sides sides)
 {
-    bool x_negative = x < 0.0;
-    bool tiny = y_top + (64u << 20) < x_top;
-
-    if (x_negative && tiny) {
-        return 0.0;
+    if (!rc_atan2_is_moderate(sides.far)) {
+        return rc_atan2_rescaled(sides);
     }
 
-    return rc_atan_f64(rc_abs_f64(y / x));
+    return sides;
 }
 
 
-// The angle from z = atan(|y / x|), moved into the quadrant of (x, y).
-static double rc_atan2_from_slope_f64(double z, bool x_negative, bool y_negative)
+// The arctangent of near / far from 1/16 up, through the cell of the table that the rounded ratio
+// picks, with middle c: atan(c) + atan(u) for u = (near - c far) / (far + c near). c has 4
+// significant bits, so with the low 4 cut off far, c far_hi is exact, and so is near - c far_hi,
+// the two being so close, which leaves u a few roundings in its last place.
+static rc_atan2_parts rc_atan2_by_table(rc_atan2_sides sides, double ratio)
 {
-    if (!x_negative) {
-        return y_negative ? -z : z;
+    uint64_t cell = rc_bitcast_f64(ratio) >> RC_ARC_ATAN_TABLE_SHIFT;
+    const rc_arc_sum *entry = &rc_arc_atan_table[cell - RC_ARC_ATAN_TABLE_FIRST];
+    double c = rc_arc_atan_cell_middle(cell);
+    double far_hi = rc_bitcast_u64(rc_bitcast_f64(sides.far) & ~0xfull);
+    double numerator = (sides.near - c * far_hi) - c * (sides.far - far_hi);
+    double u = numerator / (sides.far + c * sides.near);
+
+    return (rc_atan2_parts) {
+        .base = {.hi = entry->hi, .lo = entry->lo},
+        .u = u,
+        .correction = rc_arc_atan_tail_f64(u)
+    };
+}
+
+
+// The arctangent of near / far from 2^-30 to 1/16: the ratio, what its rounding lost,
+// (near - ratio far) / far, and atan(u) - u.
+static rc_atan2_parts rc_atan2_small(rc_atan2_sides sides, double ratio)
+{
+    double residual = rc_arc_residual_f64(sides.near, ratio, sides.far);
+
+    return (rc_atan2_parts) {.u = ratio, .correction = residual / sides.far + rc_arc_atan_tail_f64(ratio)};
+}
+
+
+// The arctangent of near / far below 1/16. Below 2^-30, the rounded ratio alone will do: atan's
+// cube is too small to move the rounding, and near could underflow and spoil the ratio's error.
+static rc_atan2_parts rc_atan2_below(rc_atan2_sides sides, double ratio)
+{
+    if (ratio < 0x1p-30) {
+        return (rc_atan2_parts) {.u = ratio};
     }
 
-    if (y_negative) {
-        return (z - rc_atan2_pi_lo_f64) - rc_atan2_pi_f64;
+    return rc_atan2_small(rc_atan2_scaled(sides), ratio);
+}
+
+
+// The result from the angle from the nearer axis, by the octant: the signs of y and x, and steep if
+// |y| > |x|. The octant's offset and the angle's base come together first, both exactly, which
+// can be under way while u is still being divided out.
+static double rc_atan2_in_octant(double y, double x, bool steep, rc_atan2_parts angle)
+{
+    rc_atan2_octant octant = rc_atan2_octants[(rc_bitcast_f64(y) >> 63) * 4 + (rc_bitcast_f64(x) >> 63) * 2 + steep];
+    rc_arc_sum base = rc_arc_fast_two_sum(octant.offset.hi, octant.sign * angle.base.hi);
+    rc_arc_sum sum = rc_arc_fast_two_sum(base.hi, octant.sign * angle.u);
+    double lo = (octant.offset.lo + base.lo) + octant.sign * (angle.base.lo + angle.correction);
+
+    return sum.hi + (sum.lo + lo);
+}
+
+
+// Whether the ratio is at least 1/16, where the table takes it, which is false for NaN.
+static bool rc_atan2_is_tabled(double ratio)
+{
+    return ratio >= 0x1p-4;
+}
+
+
+// atan2 where the ratio is below 1/16, or NaN: a NaN, both zero, or both infinite.
+static double rc_atan2_untabled(double y, double x, bool steep, rc_atan2_sides sides, double ratio)
+{
+    if (ratio != ratio) {
+        return rc_atan2_special(y, x);
     }
 
-    return rc_atan2_pi_f64 - (z - rc_atan2_pi_lo_f64);
+    return rc_atan2_in_octant(y, x, steep, rc_atan2_below(sides, ratio));
 }
 
 
 double rc_atan2_f64(double y, double x)
 {
-    uint64_t x_bits = rc_bitcast_f64(x);
-    uint64_t y_bits = rc_bitcast_f64(y);
-    uint64_t x_magnitude = x_bits & 0x7fffffffffffffffull;
-    uint64_t y_magnitude = y_bits & 0x7fffffffffffffffull;
-    uint32_t x_top = (uint32_t)(x_magnitude >> 32);
-    uint32_t y_top = (uint32_t)(y_magnitude >> 32);
-    bool x_negative = (x_bits >> 63) != 0;
-    bool y_negative = (y_bits >> 63) != 0;
+    double ay = rc_abs_f64(y);
+    double ax = rc_abs_f64(x);
+    bool steep = ay > ax;
+    rc_atan2_sides sides = {.near = steep ? ax : ay, .far = steep ? ay : ax};
+    double ratio = sides.near / sides.far;
 
-    // NaN in either gives NaN, and x = 1 is plain atan
-    if (x != x || y != y) {
-        return x + y;
+    if (!rc_atan2_is_tabled(ratio)) {
+        return rc_atan2_untabled(y, x, steep, sides, ratio);
     }
 
-    if (x_bits == 0x3ff0000000000000ull) {
-        return rc_atan_f64(y);
-    }
-
-    // On the x axis, +-0 to the right and +-pi to the left
-    if (y_magnitude == 0) {
-        return x_negative ? rc_atan2_signed_f64(rc_atan2_pi_f64, y_negative) : y;
-    }
-
-    // On the y axis, +-pi/2
-    if (x_magnitude == 0) {
-        return rc_atan2_signed_f64(rc_atan2_pi_f64 / 2.0, y_negative);
-    }
-
-    if (x_top == 0x7ff00000u) {
-        return rc_atan2_infinite_x_f64(y_top, x_negative, y_negative);
-    }
-
-    if (rc_atan2_is_steep_f64(x_top, y_top)) {
-        return rc_atan2_signed_f64(rc_atan2_pi_f64 / 2.0, y_negative);
-    }
-
-    return rc_atan2_from_slope_f64(rc_atan2_slope_f64(y, x, x_top, y_top), x_negative, y_negative);
+    return rc_atan2_in_octant(y, x, steep, rc_atan2_by_table(rc_atan2_scaled(sides), ratio));
 }

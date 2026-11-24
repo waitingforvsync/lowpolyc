@@ -1,116 +1,78 @@
 // math/atan_f64.c
 //
-// The arctangent of a double. Ported from musl 1.2.5 (MIT), src/math/atan.c, which is FreeBSD's
-// s_atan.c. Its notice:
+// rc_atan_f64: the arctangent of a double. We work on |x| and give the result x's sign, so
+// atan(-x) is exactly -atan(x).
 //
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+// From 1/16 to 16, x sits in a cell of the atan table, a quarter of a binade, whose middle c gives
+// atan(x) = atan(c) + atan(u), u = (x - c) / (1 + x c), with |u| < 1/16. x - c is exact, so u is
+// out by only a few roundings in its last place, and u is small beside atan(c), which the table
+// holds to twice double precision. Below 1/16 we take c = 0, so u is x itself; beyond 16, the
+// angle is pi/2 + atan(-1/x). atan(u) is u plus u^3 times a quartic in u^2, fitted to 2^-62.5, so
+// most of the error is the final rounding: 0.73 ulp at worst in testing.
 //
-// Developed at SunPro, a Sun Microsystems, Inc. business.
-// Permission to use, copy, modify, and distribute this
-// software is freely granted, provided that this notice
-// is preserved.
+// The ranges branch on the top 14 bits of |x|, the table's index. Below 2^-27 and from 2^54 up,
+// tested only off the table, x takes a shortcut, which keeps subnormals out of the polynomial:
+// there atan(x) rounds to x, and to pi/2's first double with x's sign. The sign goes on as a
+// product with 1 or -1.
 
 #include "richc/math/math.h"
 
-// atan(0.5), atan(1), atan(1.5) and atan(infinity), each split in two, hi + lo.
-static const double rc_atan_hi_f64[] = {
-    4.63647609000806093515e-01, // 0x3fddac67 0561bb4f
-    7.85398163397448278999e-01, // 0x3fe921fb 54442d18
-    9.82793723247329054082e-01, // 0x3fef730b d281f69b
-    1.57079632679489655800e+00, // 0x3ff921fb 54442d18
-};
-static const double rc_atan_lo_f64[] = {
-    2.26987774529616870924e-17, // 0x3c7a2b7f 222f65e2
-    3.06161699786838301793e-17, // 0x3c81a626 33145c07
-    1.39033110312309984516e-17, // 0x3c700788 7af0cbbd
-    6.12323399573676603587e-17, // 0x3c91a626 33145c07
-};
+#include "math/arc.h"
 
-// The odd series for atan on [-7/16, 7/16]: atan(t) ~= t - t^3 (a0 + a1 t^2 + ... + a10 t^20).
-static const double rc_atan_series_f64[] = {
-    3.33333333333329318027e-01,  // 0x3fd55555 5555550d
-    -1.99999999998764832476e-01, // 0xbfc99999 9998ebc4
-    1.42857142725034663711e-01,  // 0x3fc24924 920083ff
-    -1.11111104054623557880e-01, // 0xbfbc71c6 fe231671
-    9.09088713343650656196e-02,  // 0x3fb745cd c54c206e
-    -7.69187620504482999495e-02, // 0xbfb3b0f2 af749a6d
-    6.66107313738753120669e-02,  // 0x3fb10d66 a0d03d51
-    -5.83357013379057348645e-02, // 0xbfadde2d 52defd9a
-    4.97687799461593236017e-02,  // 0x3fa97b4b 24760deb
-    -3.65315727442169155270e-02, // 0xbfa2b444 2c6a6c2f
-    1.62858201153657823623e-02,  // 0x3f90ad3a e322da11
-};
-
-
-// t - atan(t), from the series, split into its odd and even halves for speed.
-static double rc_atan_remainder_f64(double t)
+// base + atan(u), for |u| < 1/16, with x's sign.
+static double rc_atan_finish(double x, rc_arc_sum base, double u)
 {
-    const double *a = rc_atan_series_f64;
-    double z = t * t;
-    double w = z * z;
-    double odd = z * (a[0] + w * (a[2] + w * (a[4] + w * (a[6] + w * (a[8] + w * a[10])))));
-    double even = w * (a[1] + w * (a[3] + w * (a[5] + w * (a[7] + w * a[9]))));
-
-    return t * (odd + even);
+    return (base.hi + (u + (base.lo + rc_arc_atan_tail_f64(u)))) * rc_arc_sign_f64(rc_bitcast_f64(x) >> 63);
 }
 
 
-// atan(t) plus the tabled angle it was reduced by.
-static double rc_atan_offset_f64(uint32_t angle, double t)
+// atan(x) for t = |x| beyond 16, infinity and NaN included: pi/2 + atan(-1/t). From 2^54 up, that
+// is pi/2 - 1/t, which rounds to pi/2's first double: pi/2's second double less 1/t is between 0.02
+// and 0.28 of its ulp.
+static double rc_atan_beyond(double x, double t)
 {
-    return rc_atan_hi_f64[angle] - (rc_atan_remainder_f64(t) - rc_atan_lo_f64[angle] - t);
+    if (t >= 0x1p54) {
+        return RC_ARC_PI_2_HI * rc_arc_sign_f64(rc_bitcast_f64(x) >> 63);
+    }
+
+    return rc_atan_finish(x, (rc_arc_sum) {.hi = RC_ARC_PI_2_HI, .lo = RC_ARC_PI_2_LO}, -1.0 / t);
 }
 
 
-// atan(x) for 7/16 <= x < 2^66, from a tabled angle and the arctangent of what is left:
-//   [7/16, 11/16)   atan(1/2) + atan((2x - 1) / (2 + x))
-//   [11/16, 19/16)  atan(1) + atan((x - 1) / (x + 1))
-//   [19/16, 39/16)  atan(3/2) + atan((x - 1.5) / (1 + 1.5x))
-//   [39/16, 2^66)   atan(infinity) + atan(-1 / x)
-static double rc_atan_reduced_f64(double x, uint32_t top)
+// atan(x) for t = |x| below 1/16: atan(t) itself, and below 2^-27, x.
+static double rc_atan_below(double x, double t)
 {
-    if (top < 0x3fe60000u) {
-        return rc_atan_offset_f64(0, (2.0 * x - 1.0) / (2.0 + x));
+    if (t < 0x1p-27) {
+        return x;
     }
 
-    if (top < 0x3ff30000u) {
-        return rc_atan_offset_f64(1, (x - 1.0) / (x + 1.0));
-    }
+    return rc_atan_finish(x, (rc_arc_sum) {0}, t);
+}
 
-    if (top < 0x40038000u) {
-        return rc_atan_offset_f64(2, (x - 1.5) / (1.0 + 1.5 * x));
-    }
 
-    return rc_atan_offset_f64(3, -1.0 / x);
+// atan(x) for t = |x| from 1/16 to 16, through the cell of the table that the top 14 bits of t
+// pick, whose middle c has those bits and then a 1.
+static double rc_atan_by_table(double x, double t, uint64_t cell)
+{
+    rc_arc_sum base = rc_arc_atan_table[cell - RC_ARC_ATAN_TABLE_FIRST];
+    double c = rc_arc_atan_cell_middle(cell);
+
+    return rc_atan_finish(x, base, (t - c) / (1.0 + t * c));
 }
 
 
 double rc_atan_f64(double x)
 {
-    uint32_t top = (uint32_t)(rc_bitcast_f64(x) >> 32) & 0x7fffffffu;
+    double t = rc_abs_f64(x);
+    uint64_t cell = rc_bitcast_f64(t) >> RC_ARC_ATAN_TABLE_SHIFT;
 
-    // NaN stays NaN, and from 2^66 up atan(x) is +-pi/2 to double precision
-    if (x != x) {
-        return x;
+    if (cell > RC_ARC_ATAN_TABLE_LAST) {
+        return rc_atan_beyond(x, t);
     }
 
-    if (top >= 0x44100000u) {
-        return x < 0.0 ? -rc_atan_hi_f64[3] : rc_atan_hi_f64[3];
+    if (cell < RC_ARC_ATAN_TABLE_FIRST) {
+        return rc_atan_below(x, t);
     }
 
-    // Below 2^-27, atan(x) is x to double precision
-    if (top < 0x3e400000u) {
-        return x;
-    }
-
-    // Below 7/16, the series alone will do
-    if (top < 0x3fdc0000u) {
-        return x - rc_atan_remainder_f64(x);
-    }
-
-    if (x < 0.0) {
-        return -rc_atan_reduced_f64(-x, top);
-    }
-
-    return rc_atan_reduced_f64(x, top);
+    return rc_atan_by_table(x, t, cell);
 }

@@ -1,104 +1,53 @@
 // math/log_f64.c
 //
-// The natural logarithm of a double. Ported from musl 1.2.5 (MIT), src/math/log.c, which is Arm's
-// optimized-routines. Its notice:
-//
-// Copyright (c) 2018, Arm Limited.
-// SPDX-License-Identifier: MIT
+// rc_log_f64: the natural logarithm. We write x = 2^k m and take c, near 1 / m, from a table of
+// 256, so that log(x) = k ln2 - log(c) + log1p(r) with r = m c - 1 found exactly and |r| < 2^-8
+// (the reduction in exp_log_f64.h). The heads of k ln2 and -log(c) sum exactly, and adding r keeps
+// its error, so only the small terms round: log1p(r) - r from a degree 7 polynomial within
+// 2^-65.9 |r|, and the tails. Before the final rounding we are within about 2^-60 of log(x), under
+// 0.01 ulp, and the worst error we have found is 0.503 ulp.
 
 #include "richc/math/math.h"
 
-#include "exp_log_f64.h"
+#include "math/exp_log_f64.h"
 
-// The start of the range [offset, 2 offset) of z, which x's bits are reduced to by taking away k.
-#define RC_LOG_OFFSET_F64 0x3fe6000000000000ull
-
-// True for an x in [1 - 2^-4, 1 + 0x1.09p-4), given its bits.
-static bool rc_log_is_near_one_f64(uint64_t bits)
+// log(x) for the bits of a positive normal x, with the k_bias that finds its k. head + r is the
+// sum of the large terms, and r less its rounding error is exact (a fast two-sum: head is 0 or at
+// least as big a power of 2 as any r of its interval). The polynomial comes in two parts, its
+// terms to r^3 and r^4 times the rest, to keep the chain from r to the result short.
+static double rc_log_f64_normal(uint64_t bits, double k_bias)
 {
-    return bits - rc_bitcast_f64(1.0 - 0x1p-4) < rc_bitcast_f64(1.0 + 0x1.09p-4) - rc_bitcast_f64(1.0 - 0x1p-4);
-}
-
-
-// log(x) for an x near 1 but not 1, from log(1 + r) as a polynomial in r = x - 1. The worst-case
-// error is around 0.507 ulp.
-static double rc_log_near_one_f64(double x)
-{
-    const double *b = rc_log_data_f64.poly_near_one;
-    double r = x - 1.0;
+    const rc_log_f64_constants *c = &rc_log_f64_data;
+    rc_log_f64_reduced reduced = rc_log_f64_reduce(bits, 8, rc_log_f64_inverse, k_bias);
+    rc_exp_log_f64_pair log_c = rc_log_f64_table[reduced.index];
+    double r = rc_log_f64_r(reduced.scaled, 8, c->r_scale);
+    double head = reduced.k * c->ln2_hi + log_c.hi;
+    double sum = head + r;
     double r2 = r * r;
-    double r3 = r * r2;
-    double poly = r3 * (b[1] + r * b[2] + r2 * b[3] + r3 * (b[4] + r * b[5] + r2 * b[6] + r3 * (b[7] + r * b[8] + r2 * b[9] + r3 * b[10])));
-    double split = r * 0x1p27;
-    double r_hi = r + split - split;
-    double r_lo = r - r_hi;
+    double upper = (c->poly[1] + r * c->poly[2]) + r2 * (c->poly[3] + r * c->poly[4]);
+    double tail = (r - (sum - head)) + (reduced.k * c->ln2_lo + log_c.lo);
+    double lower = tail + r2 * (c->minus_half + r * c->poly[0]);
 
-    // r + b[0] r^2, where b[0] is -0.5, in two parts
-    double square = r_hi * r_hi * b[0];
-    double hi = r + square;
-    double lo = r - hi + square + b[0] * r_lo * (r_hi + r);
-
-    return poly + lo + hi;
+    return sum + (lower + (r2 * r2) * upper);
 }
 
 
-// log(x) for a positive normal x, given its bits: log(x) = k ln2 + log(c) + log1p(z/c - 1).
-static double rc_log_normal_f64(uint64_t bits)
-{
-    rc_log_reduction_f64 reduced = rc_log_reduce_f64(bits, RC_LOG_OFFSET_F64, RC_LOG_TABLE_BITS_F64);
-    rc_log_centre_f64 centre = rc_log_data_f64.centres[reduced.index];
-    rc_log_centre_split_f64 split = rc_log_data_f64.centre_splits[reduced.index];
-    const double *a = rc_log_data_f64.poly;
-
-    // r ~= z/c - 1, with |r| < 1/2N, and a rounding error of 2^-55/N + 2^-66
-    double r = (reduced.z - split.c_hi - split.c_lo) * centre.inv_c;
-
-    // hi + lo = r + log(c) + k ln2
-    double w = reduced.k * rc_log_data_f64.ln2_hi + centre.log_c;
-    double hi = w + r;
-    double lo = w - hi + r + reduced.k * rc_log_data_f64.ln2_lo;
-
-    // log(x) = lo + (log1p(r) - r) + hi. The worst-case error is 0.5 + 4.13/N + abs poly error
-    // 2^57 ulp (+ 0.002 ulp without fma) for |log(x)| > 2^-5, and 0.5 + 2.06/N + abs poly error
-    // 2^56 ulp (+ 0.001 ulp without fma) for |log(x)| > 2^-4.
-    double r2 = r * r;
-
-    return lo + r2 * a[0] + r * r2 * (a[1] + r * a[2] + r2 * (a[3] + r * a[4])) + hi;
-}
-
-
-// log(x) for an x below 2^-1022 (zero, subnormal or negative), infinite or NaN.
-static double rc_log_unusual_f64(double x)
-{
-    uint64_t bits = rc_bitcast_f64(x);
-
-    if ((bits << 1) == 0) {
-        return rc_bitcast_u64(0xfff0000000000000ull);
-    }
-
-    if (bits == 0x7ff0000000000000ull) {
-        return x;
-    }
-
-    if (rc_log_is_negative_or_nan_f64(bits)) {
-        return (x - x) / (x - x);
-    }
-
-    return rc_log_normal_f64(rc_log_normalised_bits_f64(x));
-}
-
-
+// A subnormal x joins the normal path as its bits, which as an integer are x 2^1074: converting
+// them makes a normal double with no arithmetic on a subnormal, which some processors take a slow
+// path for.
 double rc_log_f64(double x)
 {
     uint64_t bits = rc_bitcast_f64(x);
+    double k_bias = rc_log_f64_data.k_bias;
 
-    if (rc_log_is_near_one_f64(bits)) {
-        return x == 1.0 ? 0.0 : rc_log_near_one_f64(x);
+    if (!rc_exp_log_f64_is_positive_normal(bits)) {
+        if (!rc_exp_log_f64_is_positive_subnormal(bits)) {
+            return rc_exp_log_f64_log_special(bits);
+        }
+
+        bits = rc_bitcast_f64((double)(int64_t)bits);
+        k_bias += 1074.0;
     }
 
-    if (rc_log_is_unusual_f64(bits)) {
-        return rc_log_unusual_f64(x);
-    }
-
-    return rc_log_normal_f64(bits);
+    return rc_log_f64_normal(bits, k_bias);
 }

@@ -1,105 +1,85 @@
 // math/cbrt_f64.c
 //
-// The cube root of a double. Ported from musl 1.2.5 (MIT), src/math/cbrt.c, which is FreeBSD's
-// s_cbrt.c. Its notice:
+// rc_cbrt_f64: the real cube root of a double.
 //
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+// A third of |x|'s top 32 bits, plus a bias, read back as a double's top 32 bits, is a first guess
+// at the root within 3.2%, and a step of Halley's method takes that to 2^-15.4. We cut that to a
+// y of 17 significant bits, so y^3 is exact, and so is x - y^3, so the excess e = x / y^3 - 1
+// costs one rounding, and cbrt(x) = y (1 + e)^(1/3) = y (1 + e/3 - e^2/9 + 5e^3/81 - 10e^4/243)
+// to within 2^-70, as |e| < 2^-13.1. The correction is tiny beside y, so the error is the final
+// rounding and very little more: under 0.501 ulp. Exact cubes come out exact. The guess carries
+// x's sign, and every step is odd, so cbrt(-x) is exactly -cbrt(x).
 //
-// Developed at SunPro, a Sun Microsystems, Inc. business.
-// Permission to use, copy, modify, and distribute this
-// software is freely granted, provided that this notice
-// is preserved.
-//
-// Optimized by Bruce D. Evans.
+// Beyond 2^600 in size or below 2^-600, x is scaled by 2^-600 or 2^600 first, so that nothing
+// leaves the normal range. A subnormal x is m 2^-1074 for an integer m, so its root is that of m,
+// which we make from the bits, times 2^-358: arithmetic on a subnormal can be slow.
 
 #include "richc/math/math.h"
 
-// The biases that turn a third of the high word into a rough cube root, for normal and subnormal
-// numbers: (1023 - 1023/3 - 0.03306235651) * 2^20, and that less 54/3 for the 2^54 scaling.
-static const uint32_t rc_cbrt_bias_f64 = 715094163;
-static const uint32_t rc_cbrt_subnormal_bias_f64 = 696219795;
+#include "math/arc.h"
 
-// P(r) ~= 1 / cbrt(r) for |r - 1| < 1/10, with |1/cbrt(r) - P(r)| < 2^-23.5.
-static const double rc_cbrt_p_f64[] = {
-    1.87595182427177009643,   // 0x3ffe03e6 0f61e692
-    -1.88497979543377169875,  // 0xbffe28e0 92f02420
-    1.621429720105354466140,  // 0x3ff9f160 4a49d6c2
-    -0.758397934778766047437, // 0xbfe844cb bee751d9
-    0.145996192886612446982,  // 0x3fc2b000 d4e4edd7
-};
+// What the guess adds to a third of |x|'s top 32 bits: the one that makes it closest, relatively.
+#define RC_CBRT_BIAS 715093542u
 
 
-// A cube root of the nonzero finite x good to 5 bits. For x = 2^e (1 + m), cbrt(x) is about
-// 2^(e/3) (1 + (e%3 + m) / 3), within 1 in 16, and a bias of -0.03306235651 on the last term
-// halves that. Dividing the high word by 3, exponent bias and all, gives almost exactly this. A
-// subnormal is scaled up by 2^54 first, and its bias divides the scale back out.
-static double rc_cbrt_estimate_f64(double x, uint32_t top)
+// Whether |x|, as its bits, is strictly between those of 2^-600 and 2^600, so its root needs no
+// scaling: one unsigned comparison.
+static bool rc_cbrt_is_ordinary(uint64_t magnitude)
 {
-    uint64_t sign = rc_bitcast_f64(x) & 0x8000000000000000ull;
+    return magnitude - 0x1a70000000000001ull < 0x6570000000000000ull - 0x1a70000000000001ull;
+}
 
-    if (top < 0x00100000u) {
-        uint32_t scaled_top = (uint32_t)(rc_bitcast_f64(x * 0x1p54) >> 32) & 0x7fffffffu;
 
-        return rc_bitcast_u64(sign | ((uint64_t)(scaled_top / 3 + rc_cbrt_subnormal_bias_f64) << 32));
+// The first guess at cbrt(x) for a normal x: a third of |x|'s top 32 bits, plus the bias, as a
+// double's top 32 bits, with x's sign.
+static double rc_cbrt_guess(double x)
+{
+    uint64_t bits = rc_bitcast_f64(x);
+    uint32_t top = (uint32_t)(bits >> 32) & 0x7fffffffu;
+
+    return rc_bitcast_u64((uint64_t)(top / 3 + RC_CBRT_BIAS) << 32 | (bits & 0x8000000000000000ull));
+}
+
+
+// The cube root of x, for |x| between 2^-600 and 2^600.
+static double rc_cbrt_ordinary(double x)
+{
+    double near = rc_arc_cbrt_halley(x, rc_cbrt_guess(x));
+    double y = rc_bitcast_u64(rc_bitcast_f64(near) & 0xfffffff000000000ull);
+    double cube = y * y * y;
+    double excess = (x - cube) / cube;
+    double series = 0x1.5555555555555p-2 +
+        excess * (-0x1.c71c71c71c71cp-4 + excess * (0x1.f9add3c0ca458p-5 + excess * -0x1.511e8d2b3183bp-5));
+
+    return y + y * (excess * series);
+}
+
+
+// The cube root of x beyond that, with magnitude its bits less the sign: zero, infinite or NaN;
+// subnormal; or scaled into range by 2^600 or 2^-600.
+static double rc_cbrt_extreme(double x, uint64_t magnitude)
+{
+    bool tiny = magnitude < 0x3ff0000000000000ull;
+
+    if (magnitude == 0 || magnitude >= 0x7ff0000000000000ull) {
+        return x + x;
     }
 
-    return rc_bitcast_u64(sign | ((uint64_t)(top / 3 + rc_cbrt_bias_f64) << 32));
-}
+    if (magnitude < 0x0010000000000000ull) {
+        return rc_cbrt_ordinary(rc_copysign_f64((double)(int64_t)magnitude, x)) * 0x1p-358;
+    }
 
-
-// t to 23 bits, as t P(t^3 / x), since t is within about 1/32 of cbrt(x) and so t^3 / x is close
-// enough to 1.
-static double rc_cbrt_refine_f64(double t, double x)
-{
-    const double *p = rc_cbrt_p_f64;
-    double r = (t * t) * (t / x);
-
-    return t * ((p[0] + r * (p[1] + r * p[2])) + ((r * r) * r) * (p[3] + r * p[4]));
-}
-
-
-// t rounded away from zero to 23 bits: a little sloppily, but always larger in magnitude than
-// cbrt(x) and by no more than about 2 23-bit ulps, which the Newton step needs.
-static double rc_cbrt_round_f64(double t)
-{
-    return rc_bitcast_u64((rc_bitcast_f64(t) + 0x80000000u) & 0xffffffffc0000000ull);
-}
-
-
-// One Newton step to 53 bits, with an error under 0.667 ulps. t * t and t + t are exact, and so is
-// r - t, with |r| < |t|.
-static double rc_cbrt_newton_f64(double t, double x)
-{
-    double r = x / (t * t);
-    double correction = (r - t) / ((t + t) + r);
-
-    return t + t * correction;
-}
-
-
-// The cube root of the nonzero finite x.
-static double rc_cbrt_finite_f64(double x, uint32_t top)
-{
-    double estimate = rc_cbrt_estimate_f64(x, top);
-    double t23 = rc_cbrt_round_f64(rc_cbrt_refine_f64(estimate, x));
-
-    return rc_cbrt_newton_f64(t23, x);
+    return rc_cbrt_ordinary(x * (tiny ? 0x1p600 : 0x1p-600)) * (tiny ? 0x1p-200 : 0x1p200);
 }
 
 
 double rc_cbrt_f64(double x)
 {
     uint64_t magnitude = rc_bitcast_f64(x) & 0x7fffffffffffffffull;
-    uint32_t top = (uint32_t)(magnitude >> 32);
 
-    // Infinity, NaN and both zeros are their own cube roots
-    if (top >= 0x7ff00000u) {
-        return x + x;
+    if (!rc_cbrt_is_ordinary(magnitude)) {
+        return rc_cbrt_extreme(x, magnitude);
     }
 
-    if (magnitude == 0) {
-        return x;
-    }
-
-    return rc_cbrt_finite_f64(x, top);
+    return rc_cbrt_ordinary(x);
 }

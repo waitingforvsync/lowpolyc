@@ -65,33 +65,33 @@ typedef struct accuracy_job {
     accuracy_worst worst;
 } accuracy_job;
 
-// The limits are the worst errors measured, or musl's stated bounds where sampling could miss the
-// worst, with a little room, so a change that makes a function worse shows up.
+// The limits are the worst errors measured, or the bound a function's banner derives where sampling
+// could miss the worst, with a little room, so a change that makes a function worse shows up.
 static const accuracy_case accuracy_cases[] = {
-    {.name = "sin_f32", .ours_f32 = rc_sin_f32, .reference_f32 = sin, .limit_ulps = 0.51},
-    {.name = "cos_f32", .ours_f32 = rc_cos_f32, .reference_f32 = cos, .limit_ulps = 0.51},
-    {.name = "tan_f32", .ours_f32 = rc_tan_f32, .reference_f32 = tan, .limit_ulps = 0.81},
-    {.name = "asin_f32", .ours_f32 = rc_asin_f32, .reference_f32 = asin, .limit_ulps = 0.75},
-    {.name = "acos_f32", .ours_f32 = rc_acos_f32, .reference_f32 = acos, .limit_ulps = 0.92},
-    {.name = "atan_f32", .ours_f32 = rc_atan_f32, .reference_f32 = atan, .limit_ulps = 0.86},
-    {.name = "exp_f32", .ours_f32 = rc_exp_f32, .reference_f32 = exp, .limit_ulps = 0.51},
-    {.name = "log_f32", .ours_f32 = rc_log_f32, .reference_f32 = log, .limit_ulps = 0.82},
-    {.name = "log2_f32", .ours_f32 = rc_log2_f32, .reference_f32 = log2, .limit_ulps = 0.76},
+    {.name = "sin_f32", .ours_f32 = rc_sin_f32, .reference_f32 = sin, .limit_ulps = 0.502},
+    {.name = "cos_f32", .ours_f32 = rc_cos_f32, .reference_f32 = cos, .limit_ulps = 0.502},
+    {.name = "tan_f32", .ours_f32 = rc_tan_f32, .reference_f32 = tan, .limit_ulps = 0.501},
+    {.name = "asin_f32", .ours_f32 = rc_asin_f32, .reference_f32 = asin, .limit_ulps = 0.505},
+    {.name = "acos_f32", .ours_f32 = rc_acos_f32, .reference_f32 = acos, .limit_ulps = 0.505},
+    {.name = "atan_f32", .ours_f32 = rc_atan_f32, .reference_f32 = atan, .limit_ulps = 0.51},
+    {.name = "exp_f32", .ours_f32 = rc_exp_f32, .reference_f32 = exp, .limit_ulps = 0.502},
+    {.name = "log_f32", .ours_f32 = rc_log_f32, .reference_f32 = log, .limit_ulps = 0.501},
+    {.name = "log2_f32", .ours_f32 = rc_log2_f32, .reference_f32 = log2, .limit_ulps = 0.501},
     {.name = "cbrt_f32", .ours_f32 = rc_cbrt_f32, .reference_f32 = cbrt, .limit_ulps = 0.501},
-    {.name = "atan2_f32", .ours2_f32 = rc_atan2_f32, .reference2_f32 = atan2, .limit_ulps = 1.6, .low = -1e3, .high = 1e3},
-    {.name = "pow_f32", .ours2_f32 = rc_pow_f32, .reference2_f32 = pow, .limit_ulps = 0.82, .low = 0.0, .high = 100.0},
-    {.name = "sin_f64", .ours_f64 = rc_sin_f64, .reference_f64 = sinl, .limit_ulps = 0.85, .low = -1e6, .high = 1e6},
-    {.name = "cos_f64", .ours_f64 = rc_cos_f64, .reference_f64 = cosl, .limit_ulps = 0.85, .low = -1e6, .high = 1e6},
-    {.name = "tan_f64", .ours_f64 = rc_tan_f64, .reference_f64 = tanl, .limit_ulps = 0.95, .low = -1e6, .high = 1e6},
-    {.name = "asin_f64", .ours_f64 = rc_asin_f64, .reference_f64 = asinl, .limit_ulps = 0.95, .low = -1.0, .high = 1.0},
-    {.name = "acos_f64", .ours_f64 = rc_acos_f64, .reference_f64 = acosl, .limit_ulps = 0.95, .low = -1.0, .high = 1.0},
-    {.name = "atan_f64", .ours_f64 = rc_atan_f64, .reference_f64 = atanl, .limit_ulps = 0.9, .low = -1e3, .high = 1e3},
-    {.name = "exp_f64", .ours_f64 = rc_exp_f64, .reference_f64 = expl, .limit_ulps = 0.52, .low = -750.0, .high = 750.0},
-    {.name = "log_f64", .ours_f64 = rc_log_f64, .reference_f64 = logl, .limit_ulps = 0.53, .low = 0.0, .high = 1e10},
-    {.name = "log2_f64", .ours_f64 = rc_log2_f64, .reference_f64 = log2l, .limit_ulps = 0.56, .low = 0.0, .high = 1e10},
-    {.name = "cbrt_f64", .ours_f64 = rc_cbrt_f64, .reference_f64 = cbrtl, .limit_ulps = 0.7, .low = -1e10, .high = 1e10},
-    {.name = "atan2_f64", .ours2_f64 = rc_atan2_f64, .reference2_f64 = atan2l, .limit_ulps = 1.6, .low = -1e3, .high = 1e3},
-    {.name = "pow_f64", .ours2_f64 = rc_pow_f64, .reference2_f64 = powl, .limit_ulps = 0.52, .low = 0.0, .high = 100.0},
+    {.name = "atan2_f32", .ours2_f32 = rc_atan2_f32, .reference2_f32 = atan2, .limit_ulps = 0.52, .low = -1e3, .high = 1e3},
+    {.name = "pow_f32", .ours2_f32 = rc_pow_f32, .reference2_f32 = pow, .limit_ulps = 0.52, .low = 0.0, .high = 100.0},
+    {.name = "sin_f64", .ours_f64 = rc_sin_f64, .reference_f64 = sinl, .limit_ulps = 0.65, .low = -1e6, .high = 1e6},
+    {.name = "cos_f64", .ours_f64 = rc_cos_f64, .reference_f64 = cosl, .limit_ulps = 0.65, .low = -1e6, .high = 1e6},
+    {.name = "tan_f64", .ours_f64 = rc_tan_f64, .reference_f64 = tanl, .limit_ulps = 0.80, .low = -1e6, .high = 1e6},
+    {.name = "asin_f64", .ours_f64 = rc_asin_f64, .reference_f64 = asinl, .limit_ulps = 0.80, .low = -1.0, .high = 1.0},
+    {.name = "acos_f64", .ours_f64 = rc_acos_f64, .reference_f64 = acosl, .limit_ulps = 0.75, .low = -1.0, .high = 1.0},
+    {.name = "atan_f64", .ours_f64 = rc_atan_f64, .reference_f64 = atanl, .limit_ulps = 0.75, .low = -1e3, .high = 1e3},
+    {.name = "exp_f64", .ours_f64 = rc_exp_f64, .reference_f64 = expl, .limit_ulps = 0.51, .low = -750.0, .high = 750.0},
+    {.name = "log_f64", .ours_f64 = rc_log_f64, .reference_f64 = logl, .limit_ulps = 0.505, .low = 0.0, .high = 1e10},
+    {.name = "log2_f64", .ours_f64 = rc_log2_f64, .reference_f64 = log2l, .limit_ulps = 0.505, .low = 0.0, .high = 1e10},
+    {.name = "cbrt_f64", .ours_f64 = rc_cbrt_f64, .reference_f64 = cbrtl, .limit_ulps = 0.501, .low = -1e10, .high = 1e10},
+    {.name = "atan2_f64", .ours2_f64 = rc_atan2_f64, .reference2_f64 = atan2l, .limit_ulps = 0.70, .low = -1e3, .high = 1e3},
+    {.name = "pow_f64", .ours2_f64 = rc_pow_f64, .reference2_f64 = powl, .limit_ulps = 0.515, .low = 0.0, .high = 100.0},
 };
 
 // The special values every sampled run tries, in every combination for two arguments.
@@ -339,7 +339,7 @@ static bool accuracy_measure(const accuracy_case *test, uint64_t samples)
         accuracy_note(&worst, jobs[i].worst.ulps, jobs[i].worst.x, jobs[i].worst.y);
     }
 
-    printf("%-10s %12" PRIu64 " inputs  worst %.3f ulp at (%a, %a)  limit %.2f  %s\n", test->name, total, worst.ulps, worst.x, worst.y,
+    printf("%-10s %12" PRIu64 " inputs  worst %.3f ulp at (%a, %a)  limit %.3f  %s\n", test->name, total, worst.ulps, worst.x, worst.y,
         test->limit_ulps, worst.ulps <= test->limit_ulps ? "ok" : "FAIL");
     return worst.ulps <= test->limit_ulps;
 }

@@ -1,61 +1,51 @@
 // math/cbrt_f32.c
 //
-// The cube root of a float. Ported from musl 1.2.5 (MIT), src/math/cbrtf.c, which is FreeBSD's
-// s_cbrtf.c. Its notice:
+// rc_cbrt_f32: the real cube root of a float, worked in double.
 //
-// Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
-// Debugged and optimized by Bruce D. Evans.
-//
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
-//
-// Developed at SunPro, a Sun Microsystems, Inc. business.
-// Permission to use, copy, modify, and distribute this
-// software is freely granted, provided that this notice
-// is preserved.
+// A third of |x|'s bits, plus a bias, read back as a float, is a first guess at the root within
+// 3.2%: it divides the exponent by 3 and roughly roots the rest. Each step of Halley's method, in
+// double, triples the bits that are right, to 2^-15.4 and then about 2^-45, so the result rounds
+// to the nearest float but in the rarest of cases: at worst 0.5 ulp and a hair more, over every
+// float. Exact cubes come out exact. The guess carries x's sign, and every step is odd, so
+// cbrt(-x) is exactly -cbrt(x). A subnormal x is m 2^-149 for an integer m, so its root is that of
+// 2m, a normal float we make from the bits, times 2^-50: arithmetic on a subnormal can be slow.
 
 #include "richc/math/math.h"
 
-// The biases that turn a third of the bits into a rough cube root, for normal and for subnormal
-// numbers: (127 - 127.0/3 - 0.03306235651) * 2^23, and the same less 24/3 for the 2^24 scaling.
-static const uint32_t rc_cbrt_bias_f32 = 709958130;
-static const uint32_t rc_cbrt_subnormal_bias_f32 = 642849266;
+#include "math/arc.h"
+
+// What the guess adds to a third of |x|'s bits: the one that makes it closest, relatively.
+#define RC_CBRT_BIAS 709953151u
 
 
-// A cube root of the nonzero finite x good to 5 bits, from a third of its bits. A subnormal is
-// scaled up by 2^24 first, and its bias divides the scale back out.
-static float rc_cbrt_estimate_f32(float x, uint32_t magnitude)
+// Whether |x|, as its bits, is a normal float: not zero, subnormal, infinite or NaN.
+static bool rc_cbrt_is_normal(uint32_t magnitude)
 {
-    uint32_t sign = rc_bitcast_f32(x) & 0x80000000u;
+    return magnitude - 0x00800000u < 0x7f000000u;
+}
 
-    if (magnitude < 0x00800000u) {
-        uint32_t scaled = rc_bitcast_f32(x * 0x1p24f) & 0x7fffffffu;
 
-        return rc_bitcast_u32(sign | (scaled / 3 + rc_cbrt_subnormal_bias_f32));
+// The cube root of a normal float x, unrounded.
+static double rc_cbrt_normal(float x)
+{
+    uint32_t bits = rc_bitcast_f32(x);
+    uint32_t magnitude = bits & 0x7fffffffu;
+    double guess = (double)rc_bitcast_u32((magnitude / 3 + RC_CBRT_BIAS) | (bits & 0x80000000u));
+    double d = (double)x;
+
+    return rc_arc_cbrt_halley(d, rc_arc_cbrt_halley(d, guess));
+}
+
+
+// The cube root of a float that isn't normal, with magnitude its bits less the sign: zero,
+// infinite or NaN, or subnormal, as 2m times 2^-150.
+static float rc_cbrt_abnormal(float x, uint32_t magnitude)
+{
+    if (magnitude == 0 || magnitude >= 0x7f800000u) {
+        return x + x;
     }
 
-    return rc_bitcast_u32(sign | (magnitude / 3 + rc_cbrt_bias_f32));
-}
-
-
-// One Newton step for t^3 = x, solving t^2 - x/t = 0, arranged so nothing overflows or
-// underflows in double.
-static double rc_cbrt_newton_f32(double t, double x)
-{
-    double r = t * t * t;
-
-    return t * (x + x + r) / (x + r + r);
-}
-
-
-// The cube root of the nonzero finite x. Two Newton steps take the estimate to 16 bits and then 47,
-// and rounding that to 24 is perfect.
-static float rc_cbrt_finite_f32(float x, uint32_t magnitude)
-{
-    double estimate = (double)rc_cbrt_estimate_f32(x, magnitude);
-    double t16 = rc_cbrt_newton_f32(estimate, (double)x);
-    double t47 = rc_cbrt_newton_f32(t16, (double)x);
-
-    return (float)t47;
+    return (float)(rc_cbrt_normal(rc_copysign_f32((float)(magnitude << 1), x)) * 0x1p-50);
 }
 
 
@@ -63,14 +53,9 @@ float rc_cbrt_f32(float x)
 {
     uint32_t magnitude = rc_bitcast_f32(x) & 0x7fffffffu;
 
-    // Infinity, NaN and both zeros are their own cube roots
-    if (magnitude >= 0x7f800000u) {
-        return x + x;
+    if (!rc_cbrt_is_normal(magnitude)) {
+        return rc_cbrt_abnormal(x, magnitude);
     }
 
-    if (magnitude == 0) {
-        return x;
-    }
-
-    return rc_cbrt_finite_f32(x, magnitude);
+    return (float)rc_cbrt_normal(x);
 }

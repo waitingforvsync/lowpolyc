@@ -1,278 +1,268 @@
 // math/exp_log_f64.h
 //
-// The tables behind rc_exp_f64, rc_log_f64, rc_log2_f64 and rc_pow_f64, and the parts they share:
-// exp's kernel, which pow ends with too, and the reduction of x to 2^k z that every log starts
-// with. Private to core. Ported from musl 1.2.5 (MIT), src/math/exp_data.h, log_data.h,
-// log2_data.h, pow_data.h, exp.c and pow.c, which are Arm's optimized-routines. Their notice:
+// What rc_exp_f64, rc_log_f64, rc_log2_f64 and rc_pow_f64 share: their tables and constants, the
+// log reduction and the exp kernel. The kernels are inline, so each function keeps its own fast
+// path, and so is exp's rare scaling near overflow and underflow, so that rc_exp_f64 calls
+// nothing and V8 spares it a stack check.
 //
-// Copyright (c) 2018, Arm Limited.
-// SPDX-License-Identifier: MIT
+// The constants live in the .c files with the tables, out of the compiler's sight, so that it
+// loads them rather than writing them into the code. V8 builds a double from an immediate in two
+// instructions where a load takes one, which costs wasm up to a tenth of its speed here; natively
+// it makes no difference.
+//
+// log works on x = 2^k m, m in [1, 2). The top b bits of m pick c = j / 2^(b + 1) from a table,
+// chosen so that r = m c - 1 is small, and integer arithmetic finds r exactly: m as a 53-bit
+// integer times j is under 2^62, and is 2^(53 + b) (1 + r). Less 2^(53 + b) it is at most 2^53 in
+// size, so it becomes a double exactly too. Then log(x) = k ln2 - log(c) + log1p(r).
+//
+// exp works on x = (128 k + j) ln2 / 128 + r, |r| <= ln2 / 256, as 2^k 2^(j/128) e^r, with
+// 2^(j/128) from a table as hi (1 + lo) and e^r - 1 from a polynomial.
 
 #ifndef RC_MATH_EXP_LOG_F64_H_
 #define RC_MATH_EXP_LOG_F64_H_
 
 #include "richc/math/math.h"
 
-// ---- tables ----
+// Beyond these e^x rounds to infinity or to zero. The true thresholds are 709.7827 and -745.1332.
+#define RC_EXP_F64_OVERFLOW  709.79
+#define RC_EXP_F64_UNDERFLOW -745.2
 
-#define RC_EXP_TABLE_BITS_F64     7
-#define RC_LOG_TABLE_BITS_F64     7
-#define RC_LOG2_TABLE_BITS_F64    6
-#define RC_POW_LOG_TABLE_BITS_F64 7
+// The bits of rc_exp_f64_data.fast, 700.
+#define RC_EXP_F64_FAST_BITS 0x4085e00000000000ull
 
-// The constants for exp, which pow shares.
-typedef struct rc_exp_table_f64 {
-    double inv_ln2_n;
+// The bits of infinity and of the smallest normal number, and the significand's mask.
+#define RC_EXP_LOG_F64_INFINITY_BITS 0x7ff0000000000000ull
+#define RC_EXP_LOG_F64_MIN_NORMAL    0x0010000000000000ull
+#define RC_EXP_LOG_F64_MANTISSA_BITS 0x000fffffffffffffull
+
+// The bits of 2^52. An exponent field put in their low bits makes the double 2^52 + exponent.
+#define RC_EXP_LOG_F64_EXPONENT_BITS 0x4330000000000000ull
+
+// A double carried as the unevaluated sum hi + lo, lo being the smaller.
+typedef struct rc_exp_log_f64_pair {
+    double hi;
+    double lo;
+} rc_exp_log_f64_pair;
+
+// The constants of the exp kernel. Below fast in size, e^x and the 2^k it is built on are normal.
+// x 128 / ln2 plus shift rounds to the nearest whole n. ln2 / 128 is step_hi, a multiple of 2^-42
+// so that n times it is exact, plus step_lo. And e^r = 1 + r + r^2 (poly[0] + ... + poly[3] r^3).
+typedef struct rc_exp_f64_constants {
+    double fast;
+    double inv_step;
     double shift;
-    double neg_ln2_hi_n;
-    double neg_ln2_lo_n;
+    double step_hi;
+    double step_lo;
     double poly[4];
+} rc_exp_f64_constants;
 
-    // 2^(k/N) ~= H[k] (1 + T[k]) for k in [0, N), as the bits of T[k] then of H[k] - (k << 52) / N
-    uint64_t scales[2 * (1 << RC_EXP_TABLE_BITS_F64)];
-} rc_exp_table_f64;
-
-// 1/c and log(c) for the c near the centre of one subinterval of z, for log and log2.
-typedef struct rc_log_centre_f64 {
-    double inv_c;
-    double log_c;
-} rc_log_centre_f64;
-
-// That c as the sum of two doubles, for working out z/c - 1 without fma.
-typedef struct rc_log_centre_split_f64 {
-    double c_hi;
-    double c_lo;
-} rc_log_centre_split_f64;
-
-// The constants for log.
-typedef struct rc_log_table_f64 {
+// The constants of rc_log_f64, which rc_pow_f64 shares. k_bias, 2^52 + 1023, takes k from the
+// double that the exponent field makes in the bits of 2^52, and r_scale, 2^-61, turns 2^61 r into
+// r. ln2 is ln2_hi, a multiple of 2^-42 so that k times it is exact, plus ln2_lo. And
+// log1p(r) = r - r^2 / 2 + r^3 (poly[0] + ... + poly[4] r^4).
+typedef struct rc_log_f64_constants {
+    double k_bias;
+    double r_scale;
     double ln2_hi;
     double ln2_lo;
+    double minus_half;
     double poly[5];
-    double poly_near_one[11];
-    rc_log_centre_f64 centres[1 << RC_LOG_TABLE_BITS_F64];
-    rc_log_centre_split_f64 centre_splits[1 << RC_LOG_TABLE_BITS_F64];
-} rc_log_table_f64;
+} rc_log_f64_constants;
 
-// The constants for log2.
-typedef struct rc_log2_table_f64 {
+// The constants of rc_log2_f64, which works on R = 2^61 r rather than r: each constant that
+// multiplies a power of r is scaled by that power of 2^-61, which changes no rounding. k_bias as
+// for log. 2^-61 / ln2 is inv_ln2 rounded, and also inv_ln2_hi, a multiple of 2^-87 so that a
+// 26-bit R times it is exact, plus inv_ln2_lo. And
+// log1p(r) / ln2 = R inv_ln2 + R^2 (poly[0] + ... + poly[5] R^5).
+typedef struct rc_log2_f64_constants {
+    double k_bias;
+    double inv_ln2;
     double inv_ln2_hi;
     double inv_ln2_lo;
     double poly[6];
-    double poly_near_one[10];
-    rc_log_centre_f64 centres[1 << RC_LOG2_TABLE_BITS_F64];
-    rc_log_centre_split_f64 centre_splits[1 << RC_LOG2_TABLE_BITS_F64];
-} rc_log2_table_f64;
+} rc_log2_f64_constants;
 
-// 1/c and log(c) for pow's log, with log(c) split in two. The pad is unused, but makes each entry
-// a power of two in size, for quicker indexing.
-typedef struct rc_pow_log_centre_f64 {
-    double inv_c;
-    double pad;
-    double log_c;
-    double log_c_tail;
-} rc_pow_log_centre_f64;
+// The constants of rc_pow_f64's log. log1p(r) = r - r^2 / 2 + r^3 (poly[0] + ... + poly[5] r^5),
+// and head_bias and tail_bias turn the doubles that r's two parts make into those parts. They are
+// kept apart, or clang packs their two subtractions into one vector operation, costing shuffles.
+typedef struct rc_pow_f64_constants {
+    double head_bias;
+    double poly[6];
+    double tail_bias;
+} rc_pow_f64_constants;
 
-// The constants for the log inside pow.
-typedef struct rc_pow_log_table_f64 {
-    double ln2_hi;
-    double ln2_lo;
-    double poly[7];
-    rc_pow_log_centre_f64 centres[1 << RC_POW_LOG_TABLE_BITS_F64];
-} rc_pow_log_table_f64;
-
-extern const rc_exp_table_f64 rc_exp_data_f64;
-extern const rc_log_table_f64 rc_log_data_f64;
-extern const rc_log2_table_f64 rc_log2_data_f64;
-extern const rc_pow_log_table_f64 rc_pow_log_data_f64;
-
-// ---- bits ----
-
-// The top 12 bits of x: its sign and exponent.
-static inline uint32_t rc_top12_f64(double x)
-{
-    return (uint32_t)(rc_bitcast_f64(x) >> 52);
-}
-
-// The top 12 bits of bits read as a signed number: an arithmetic shift down by 52, without
-// shifting a negative value.
-static inline int32_t rc_top12_signed_f64(uint64_t bits)
-{
-    return (int32_t)((bits >> 52) ^ 0x800u) - 0x800;
-}
-
-// ---- exp, for exp and pow ----
-
-// What exp's argument reduction leaves: the result is scale (1 + tmp), where the bits of scale are
-// scale_bits, whose exponent may have wrapped into the sign bit, and k is the low 32 bits of ki.
-typedef struct rc_exp_reduction_f64 {
+// e^(hi + lo) = 2^k t_hi (1 + tmp), where t_hi is 2^(j/128) rounded and n_bits are the bits of
+// 1.5 2^52 + n, n = 128 k + j.
+typedef struct rc_exp_f64_reduced {
+    uint64_t n_bits;
+    double t_hi;
     double tmp;
-    uint64_t scale_bits;
-    uint64_t ki;
-} rc_exp_reduction_f64;
+} rc_exp_f64_reduced;
 
-// x = k ln2/N + r, with r in [-ln2/2N, ln2/2N], so that exp(x) = 2^(k/N) exp(r), with exp(r) in
-// [2^(-1/2N), 2^(1/2N)], and 2^(k/N) exp(r) ~= scale + scale (tail + exp(r) - 1). xtail is added
-// to r. sign_bias, 0 or 0x800 << 7, lands on scale's sign bit.
-static inline rc_exp_reduction_f64 rc_exp_reduce_f64(double x, double xtail, uint64_t sign_bias)
+// x = 2^k m reduced with a table of 2^b: k, the table index, and scaled, the 53-bit integer m
+// times j, which is 2^(53 + b) (1 + r).
+typedef struct rc_log_f64_reduced {
+    double k;
+    uint32_t index;
+    uint64_t scaled;
+} rc_log_f64_reduced;
+
+// 2^(j/128) for j in [0, 128), as hi (1 + lo), and the exp kernel's constants.
+extern const rc_exp_log_f64_pair rc_exp_f64_table[128];
+extern const rc_exp_f64_constants rc_exp_f64_data;
+
+// The j of each of log's 256 intervals, c being j / 512, -log(c) for each as a multiple of 2^-42
+// and the rest, and the constants of log and of pow's log.
+extern const uint16_t rc_log_f64_inverse[256];
+extern const rc_exp_log_f64_pair rc_log_f64_table[256];
+extern const rc_log_f64_constants rc_log_f64_data;
+extern const rc_pow_f64_constants rc_pow_f64_data;
+
+// The same j for log2, with -log2(c), and log2's constants.
+extern const uint16_t rc_log2_f64_inverse[256];
+extern const rc_exp_log_f64_pair rc_log2_f64_table[256];
+extern const rc_log2_f64_constants rc_log2_f64_data;
+
+// ---- exact steps ----
+
+// a + b and its rounding error, exactly, whatever their sizes (Knuth's two-sum).
+static inline rc_exp_log_f64_pair rc_exp_log_f64_sum(double a, double b)
 {
-    const double *poly = rc_exp_data_f64.poly;
-    double z = rc_exp_data_f64.inv_ln2_n * x;
-    double shifted = z + rc_exp_data_f64.shift;
-    uint64_t ki = rc_bitcast_f64(shifted);
-    double kd = shifted - rc_exp_data_f64.shift;
-    double r = x + kd * rc_exp_data_f64.neg_ln2_hi_n + kd * rc_exp_data_f64.neg_ln2_lo_n + xtail;
-    uint64_t pair = 2 * (ki % (1u << RC_EXP_TABLE_BITS_F64));
-    uint64_t top = (ki + sign_bias) << (52 - RC_EXP_TABLE_BITS_F64);
-    double tail = rc_bitcast_u64(rc_exp_data_f64.scales[pair]);
-    double r2 = r * r;
+    double sum = a + b;
+    double b_part = sum - a;
 
-    // Only a valid scale when -1023 N < k < 1024 N. Without fma the worst case error is 0.25/N ulp
-    // larger: less than 0.5 + 1.11/N + (abs poly error * 2^53) ulp in all.
-    return (rc_exp_reduction_f64) {
-        .tmp = tail + r + r2 * (poly[0] + r * poly[1]) + r2 * r2 * (poly[2] + r * poly[3]),
-        .scale_bits = rc_exp_data_f64.scales[pair + 1] + top,
-        .ki = ki
+    return (rc_exp_log_f64_pair) {.hi = sum, .lo = (a - (sum - b_part)) + (b - b_part)};
+}
+
+// x with its low bits cleared, keeping the top 53 - dropped bits of its significand. The rest,
+// x minus this, is exact.
+static inline double rc_exp_log_f64_head(double x, uint32_t dropped)
+{
+    return rc_bitcast_u64(rc_bitcast_f64(x) & (~0ull << dropped));
+}
+
+// ---- log ----
+
+// True for the bits of a positive normal double: not zero, subnormal, infinite, NaN or negative.
+static inline bool rc_exp_log_f64_is_positive_normal(uint64_t bits)
+{
+    return (uint32_t)(bits >> 52) - 1u < 2046u;
+}
+
+// True for the bits of a positive subnormal double.
+static inline bool rc_exp_log_f64_is_positive_subnormal(uint64_t bits)
+{
+    return bits - 1 < RC_EXP_LOG_F64_MIN_NORMAL - 1;
+}
+
+// log(x) and log2(x) for the bits of an x zero, negative, infinite or NaN: -infinity, NaN, or
+// x + x, which keeps infinity and quietens NaN. Masks choose between them, as branches would be
+// mispredicted in mixes of special values.
+static inline double rc_exp_log_f64_log_special(uint64_t bits)
+{
+    uint64_t negative = 0 - (bits >> 63);
+    uint64_t zero = 0 - (uint64_t)((bits << 1) == 0);
+    uint64_t sum = rc_bitcast_f64(rc_bitcast_u64(bits) + rc_bitcast_u64(bits));
+    uint64_t nonzero = (sum & ~negative) | (0x7ff8000000000000ull & negative);
+
+    return rc_bitcast_u64((nonzero & ~zero) | (0xfff0000000000000ull & zero));
+}
+
+// The bits of a positive normal x reduced with a table of 2^table_bits intervals. With k_bias
+// raised by 1074, the bits of a subnormal x scaled by 2^1074 serve too.
+static inline rc_log_f64_reduced rc_log_f64_reduce(uint64_t bits, uint32_t table_bits, const uint16_t *inverse, double k_bias)
+{
+    uint32_t index = (uint32_t)(bits >> (52 - table_bits)) & ((1u << table_bits) - 1u);
+    uint64_t m = (bits & RC_EXP_LOG_F64_MANTISSA_BITS) | RC_EXP_LOG_F64_MIN_NORMAL;
+
+    return (rc_log_f64_reduced) {
+        .k = rc_bitcast_u64((bits >> 52) | RC_EXP_LOG_F64_EXPONENT_BITS) - k_bias,
+        .index = index,
+        .scaled = m * inverse[index]
     };
 }
 
-// scale (1 + tmp) for a scale and tmp from a reduction that stayed in range.
-static inline double rc_exp_scaled_f64(rc_exp_reduction_f64 reduced)
+// 2^(53 + table_bits) r, exactly, from the scaled of a table of 2^table_bits.
+static inline double rc_log_f64_scaled_r(uint64_t scaled, uint32_t table_bits)
 {
-    double scale = rc_bitcast_u64(reduced.scale_bits);
+    return (double)((int64_t)scaled - ((int64_t)1 << (53 + table_bits)));
+}
+
+// r, exactly, from the scaled of a table of 2^table_bits, r_scale being 2^-(53 + table_bits).
+static inline double rc_log_f64_r(uint64_t scaled, uint32_t table_bits, double r_scale)
+{
+    return rc_log_f64_scaled_r(scaled, table_bits) * r_scale;
+}
+
+// ---- exp ----
+
+// Reduces hi + lo, for |hi| <= 746 and |lo| <= 2^-14. Adding the shift leaves n in the low bits.
+// hi less n step_hi is exact, and it is the only large part of tmp. It takes in the rest of r and
+// the table's tail while the polynomial is on its way, and then the polynomial, so tmp rounds
+// twice at its own size, under 2^-62.4 of 1 each time; summing the small terms first would round
+// once, but take three cycles longer.
+static inline rc_exp_f64_reduced rc_exp_f64_reduce(double hi, double lo)
+{
+    const rc_exp_f64_constants *c = &rc_exp_f64_data;
+    double shifted = hi * c->inv_step + c->shift;
+    double n = shifted - c->shift;
+    uint64_t n_bits = rc_bitcast_f64(shifted);
+    double r_head = hi - n * c->step_hi;
+    double r_tail = n * c->step_lo - lo;
+    double r = r_head - r_tail;
+    rc_exp_log_f64_pair t = rc_exp_f64_table[n_bits & 127u];
+    double r2 = r * r;
+    double poly = r2 * (c->poly[0] + r * c->poly[1]) + (r2 * r2) * (c->poly[2] + r * c->poly[3]);
+
+    return (rc_exp_f64_reduced) {.n_bits = n_bits, .t_hi = t.hi, .tmp = (r_head + (t.lo - r_tail)) + poly};
+}
+
+// e^(hi + lo) for |hi| < rc_exp_f64_data.fast and |lo| <= 2^-14, negated if sign is the sign bit
+// rather than 0. n_bits shifted down by 7 is k plus a multiple of 2^12, which shifting up by 52
+// drops, so adding it to t_hi's bits scales t_hi by 2^k, and adding the sign bit too negates it.
+// Only scale (1 + tmp) rounds at the result's size, within 2^-59.4 of it before that.
+static inline double rc_exp_f64_kernel(double hi, double lo, uint64_t sign)
+{
+    rc_exp_f64_reduced reduced = rc_exp_f64_reduce(hi, lo);
+    double scale = rc_bitcast_u64(rc_bitcast_f64(reduced.t_hi) + ((reduced.n_bits >> 7) << 52) + sign);
 
     return scale + scale * reduced.tmp;
 }
 
-// y = scale (1 + tmp), below 1 in size, rounded to the precision it will have once scaled into the
-// subnormals. Rounding it there first avoids a double rounding, which would add up to half an ulp
-// to the worst-case error.
-static inline double rc_exp_round_to_subnormal_f64(double scale, double tmp, double y, uint64_t scale_bits)
+// 2^k (t_hi + corr) for k below -1021, where the result may be subnormal. Scaling a rounded sum
+// would round twice, so we scale the parts first, by 2^(k + 1022), which keeps both normal. If
+// their sum is then under 1 the result is subnormal, and adding 1 makes it round to the subnormal
+// grid, a multiple of 2^-52 here; the 1 comes off exactly afterwards.
+static inline double rc_exp_f64_scale_down(double t_hi, double corr, int32_t k)
 {
-    double one = y < 0.0 ? -1.0 : 1.0;
-    double lo = scale - y + scale * tmp;
-    double hi = one + y;
-    double lo_sum = one - hi + y + lo;
-    double rounded = hi + lo_sum - one;
+    double scale = rc_bitcast_u64((uint64_t)(k + 1022 + 1023) << 52);
+    double hi = t_hi * scale;
+    double lo = corr * scale;
+    rc_exp_log_f64_pair shifted = rc_exp_log_f64_sum(1.0, hi);
 
-    return rounded == 0.0 ? rc_bitcast_u64(scale_bits & 0x8000000000000000ull) : rounded;
-}
-
-// scale (1 + tmp) for a negative k, with scale_bits already raised by 2^1022, and rounded for the
-// subnormals if that's where it will land.
-static inline double rc_exp_scaled_up_f64(double tmp, uint64_t scale_bits)
-{
-    double scale = rc_bitcast_u64(scale_bits);
-    double y = scale + scale * tmp;
-
-    if (rc_abs_f64(y) >= 1.0) {
-        return y;
+    if (hi + lo >= 1.0) {
+        return (hi + lo) * 0x1p-1022;
     }
 
-    return rc_exp_round_to_subnormal_f64(scale, tmp, y, scale_bits);
+    return ((shifted.hi + (shifted.lo + lo)) - 1.0) * 0x1p-1022;
 }
 
-// scale (1 + tmp) without intermediate rounding, where it may overflow or underflow. A positive k
-// may overflow, and has an exponent in scale_bits that overflowed by at most 460. A negative k may
-// underflow, and needs care in the subnormal range.
-static inline double rc_exp_scaled_extreme_f64(rc_exp_reduction_f64 reduced)
+// e^(hi + lo) for hi in [RC_EXP_F64_UNDERFLOW, RC_EXP_F64_OVERFLOW], at least rc_exp_f64_data.fast
+// in size, and |lo| <= 2^-14: rounded once, to a subnormal if it is one, or to infinity. Above the
+// normal range the sum rounds as usual, and the scaling, in two steps since 2^1024 is no double,
+// either fits or overflows. n_bits shifted down by 7 is k plus the shift's bits shifted down by 7;
+// 2048 keeps the difference unsigned until it is small.
+static inline double rc_exp_f64_extreme(double hi, double lo)
 {
-    if ((reduced.ki & 0x80000000u) == 0) {
-        double scale = rc_bitcast_u64(reduced.scale_bits - (1009ull << 52));
+    rc_exp_f64_reduced reduced = rc_exp_f64_reduce(hi, lo);
+    int32_t k = (int32_t)((reduced.n_bits >> 7) - (rc_bitcast_f64(rc_exp_f64_data.shift) >> 7) + 2048u) - 2048;
+    double corr = reduced.t_hi * reduced.tmp;
 
-        return 0x1p1009 * (scale + scale * reduced.tmp);
+    if (k > 0) {
+        return (reduced.t_hi + corr) * rc_bitcast_u64((uint64_t)(k - 1 + 1023) << 52) * 2.0;
     }
 
-    return 0x1p-1022 * rc_exp_scaled_up_f64(reduced.tmp, reduced.scale_bits + (1022ull << 52));
-}
-
-// True unless 2^-54 <= |x| < 512, given the top 12 bits of |x|.
-static inline bool rc_exp_is_unusual_f64(uint32_t abstop)
-{
-    return abstop - rc_top12_f64(0x1p-54) >= rc_top12_f64(512.0) - rc_top12_f64(0x1p-54);
-}
-
-// Infinity for a positive x and zero for a negative one, negated for a nonzero sign_bias.
-static inline double rc_exp_out_of_range_f64(double x, uint64_t sign_bias)
-{
-    double magnitude = (rc_bitcast_f64(x) >> 63) != 0 ? 0.0 : rc_bitcast_u64(0x7ff0000000000000ull);
-
-    return sign_bias != 0 ? -magnitude : magnitude;
-}
-
-// exp(x + xtail) for a finite x outside [2^-54, 512) in size: 1 + x for a tiny x, overflow or
-// underflow from 1024 up, and a careful scaling between.
-static inline double rc_exp_unusual_f64(double x, double xtail, uint64_t sign_bias, uint32_t abstop)
-{
-    if (abstop < rc_top12_f64(0x1p-54)) {
-        return sign_bias != 0 ? -(1.0 + x) : 1.0 + x;
-    }
-
-    if (abstop >= rc_top12_f64(1024.0)) {
-        return rc_exp_out_of_range_f64(x, sign_bias);
-    }
-
-    return rc_exp_scaled_extreme_f64(rc_exp_reduce_f64(x, xtail, sign_bias));
-}
-
-// exp(x + xtail), negated for a nonzero sign_bias, for a finite x with |xtail| < 2^-8/N and
-// |xtail| <= |x|.
-static inline double rc_exp_kernel_f64(double x, double xtail, uint64_t sign_bias)
-{
-    uint32_t abstop = rc_top12_f64(x) & 0x7ffu;
-
-    if (rc_exp_is_unusual_f64(abstop)) {
-        return rc_exp_unusual_f64(x, xtail, sign_bias, abstop);
-    }
-
-    return rc_exp_scaled_f64(rc_exp_reduce_f64(x, xtail, sign_bias));
-}
-
-// ---- the logs' reduction ----
-
-// x = 2^k z, with z in [offset, 2 offset) and exact, and the index of the subinterval z falls in,
-// of the 2^table_bits that split that range.
-typedef struct rc_log_reduction_f64 {
-    uint32_t index;
-    double k;
-    double z;
-    uint64_t z_bits;
-} rc_log_reduction_f64;
-
-// The reduction of the positive normal x with the given bits.
-static inline rc_log_reduction_f64 rc_log_reduce_f64(uint64_t bits, uint64_t offset, uint32_t table_bits)
-{
-    uint64_t tmp = bits - offset;
-    uint64_t z_bits = bits - (tmp & (0xfffull << 52));
-
-    return (rc_log_reduction_f64) {
-        .index = (uint32_t)((tmp >> (52 - table_bits)) % (1u << table_bits)),
-        .k = (double)rc_top12_signed_f64(tmp),
-        .z = rc_bitcast_u64(z_bits),
-        .z_bits = z_bits
-    };
-}
-
-// True for the x log and log2 can't reduce as they are: below 2^-1022 (zero, subnormal or
-// negative), infinite or NaN.
-static inline bool rc_log_is_unusual_f64(uint64_t bits)
-{
-    uint32_t top = (uint32_t)(bits >> 48);
-
-    return top - 0x0010u >= 0x7ff0u - 0x0010u;
-}
-
-// True for the bits of a negative number or a NaN.
-static inline bool rc_log_is_negative_or_nan_f64(uint64_t bits)
-{
-    return (bits >> 63) != 0 || (bits & 0x7ff0000000000000ull) == 0x7ff0000000000000ull;
-}
-
-// The bits of the positive subnormal x, normalised: x scaled up by 2^52, then 52 taken off its
-// exponent, which wraps below zero. Only the reduction makes sense of them.
-static inline uint64_t rc_log_normalised_bits_f64(double x)
-{
-    return rc_bitcast_f64(x * 0x1p52) - (52ull << 52);
+    return rc_exp_f64_scale_down(reduced.t_hi, corr, k);
 }
 
 #endif // RC_MATH_EXP_LOG_F64_H_

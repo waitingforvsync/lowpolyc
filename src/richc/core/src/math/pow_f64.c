@@ -1,298 +1,246 @@
 // math/pow_f64.c
 //
-// A double to the power of a double. Ported from musl 1.2.5 (MIT), src/math/pow.c, which is Arm's
-// optimized-routines. Its notice:
+// rc_pow_f64: x^y, as e^(y log|x|), with C's rules for the special cases and the sign.
 //
-// Copyright (c) 2018, Arm Limited.
-// SPDX-License-Identifier: MIT
+// y log|x| can be as large as 745, so log|x| needs to be good to around 2^-69 for the product to
+// be good to 2^-60. We reduce as rc_log_f64 does, to k ln2 - log(c) + log1p(r) with r exact and
+// |r| < 2^-8, and carry the large terms with their errors: the head of k ln2 - log(c), r, and the
+// exact -r^2 / 2 of a 22-bit head of r. r^3 times a degree 5 polynomial within 2^-74 |r| does the
+// rest, and its rounding, under 2^-77, is the largest error left. log|x| comes out as a 26-bit
+// head and a rest within about 2^-69 |log|x||, the head early, so that the exp kernel in
+// exp_log_f64.h can start on y times it, exact, while the rest catches up; it adds four errors
+// under 2^-61.4 of the result. Before the final rounding we are within about 2^-58.5 of x^y, under
+// 0.025 ulp, and the worst error we have found is 0.511 ulp.
 //
-// x^y = exp(y log(x)), with log(x) worked out to about 15 bits more than a double holds. The
-// worst-case error is 0.54 ulp: about exp's ulp error, 0.511 without fma, plus 1024 ln2 2^53 times
-// log's relative error, 1.5 2^-68 without fma.
+// A subnormal x goes the same way, scaled into the normals first, and so does a negative x with an
+// integer y, as |x|: the exp kernel puts the sign of an odd power on the scale it builds. The
+// special cases come in mixes, so they are sorted with few branches.
 
 #include "richc/math/math.h"
 
-#include "exp_log_f64.h"
+#include "math/exp_log_f64.h"
 
-// The start of the range [offset, 2 offset) of z, which x's bits are reduced to by taking away k.
-#define RC_POW_LOG_OFFSET_F64 0x3fe6955500000000ull
+#define RC_POW_F64_INFINITY rc_bitcast_u64(RC_EXP_LOG_F64_INFINITY_BITS)
+#define RC_POW_F64_SIGN_BIT 0x8000000000000000ull
 
-// Passed to exp's kernel to make the result negative.
-#define RC_POW_SIGN_BIAS_F64 ((uint64_t)0x800 << RC_EXP_TABLE_BITS_F64)
+// The bits of 2^23 and of 1.5 2^-9, in whose low bits r's head and tail become doubles.
+#define RC_POW_F64_HEAD_BITS 0x4160000000000000ull
+#define RC_POW_F64_TAIL_BITS 0x3f68000000000000ull
 
-// The bits of 1.0.
-#define RC_POW_ONE_BITS_F64 0x3ff0000000000000ull
+// The bits of a positive normal x, and the k_bias that finds its exponent k from them.
+typedef struct rc_pow_f64_base {
+    uint64_t bits;
+    double k_bias;
+} rc_pow_f64_base;
 
-// The bits of infinity.
-#define RC_POW_INFINITY_BITS_F64 0x7ff0000000000000ull
-
-// Whether a y is a whole number, and if so whether it's odd or even.
-typedef enum rc_pow_whole {
-    RC_POW_WHOLE_NONE,
-    RC_POW_WHOLE_ODD,
-    RC_POW_WHOLE_EVEN
-} rc_pow_whole;
-
-// log(x) as the sum of a double and a tail of about 15 more bits.
-typedef struct rc_pow_log_parts_f64 {
-    double hi;
-    double lo;
-} rc_pow_log_parts_f64;
-
-// log(x) for a positive normal x, given its bits, or those of a subnormal x normalised with its
-// exponent going negative.
-static rc_pow_log_parts_f64 rc_pow_log_f64(uint64_t bits)
+// r = m c - 1 as head + tail, both exact, from the reduction's scaled, 2^61 (1 + r). scaled
+// rounded to a multiple of 2^32 makes, in the low bits of 2^23, 2^23 + 1 + head: head is r to the
+// nearest 2^-29, of at most 22 bits. The rest, under 2^31 in size, added to the bits of 1.5 2^-9
+// makes 1.5 2^-9 + tail. The integers keep it free of int-to-double conversions, which clang
+// leaves with a false dependency that serialises calls in a loop.
+static rc_exp_log_f64_pair rc_pow_f64_split_r(uint64_t scaled)
 {
-    rc_log_reduction_f64 reduced = rc_log_reduce_f64(bits, RC_POW_LOG_OFFSET_F64, RC_POW_LOG_TABLE_BITS_F64);
-    rc_pow_log_centre_f64 centre = rc_pow_log_data_f64.centres[reduced.index];
-    const double *a = rc_pow_log_data_f64.poly;
+    const rc_pow_f64_constants *c = &rc_pow_f64_data;
+    uint64_t upper = (scaled + 0x80000000ull) >> 32;
+    double head = rc_bitcast_u64(upper | RC_POW_F64_HEAD_BITS) - c->head_bias;
+    double tail = rc_bitcast_u64(RC_POW_F64_TAIL_BITS + (scaled - (upper << 32))) - c->tail_bias;
 
-    // 1/c is j/N or j/N/2 for a whole j in [N, 2N), and |z/c - 1| < 1/N, so r = z/c - 1 is exact.
-    // Splitting z makes r_hi, r_lo and r_hi^2 exact, and |r_lo| <= |r|.
-    double z_hi = rc_bitcast_u64((reduced.z_bits + (1ull << 31)) & (UINT64_MAX << 32));
-    double z_lo = reduced.z - z_hi;
-    double r_hi = z_hi * centre.inv_c - 1.0;
-    double r_lo = z_lo * centre.inv_c;
-    double r = r_hi + r_lo;
-
-    // k ln2 + log(c) + r
-    double t1 = reduced.k * rc_pow_log_data_f64.ln2_hi + centre.log_c;
-    double t2 = t1 + r;
-    double lo1 = reduced.k * rc_pow_log_data_f64.ln2_lo + centre.log_c_tail;
-    double lo2 = t1 - t2 + r;
-
-    // k ln2 + log(c) + r + a[0] r^2, where a[0] is -0.5
-    double ar = a[0] * r;
-    double ar2 = r * ar;
-    double ar3 = r * ar2;
-    double ar_hi = a[0] * r_hi;
-    double ar_hi2 = r_hi * ar_hi;
-    double hi = t2 + ar_hi2;
-    double lo3 = r_lo * (ar + ar_hi);
-    double lo4 = t2 - hi + ar_hi2;
-
-    // log1p(r) - r - a[0] r^2
-    double p = ar3 * (a[1] + r * a[2] + ar2 * (a[3] + r * a[4] + ar2 * (a[5] + r * a[6])));
-    double lo = lo1 + lo2 + lo3 + lo4 + p;
-    double y = hi + lo;
-
-    return (rc_pow_log_parts_f64) {.hi = y, .lo = hi - y + lo};
+    return (rc_exp_log_f64_pair) {.hi = head, .lo = tail};
 }
 
 
-// x^y for a positive x, given its bits, or those of a subnormal x normalised with its exponent
-// going negative, and a |y| in [2^-65, 2^63). A nonzero sign_bias negates it.
-static double rc_pow_core_f64(uint64_t x_bits, double y, uint64_t sign_bias)
+// log(x) as head + rest, the head of 26 bits and the rest under 2^-25 of it, for a positive normal
+// x given as its base. first and second sum the head of k ln2 - log(c), r and the square of r's
+// head, each smaller than the sum before it, so a fast two-sum finds each error. The head comes
+// early, from second and the polynomial's leading terms. second less it is exact, and the
+// polynomial, the errors, the tails of the table and the rest of the square,
+// -(r - head) (r + head) / 2, join that to make the rest, which rounds only at its own small size.
+static rc_exp_log_f64_pair rc_pow_f64_log(rc_pow_f64_base base)
 {
-    rc_pow_log_parts_f64 log_x = rc_pow_log_f64(x_bits);
+    const rc_log_f64_constants *c = &rc_log_f64_data;
+    const double *p = rc_pow_f64_data.poly;
+    rc_log_f64_reduced reduced = rc_log_f64_reduce(base.bits, 8, rc_log_f64_inverse, base.k_bias);
+    rc_exp_log_f64_pair log_c = rc_log_f64_table[reduced.index];
+    rc_exp_log_f64_pair split = rc_pow_f64_split_r(reduced.scaled);
+    double r = split.hi + split.lo;
+    double head = reduced.k * c->ln2_hi + log_c.hi;
+    double first = head + r;
+    double square = split.hi * (c->minus_half * split.hi);
+    double second = first + square;
+    double r2 = r * r;
+    double r3 = r2 * r;
+    double leading = r3 * (p[0] + r * p[1]);
+    double trailing = (r3 * r2) * ((p[2] + r * p[3]) + r2 * (p[4] + r * p[5]));
+    double log_head = rc_exp_log_f64_head(second + leading, 27);
+    double errors = (r - (first - head)) + (square - (second - first));
+    double tail = (c->minus_half * split.lo) * (r + split.hi) + (reduced.k * c->ln2_lo + log_c.lo);
+    double rest = ((second - log_head) + (leading + trailing)) + (errors + tail);
 
-    // y log(x) in two parts, |e_lo| < |e_hi| 2^-25
-    double y_hi = rc_bitcast_u64(rc_bitcast_f64(y) & (UINT64_MAX << 27));
-    double y_lo = y - y_hi;
-    double log_hi = rc_bitcast_u64(rc_bitcast_f64(log_x.hi) & (UINT64_MAX << 27));
-    double log_lo = log_x.hi - log_hi + log_x.lo;
-    double e_hi = y_hi * log_hi;
-    double e_lo = y_lo * log_hi + y * log_lo;
-
-    return rc_exp_kernel_f64(e_hi, e_lo, sign_bias);
+    return (rc_exp_log_f64_pair) {.hi = log_head, .lo = rest};
 }
 
 
-// Whether the nonzero finite y, given its bits, is a whole number whose units bit is unit_shift
-// bits up, and if so whether it's odd or even.
-static rc_pow_whole rc_pow_whole_at_f64(uint64_t y_bits, uint32_t unit_shift)
+// y (head + rest) as hi + lo. The 26-bit heads of y and log(x) have an exact product, and the
+// rest is under 2^-24 of it.
+static rc_exp_log_f64_pair rc_pow_f64_times(double y, rc_exp_log_f64_pair log_x)
 {
-    uint64_t unit = 1ull << unit_shift;
+    double y_head = rc_exp_log_f64_head(y, 27);
 
-    if ((y_bits & (unit - 1)) != 0) {
-        return RC_POW_WHOLE_NONE;
-    }
-
-    return (y_bits & unit) != 0 ? RC_POW_WHOLE_ODD : RC_POW_WHOLE_EVEN;
+    return (rc_exp_log_f64_pair) {.hi = y_head * log_x.hi, .lo = (y - y_head) * log_x.hi + y * log_x.lo};
 }
 
 
-// Whether the nonzero finite y, given its bits, is a whole number, and if so whether it is
-// odd or even.
-static rc_pow_whole rc_pow_whole_of_f64(uint64_t y_bits)
+// e^(hi + lo) for hi at least rc_exp_f64_data.fast in size: infinity, zero or the careful scaling.
+static double rc_pow_f64_extreme(rc_exp_log_f64_pair exponent)
 {
-    uint32_t exponent = (uint32_t)(y_bits >> 52) & 0x7ffu;
-
-    if (exponent < 0x3ff) {
-        return RC_POW_WHOLE_NONE;
+    if (exponent.hi > RC_EXP_F64_OVERFLOW) {
+        return RC_POW_F64_INFINITY;
     }
 
-    if (exponent > 0x3ff + 52) {
-        return RC_POW_WHOLE_EVEN;
-    }
-
-    return rc_pow_whole_at_f64(y_bits, 0x3ff + 52 - exponent);
-}
-
-
-// True for the bits of zero, infinity or NaN, of either sign.
-static bool rc_pow_is_zero_inf_nan_f64(uint64_t bits)
-{
-    return 2 * bits - 1 >= 2 * RC_POW_INFINITY_BITS_F64 - 1;
-}
-
-
-// True for the bits of a NaN.
-static bool rc_pow_is_nan_f64(uint64_t bits)
-{
-    return 2 * bits > 2 * RC_POW_INFINITY_BITS_F64;
-}
-
-
-// True if x^y needs more than the core: x is negative, zero, subnormal, infinite or NaN, or |y| is
-// below 2^-65, at least 2^63 or NaN. Beyond |y| ~= 0x1.749p62 (1075 ln2 2^53), x^y is infinity or
-// zero, and below 0x1.e7b6p-65 (2^-54 / 1075) it's +-1.
-static bool rc_pow_is_unusual_f64(uint64_t x_bits, uint64_t y_bits)
-{
-    uint32_t x_top = (uint32_t)(x_bits >> 52);
-    uint32_t y_top = (uint32_t)(y_bits >> 52) & 0x7ffu;
-
-    return x_top - 0x001u >= 0x7ffu - 0x001u ||
-        y_top - 0x3beu >= 0x43eu - 0x3beu;
-}
-
-
-// x^y for a y of zero, infinity or NaN.
-static double rc_pow_special_y_f64(double x, double y)
-{
-    uint64_t x_bits = rc_bitcast_f64(x);
-    uint64_t y_bits = rc_bitcast_f64(y);
-    bool x_inside_one = 2 * x_bits < 2 * RC_POW_ONE_BITS_F64;
-    bool y_positive = (y_bits >> 63) == 0;
-
-    if (2 * y_bits == 0) {
-        return 1.0;
-    }
-
-    if (x_bits == RC_POW_ONE_BITS_F64) {
-        return 1.0;
-    }
-
-    if (rc_pow_is_nan_f64(x_bits) || rc_pow_is_nan_f64(y_bits)) {
-        return x + y;
-    }
-
-    if (2 * x_bits == 2 * RC_POW_ONE_BITS_F64) {
-        return 1.0;
-    }
-
-    // |x| < 1 and y is infinity, or |x| > 1 and y is -infinity
-    if (x_inside_one == y_positive) {
+    if (exponent.hi < RC_EXP_F64_UNDERFLOW) {
         return 0.0;
     }
 
-    return y * y;
+    return rc_exp_f64_extreme(exponent.hi, exponent.lo);
 }
 
 
-// True if x is negative and y an odd whole number, given their bits, for a finite nonzero y.
-static bool rc_pow_is_negative_to_odd_f64(uint64_t x_bits, uint64_t y_bits)
+// True if |hi| is below rc_exp_f64_data.fast, for the exp kernel; false for NaN too. The test is
+// on the bits less the sign, which order as the magnitudes do, and spares gcc a spilled mask.
+static bool rc_pow_f64_is_fast(double hi)
 {
-    return (x_bits >> 63) != 0 && rc_pow_whole_of_f64(y_bits) == RC_POW_WHOLE_ODD;
+    return (rc_bitcast_f64(hi) << 1) < (RC_EXP_F64_FAST_BITS << 1);
 }
 
 
-// x^y for an x of zero, infinity or NaN, and a finite nonzero y.
-static double rc_pow_special_x_f64(double x, double y)
+// x^y for a positive finite x, given as its base, and any finite y, negated if sign is the sign
+// bit rather than 0.
+static double rc_pow_f64_positive(rc_pow_f64_base base, double y, uint64_t sign)
 {
-    uint64_t x_bits = rc_bitcast_f64(x);
-    uint64_t y_bits = rc_bitcast_f64(y);
-    double square = rc_pow_is_negative_to_odd_f64(x_bits, y_bits) ? -(x * x) : x * x;
+    rc_exp_log_f64_pair exponent = rc_pow_f64_times(y, rc_pow_f64_log(base));
 
-    return (y_bits >> 63) != 0 ? 1.0 / square : square;
+    if (!rc_pow_f64_is_fast(exponent.hi)) {
+        return rc_bitcast_u64(rc_bitcast_f64(rc_pow_f64_extreme(exponent)) | sign);
+    }
+
+    return rc_exp_f64_kernel(exponent.hi, exponent.lo, sign);
 }
 
 
-// x^y where |y| is below 2^-65 or at least 2^63, for a nonzero finite x, given the bits of |x|, and
-// y finite and nonzero. Such a y is even if it's whole, so the result is positive.
-static double rc_pow_extreme_y_f64(uint64_t x_abs_bits, double y)
+// The sign bit if y is an odd integer, else 0, for a finite y. y less twice the integer part of
+// y / 2 is exact, and 1 in size just when y is odd: every double of 2^53 or more is even, as is its
+// half.
+static uint64_t rc_pow_f64_odd_sign(double y)
 {
-    uint32_t y_top = rc_top12_f64(y);
+    double rest = y - 2.0 * rc_trunc_f64(y * 0.5);
 
-    if (x_abs_bits == RC_POW_ONE_BITS_F64) {
+    return (uint64_t)(rc_abs_f64(rest) == 1.0) << 63;
+}
+
+
+// x^y for y zero, infinite or NaN. Beyond the cases that give 1 or NaN, y is infinite, and
+// x^y is 1 for |x| = 1, and otherwise infinity or 0 by whether |x| < 1 and y < 0 agree.
+static double rc_pow_f64_special_y(double x, double y)
+{
+    double magnitude = rc_abs_f64(x);
+
+    if (y == 0.0 || x == 1.0) {
         return 1.0;
     }
 
-    // x^y ~= 1 + y log(x) for |y| < 2^-65
-    if ((y_top & 0x7ffu) < 0x3beu) {
-        return x_abs_bits > RC_POW_ONE_BITS_F64 ? 1.0 + y : 1.0 - y;
+    if (x != x || y != y) {
+        return x + y;
     }
 
-    if ((x_abs_bits > RC_POW_ONE_BITS_F64) == (y_top < 0x800u)) {
-        return rc_bitcast_u64(RC_POW_INFINITY_BITS_F64);
+    if (magnitude == 1.0) {
+        return 1.0;
     }
 
-    return 0.0;
+    return (magnitude < 1.0) == (y < 0.0) ? RC_POW_F64_INFINITY : 0.0;
 }
 
 
-// x^y for a nonzero finite x and y, given the bits of |x|. A nonzero sign_bias negates it.
-static double rc_pow_magnitude_f64(double x, uint64_t x_abs_bits, double y, uint64_t sign_bias)
+// True if y is finite and not zero: its bits without the sign, less 1, are below infinity's.
+static bool rc_pow_f64_is_ordinary(double y)
 {
-    uint32_t y_top = rc_top12_f64(y) & 0x7ffu;
-
-    if (y_top - 0x3beu >= 0x43eu - 0x3beu) {
-        return rc_pow_extreme_y_f64(x_abs_bits, y);
-    }
-
-    // A subnormal x is normalised so that its exponent goes negative
-    if ((x_abs_bits >> 52) == 0) {
-        return rc_pow_core_f64((rc_bitcast_f64(x * 0x1p52) & 0x7fffffffffffffffull) - (52ull << 52), y, sign_bias);
-    }
-
-    return rc_pow_core_f64(x_abs_bits, y, sign_bias);
+    return (rc_bitcast_f64(y) << 1) - 1 < (RC_EXP_LOG_F64_INFINITY_BITS << 1) - 1;
 }
 
 
-// x^y for a negative finite x and a finite nonzero y: NaN unless y is whole, and negative if
-// it is odd.
-static double rc_pow_negative_x_f64(double x, double y)
+// True for the bits of a positive finite x, normal or subnormal.
+static bool rc_pow_f64_is_positive_finite(uint64_t bits)
 {
-    uint64_t x_abs_bits = rc_bitcast_f64(x) & 0x7fffffffffffffffull;
-    rc_pow_whole whole = rc_pow_whole_of_f64(rc_bitcast_f64(y));
-
-    if (whole == RC_POW_WHOLE_NONE) {
-        return (x - x) / (x - x);
-    }
-
-    return rc_pow_magnitude_f64(x, x_abs_bits, y, whole == RC_POW_WHOLE_ODD ? RC_POW_SIGN_BIAS_F64 : 0);
+    return bits - 1 < RC_EXP_LOG_F64_INFINITY_BITS - 1;
 }
 
 
-// x^y where x is negative, zero, subnormal, infinite or NaN, or y is extreme in size or NaN.
-static double rc_pow_unusual_f64(double x, double y)
+// True for the bits of a negative finite x, normal or subnormal.
+static bool rc_pow_f64_is_negative_finite(uint64_t bits)
+{
+    return bits - (RC_POW_F64_SIGN_BIT + 1) < RC_EXP_LOG_F64_INFINITY_BITS - 1;
+}
+
+
+// The bits of a positive finite x, scaled into the normals if it is subnormal, and the k_bias
+// that finds its k from them. A subnormal's bits, as an integer, are x 2^1074, and converting them
+// makes a normal double with no arithmetic on a subnormal, which some processors take a slow path
+// for.
+static rc_pow_f64_base rc_pow_f64_base_of(uint64_t bits)
+{
+    if (bits < RC_EXP_LOG_F64_MIN_NORMAL) {
+        return (rc_pow_f64_base) {.bits = rc_bitcast_f64((double)(int64_t)bits), .k_bias = rc_log_f64_data.k_bias + 1074.0};
+    }
+
+    return (rc_pow_f64_base) {.bits = bits, .k_bias = rc_log_f64_data.k_bias};
+}
+
+
+// True if x is negative and finite and y an integer, given the bits of x.
+static bool rc_pow_f64_is_negative_to_integer(uint64_t x_bits, double y)
+{
+    return rc_pow_f64_is_negative_finite(x_bits) && rc_trunc_f64(y) == y;
+}
+
+
+// x^y for a finite, nonzero y and x zero, infinite, NaN, or negative and finite with y no
+// integer, which has no real power. Otherwise |x| is 0 or infinity, and if y is negative, flipping
+// the bits of infinity in it turns it into the other; the sign of x stays if y is odd.
+static double rc_pow_f64_special_x(double x, double y)
 {
     uint64_t x_bits = rc_bitcast_f64(x);
-    uint64_t y_bits = rc_bitcast_f64(y);
+    uint64_t flip = (rc_bitcast_f64(y) >> 63) * RC_EXP_LOG_F64_INFINITY_BITS;
 
-    if (rc_pow_is_zero_inf_nan_f64(y_bits)) {
-        return rc_pow_special_y_f64(x, y);
+    if (rc_pow_f64_is_negative_finite(x_bits)) {
+        return rc_bitcast_u64(0x7ff8000000000000ull);
     }
 
-    if (rc_pow_is_zero_inf_nan_f64(x_bits)) {
-        return rc_pow_special_x_f64(x, y);
+    if (x != x) {
+        return x + y;
     }
 
-    if ((x_bits >> 63) != 0) {
-        return rc_pow_negative_x_f64(x, y);
-    }
-
-    return rc_pow_magnitude_f64(x, x_bits, y, 0);
+    return rc_bitcast_u64(((x_bits & ~RC_POW_F64_SIGN_BIT) ^ flip) | (x_bits & rc_pow_f64_odd_sign(y)));
 }
 
 
+// A negative x with an integer y takes the fast path as |x|, its sign put back by the exp kernel
+// if y is odd.
 double rc_pow_f64(double x, double y)
 {
     uint64_t x_bits = rc_bitcast_f64(x);
+    uint64_t sign = 0;
 
-    if (rc_pow_is_unusual_f64(x_bits, rc_bitcast_f64(y))) {
-        return rc_pow_unusual_f64(x, y);
+    if (!rc_pow_f64_is_ordinary(y)) {
+        return rc_pow_f64_special_y(x, y);
     }
 
-    return rc_pow_core_f64(x_bits, y, 0);
+    if (!rc_pow_f64_is_positive_finite(x_bits)) {
+        if (!rc_pow_f64_is_negative_to_integer(x_bits, y)) {
+            return rc_pow_f64_special_x(x, y);
+        }
+
+        sign = rc_pow_f64_odd_sign(y);
+        x_bits -= RC_POW_F64_SIGN_BIT;
+    }
+
+    return rc_pow_f64_positive(rc_pow_f64_base_of(x_bits), y, sign);
 }

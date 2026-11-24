@@ -1,0 +1,36 @@
+// fit_arc.sollya
+//
+// The polynomials of asin, acos, atan and atan2 (src/math/arc.h), fitted by fpminimax with double
+// coefficients and relative error. Prints each one's coefficients in hex and its relative error.
+// asin_f64's kernel is a rational function, which fpminimax can't fit: fit_asin_ratio.py does.
+//
+//   sollya fit_arc.sollya    (or: ./run.sh fits)
+
+prec = 300;
+display = hexadecimal;
+
+procedure show(name, p, f, I) {
+    var i, e;
+    print("----", name);
+    for i from 0 to degree(p) do {
+        if coeff(p, i) != 0 then print("  x^", i, ": ", coeff(p, i));
+    };
+    e = dirtyinfnorm((p - f) / f, I);
+    display = decimal;
+    print("  relative error 2^", round(log2(e), 12, RN));
+    display = hexadecimal;
+};
+
+// f64 atan kernel: atan(u) = u + u^3 Q(u^2) for |u| <= 1/16
+p = fpminimax(atan(x), [|3, 5, 7, 9, 11|], [|D...|], [2^-60; 1/16], relative, floating, x);
+show("atan_f64 |u| <= 1/16", p, atan(x), [2^-60; 1/16]);
+
+// f32 atan kernel (evaluated in double): |u| <= 0.41422, a little past tan(pi/8)
+p = fpminimax(atan(x), [|3, 5, 7, 9, 11|], [|D...|], [2^-60; 0.41422], relative, floating, x);
+show("atan_f32 |u| <= 0.41422", p, atan(x), [2^-60; 0.41422]);
+
+// f32 asin kernel (evaluated in double): |a| <= 1/2
+p = fpminimax(asin(x), [|3, 5, 7, 9, 11, 13|], [|D...|], [2^-60; 1/2], relative, floating, x);
+show("asin_f32 |a| <= 1/2", p, asin(x), [2^-60; 1/2]);
+
+quit;

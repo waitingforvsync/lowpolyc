@@ -1,72 +1,46 @@
 // math/asin_f32.c
 //
-// The arcsine of a float. Ported from musl 1.2.5 (MIT), src/math/asinf.c, which is FreeBSD's
-// e_asinf.c. Its notice:
+// rc_asin_f32: the arcsine of a float, worked in double.
 //
-// Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.
+// Up to 1/2 in size, asin(x) is x plus x^3 times a quintic in x^2, fitted to 2^-31.8. That form
+// is odd, so asin(-x) is exactly -asin(x) there. Beyond, we work on a = |x| and give the result
+// x's sign, with asin(a) = pi/2 - 2 asin(s) for s = sqrt((1 - a) / 2), which is at most 1/2
+// again, and 1/2 - a/2 is exact. Rounding that double result to float adds little to the half ulp
+// the rounding itself costs: 0.505 ulp at worst over every float. Beyond 1, s and so the result
+// are NaN.
 //
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
-//
-// Developed at SunPro, a Sun Microsystems, Inc. business.
-// Permission to use, copy, modify, and distribute this
-// software is freely granted, provided that this notice
-// is preserved.
+// The two ranges branch, on |x|'s bits, which settles sooner than comparing the float: working out
+// both and choosing costs more than the odd misprediction. Beyond 1/2 the sign goes on as a product
+// with 1 or -1, but beyond 1, where the result is NaN, by copysign, so asin stays odd bit for bit.
 
 #include "richc/math/math.h"
 
-// pi/2, as a double: the range near 1 finishes in double precision.
-static const double rc_asin_pio2_f32 = 1.570796326794896558e+00;
+#include "math/arc.h"
 
-// The coefficients of R's numerator, and of its denominator, whose first is 1.
-static const float rc_asin_p_f32[] = {1.6666586697e-01f, -4.2743422091e-02f, -8.6563630030e-03f};
-static const float rc_asin_q_f32[] = {1.0f, -7.0662963390e-01f};
-
-
-// The rational approximation R(z) of (asin(x) - x) / x^3, where z = x^2.
-static float rc_asin_r_f32(float z)
+// asin(a) for a > 1/2: NaN beyond 1, and for NaN.
+static double rc_asin_near_one(double a)
 {
-    const float *p = rc_asin_p_f32;
-    const float *q = rc_asin_q_f32;
-    float numerator = z * (p[0] + z * (p[1] + z * p[2]));
-    float denominator = q[0] + z * q[1];
+    double z = 0.5 - 0.5 * a;
+    double s = rc_sqrt_f64(z);
 
-    return numerator / denominator;
-}
-
-
-// asin(x) for 0.5 <= |x| < 1, as pi/2 - 2 asin(sqrt((1 - |x|) / 2)), with the root in double.
-static float rc_asin_near_one_f32(float x)
-{
-    float z = (1.0f - rc_abs_f32(x)) * 0.5f;
-    double s = rc_sqrt_f64((double)z);
-    float result = (float)(rc_asin_pio2_f32 - 2.0 * (s + s * (double)rc_asin_r_f32(z)));
-
-    return x < 0.0f ? -result : result;
+    return RC_ARC_PI_2_HI - 2.0 * (s + rc_arc_asin_tail_f32(s, z));
 }
 
 
 float rc_asin_f32(float x)
 {
-    uint32_t magnitude = rc_bitcast_f32(x) & 0x7fffffffu;
+    uint32_t bits = rc_bitcast_f32(x);
+    uint32_t magnitude = bits & 0x7fffffffu;
+    double d = (double)x;
 
-    // asin(+-1) is +-pi/2, and anything larger, or NaN, has none
-    if (magnitude == 0x3f800000u) {
-        return (float)((double)x * rc_asin_pio2_f32);
+    if (magnitude <= 0x3f000000u) {
+        return (float)(d + rc_arc_asin_tail_f32(d, d * d));
     }
 
+    // Beyond 1, and for NaN, the result is NaN, which a product would not give x's sign
     if (magnitude > 0x3f800000u) {
-        return 0.0f / (x - x);
+        return (float)rc_copysign_f64(rc_asin_near_one(rc_abs_f64(d)), d);
     }
 
-    // Below 2^-12, asin(x) is x to float precision
-    if (magnitude < 0x39800000u) {
-        return x;
-    }
-
-    // Below 0.5, asin(x) = x + x^3 R(x^2)
-    if (magnitude < 0x3f000000u) {
-        return x + x * rc_asin_r_f32(x * x);
-    }
-
-    return rc_asin_near_one_f32(x);
+    return (float)(rc_asin_near_one(rc_abs_f64(d)) * rc_arc_sign_f64(bits >> 31));
 }
