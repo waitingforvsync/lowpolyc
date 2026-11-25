@@ -8,6 +8,7 @@ add_library(richc STATIC
     src/hash_index.c
     src/mstr.c
     src/mstr_float.c
+    src/random.c
     src/str.c
     src/math/acos_f32.c
     src/math/acos_f64.c
@@ -65,7 +66,9 @@ add_library(richc STATIC
     include/richc/mstr.h
     include/richc/pool.template.h
     include/richc/print.h
+    include/richc/random.h
     include/richc/str.h
+    include/richc/time.h
     include/richc/algorithm/bitset_foreach.template.h
     include/richc/algorithm/genpool_foreach.template.h
     include/richc/algorithm/hash_index_foreach.template.h
@@ -78,6 +81,19 @@ add_library(richc STATIC
     include/richc/algorithm/upper_bound.template.h
     include/richc/algorithm/private/begin.template.h
     include/richc/algorithm/private/end.template.h
+    include/richc/array/bitset.h
+    include/richc/array/f32.h
+    include/richc/array/f64.h
+    include/richc/array/i16.h
+    include/richc/array/i32.h
+    include/richc/array/i64.h
+    include/richc/array/i8.h
+    include/richc/array/mstr.h
+    include/richc/array/str.h
+    include/richc/array/u16.h
+    include/richc/array/u32.h
+    include/richc/array/u64.h
+    include/richc/array/u8.h
     include/richc/math/box2f.h
     include/richc/math/box2i.h
     include/richc/math/mat22f.h
@@ -126,23 +142,27 @@ if(RICHC_WASM)
         src/platform/wasm/fs.c
         src/platform/wasm/heap.c
         src/platform/wasm/print.c
-        src/platform/wasm/runtime.c)
+        src/platform/wasm/runtime.c
+        src/platform/wasm/time.c)
 
-    # The page scripts that supply the file and print imports. The app's own page copies them into
-    # its site, under richc/.
+    # The page scripts that supply the file, print and clock imports. The app's own page copies them
+    # into its site, under richc/.
     set_property(TARGET richc PROPERTY RICHC_WEB_FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/fs.js
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/print.js)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/print.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/time.js)
 elseif(WIN32)
     target_sources(richc PRIVATE
         src/platform/win32/fs.c
         src/platform/win32/heap.c
-        src/platform/win32/print.c)
+        src/platform/win32/print.c
+        src/platform/win32/time.c)
 else()
     target_sources(richc PRIVATE
         src/platform/posix/fs.c
         src/platform/posix/heap.c
-        src/platform/posix/print.c)
+        src/platform/posix/print.c
+        src/platform/posix/time.c)
 endif()
 
 # ---- test framework (native only) ----

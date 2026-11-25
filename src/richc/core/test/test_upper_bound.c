@@ -2,11 +2,8 @@
 //
 // Tests for the upper bound template.
 
+#include "richc/array/i32.h"
 #include "richc/test.h"
-
-#define RC_ARRAY_TYPE int32_t
-#define RC_ARRAY_NAME i32
-#include "richc/array.template.h"
 
 // Records, searched by key
 typedef struct kv {

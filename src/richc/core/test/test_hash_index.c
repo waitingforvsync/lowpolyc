@@ -4,6 +4,7 @@
 
 #include "richc/hash.h"
 
+#include "richc/array/u32.h"
 #include "richc/test.h"
 
 // A position, as in vertex coincidence. It compares with ==, so -0 and +0 match, and
@@ -21,10 +22,6 @@ typedef struct entry {
 } entry;
 
 #define RC_ARRAY_TYPE pt
-#include "richc/array.template.h"
-
-#define RC_ARRAY_TYPE uint32_t
-#define RC_ARRAY_NAME u32
 #include "richc/array.template.h"
 
 #define RC_ARRAY_TYPE entry

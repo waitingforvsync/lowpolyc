@@ -2,11 +2,8 @@
 //
 // Tests for the view, span and array template.
 
+#include "richc/array/i32.h"
 #include "richc/test.h"
-
-#define RC_ARRAY_TYPE int32_t
-#define RC_ARRAY_NAME i32
-#include "richc/array.template.h"
 
 // A struct element, so rotate is seen to move whole elements
 typedef struct pt {

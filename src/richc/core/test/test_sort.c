@@ -3,11 +3,8 @@
 // Tests for the sort template.
 
 #include "richc/arena.h"
+#include "richc/array/i32.h"
 #include "richc/test.h"
-
-#define RC_ARRAY_TYPE int32_t
-#define RC_ARRAY_NAME i32
-#include "richc/array.template.h"
 
 // Records sorted by key, so equal keys can be told apart by value
 typedef struct kv {

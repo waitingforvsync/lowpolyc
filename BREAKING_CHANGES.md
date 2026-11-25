@@ -19,6 +19,7 @@ richc.
 - [bytes.h](#bytesh)
 - [file.h](#fileh)
 - [print.h](#printh)
+- [random.h and time.h](#randomh-and-timeh)
 - [hash.h](#hashh)
 - [The array template](#the-array-template)
 - [bitset.h](#bitseth)
@@ -266,6 +267,14 @@ even between different arenas.
 - **On wasm**, the page needs the imports from `richc/print.js`, which sends
   each finished line to the console.
 
+## random.h and time.h
+
+- **Unchanged:** `rc_random_make`, `rc_random_next` and `rc_time_now_ns`, with
+  the same splitmix32 draws for every seed. `{0}` is a generator seeded with 0.
+- **On wasm**, the page needs the import from `richc/time.js`. The clock is the
+  page's `performance.now()`, which browsers coarsen to tens of microseconds or
+  more.
+
 ## hash.h
 
 - **Every hash is still 32-bit**, with the same names and signatures.
@@ -305,21 +314,14 @@ Include `richc/array.template.h`. Its control macros are unchanged
 - **Unchanged:** everything else, including growth (`max(2 * cap, need, 8)`),
   `push_n_zero`, `resize_zero`, `reverse` and `rotate`.
 
-**The per-type headers are not ported yet** (`richc/array/u8.h` and the rest).
-Until they are, write the instantiation yourself, in a header with an include
-guard:
+**The per-type headers are back at the same paths**, `richc/array/<name>.h`,
+for `u8` to `u64`, `i8` to `i64`, `f32`, `f64`, `str`, `mstr` and `bitset`.
+`richc/array/bitset.h` still makes arrays of bitsets (`rc_array_bitset`), not a
+bitset's words.
 
-```c
-#include "richc/str.h"
-
-#define RC_ARRAY_TYPE rc_str
-#define RC_ARRAY_NAME str
-#include "richc/array.template.h"
-```
-
-They will return at the same paths, so the include lines can then go back.
-Note that the old `richc/array/bitset.h` made arrays of bitsets
-(`rc_array_bitset`), not a bitset's words.
+- **`richc/array/bool.h` is gone.** `bool` is a macro for `_Bool` in C17, so
+  the old header made `rc_array__Bool`, not `rc_array_bool`. Use a bitset, or
+  an array of `u8`.
 
 ## bitset.h
 
@@ -527,9 +529,6 @@ The headers keep their names under `richc/math/`, and their arrays under
 
 | Old | What it was |
 |---|---|
-| `richc/array/*.h` | per-type arrays: `u8` to `u64`, `i8` to `i64`, `f32`, `f64`, `bool`, `str`, `mstr`, `bitset` |
-| `richc/random.h` | `rc_random`, a PRNG |
-| `richc/time.h` | a monotonic nanosecond clock |
 | `richc/rect_pack.h` | a rectangle packer |
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
 | `richc/zip/inflate.h` | DEFLATE and zlib decompression |
@@ -546,9 +545,6 @@ What Baron uses that changed, roughly in order of effort:
     `reserved - top` check in `scopes.c`, and the `top < reserved / 2` loop
     in `assemble.c`.
   - `permanent_start = permanent.top` in `baron.c` and `baron.h`.
-- **Missing modules:**
-  - the array headers for `u8`, `u32`, `i32`, `i64`, `str` and `bitset`
-  - `random.h`, for `RND`
 - **`sort.h` and `lower_bound.h` in `symdump.c` and `expression.c`:** only
   the include paths change, to `richc/algorithm/sort.template.h` and
   `richc/algorithm/lower_bound.template.h`.
