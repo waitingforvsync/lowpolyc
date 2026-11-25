@@ -25,12 +25,12 @@ static void visit(visits *v, uint32_t index)
 
 
 #define RC_BITSET_FOREACH_FUNC(i) visit(&seen, i)
-#include "richc/algorithms/bitset_foreach.template.h"
+#include "richc/algorithm/bitset_foreach.template.h"
 
 #define RC_BITSET_FOREACH_CTX visits
 #define RC_BITSET_FOREACH_FUNC(v, i) visit(v, i)
 #define RC_BITSET_FOREACH_NAME foreach_with_context
-#include "richc/algorithms/bitset_foreach.template.h"
+#include "richc/algorithm/bitset_foreach.template.h"
 
 // Each test runs against a fresh default arena, with nothing seen yet
 RC_TEST_GROUP_DATA(bitset_foreach) {

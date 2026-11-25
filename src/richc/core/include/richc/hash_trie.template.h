@@ -199,7 +199,7 @@ typedef struct RC_HASH_TRIE_ {
     uint32_t root_;  // the root block's index plus one; 0 before the first add
 } RC_HASH_TRIE_;
 
-// For walks, here and in algorithms/hash_trie_foreach.template.h: the width, and the most
+// For walks, here and in algorithm/hash_trie_foreach.template.h: the width, and the most
 // blocks a walk can have waiting. Only the first levels' blocks can hold more than one
 // key (see How it works), and each of those leaves at most width - 1 children waiting while
 // the walk goes down another.
@@ -267,7 +267,7 @@ static inline uint32_t RC_HASH_TRIE_ADD_BLOCK_(RC_HASH_TRIE_POOL_ *pool, rc_aren
     return RC_HASH_TRIE_BLOCKS_ADD_(&pool->blocks_, (RC_HASH_TRIE_BLOCK_) {0}, arena);
 }
 
-// The block at an index; algorithms/hash_trie_foreach.template.h uses the const one too.
+// The block at an index; algorithm/hash_trie_foreach.template.h uses the const one too.
 static inline RC_HASH_TRIE_BLOCK_ *RC_HASH_TRIE_BLOCK_AT_(RC_HASH_TRIE_POOL_ *pool, uint32_t index)
 {
     return RC_HASH_TRIE_BLOCKS_AT_(&pool->blocks_, index);

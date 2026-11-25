@@ -1,4 +1,4 @@
-// algorithms/end.template.h
+// algorithm/private/end.template.h
 //
 // Undoes begin.template.h, inputs and all, once an algorithm has written its functions.
 

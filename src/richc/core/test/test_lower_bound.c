@@ -26,19 +26,19 @@ typedef struct sign_ctx {
 #define RC_LOWER_BOUND_TYPE int32_t
 #define RC_LOWER_BOUND_NAME rc_lower_bound_i32
 #define RC_LOWER_BOUND_VIEW rc_view_i32
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // A comparison of whole records, searched for by a record
 #define RC_LOWER_BOUND_TYPE kv
 #define RC_LOWER_BOUND_CMP(a, b) ((a).key < (b).key)
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // The same records projected to their keys, searched for by a key
 #define RC_LOWER_BOUND_TYPE kv
 #define RC_LOWER_BOUND_NAME rc_lower_bound_kv_by_key
 #define RC_LOWER_BOUND_KEY(e) ((e).key)
 #define RC_LOWER_BOUND_KEY_TYPE int32_t
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // A context in the comparison
 #define RC_LOWER_BOUND_TYPE int32_t
@@ -46,7 +46,7 @@ typedef struct sign_ctx {
 #define RC_LOWER_BOUND_VIEW rc_view_i32
 #define RC_LOWER_BOUND_CTX sign_ctx
 #define RC_LOWER_BOUND_CMP(c, a, b) ((c)->sign * (a) < (c)->sign * (b))
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // A context in the projection, with the default comparison
 #define RC_LOWER_BOUND_TYPE kv
@@ -54,14 +54,14 @@ typedef struct sign_ctx {
 #define RC_LOWER_BOUND_CTX sign_ctx
 #define RC_LOWER_BOUND_KEY(c, e) ((c)->sign * (e).key)
 #define RC_LOWER_BOUND_KEY_TYPE int32_t
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // A context that neither the projection nor the comparison uses
 #define RC_LOWER_BOUND_TYPE int32_t
 #define RC_LOWER_BOUND_NAME rc_lower_bound_i32_ctx
 #define RC_LOWER_BOUND_VIEW rc_view_i32
 #define RC_LOWER_BOUND_CTX sign_ctx
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 
 RC_TEST(lower_bound, empty)

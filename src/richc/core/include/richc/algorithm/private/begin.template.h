@@ -1,4 +1,4 @@
-// algorithms/begin.template.h
+// algorithm/private/begin.template.h
 //
 // What the algorithms over views and spans share: how a context is passed, how an element becomes
 // the key that is compared, and how keys are compared. Each algorithm maps its own control macros
@@ -28,7 +28,7 @@
 // The fallback type keeps IntelliSense happy when it parses this file on its own
 #ifndef RC_ALGORITHM_TYPE_
 #  define RC_ALGORITHM_TYPE_ int
-#  error "richc/algorithms/begin.template.h is included by the algorithm templates, not directly"
+#  error "richc/algorithm/private/begin.template.h is included by the algorithm templates, not directly"
 #endif
 
 #if defined(RC_ALGORITHM_KEY_FN_) && !defined(RC_ALGORITHM_KEY_TYPE_)

@@ -119,7 +119,7 @@ find them.
   | `richc/template/genpool.h` | `richc/genpool.template.h` |
   | `richc/genpool_handle.h` | `richc/handle.template.h` |
   | `richc/template/hash_trie.h` | `richc/hash_trie.template.h` |
-  | `richc/template/algorithm/<name>.h` | `richc/algorithms/<name>.template.h` |
+  | `richc/template/algorithm/<name>.h` | `richc/algorithm/<name>.template.h` |
 
 - **Container templates' `NAME` macros are a suffix**, never the full type
   name: the type is always `rc_pool_<NAME>`, `rc_genpool_<NAME>` or
@@ -343,7 +343,7 @@ Note that the old `richc/array/bitset.h` made arrays of bitsets
 | `free(pool, index)` | `remove(pool, index)` | |
 | `deinit(pool, arena)` | `release(pool, arena)` | |
 | `pool.items.num` | `num_slots(pool)` | the fields are now internal (`slots_`, `first_free_`) |
-| `template/algorithm/pool_foreach.h` | none | loop to `num_slots`, skipping the slots set in `free_bitset` |
+| `template/algorithm/pool_foreach.h` | `algorithm/pool_foreach.template.h` | new `RC_POOL_FOREACH_CONST` for a read-only walk |
 
 `make`, `reserve`, `reset`, `get`, `set`, `at`, `at_const` and `free_bitset`
 are unchanged apart from the type name.
@@ -377,7 +377,7 @@ are unchanged apart from the type name.
 | `at` / `at_const` returning `NULL` for a stale handle | assert | check `is_valid` first |
 | `handle_at(pool, index)` on a free slot | asserts | it must be live |
 | `free_bitset` | none | loop to `num_slots`, using `is_live` |
-| `template/algorithm/genpool_foreach.h` | none | the same loop, with no scratch arena |
+| `template/algorithm/genpool_foreach.h` | `algorithm/genpool_foreach.template.h` | no scratch arena; new `RC_GENPOOL_FOREACH_CONST` for a read-only walk |
 
 - **New: `RC_GENPOOL_DECLARE_ONLY` and `RC_GENPOOL_IMPL_ONLY`**, for an
   element type holding a genpool of itself. The declaring pass makes the
@@ -386,9 +386,14 @@ are unchanged apart from the type name.
 ## Algorithms
 
 `sort`, `lower_bound`, `upper_bound`, `min_element`, `max_element`,
-`bitset_foreach` and `hash_trie_foreach` are all in `richc/algorithms/`. Their
-control macros, function names and arguments are unchanged, apart from the
-hash trie foreach's (see [The hash trie](#the-hash-trie)).
+`bitset_foreach`, `pool_foreach`, `genpool_foreach` and `hash_trie_foreach`
+are all in `richc/algorithm/`. Their control macros, function names and
+arguments are unchanged, apart from the hash trie foreach's (see
+[The hash trie](#the-hash-trie)) and the genpool foreach's scratch arena (see
+[Genpools and handles](#genpools-and-handles)).
+
+- **New: `hash_index_foreach`**, which calls `RC_HASH_INDEX_FOREACH_FUNC`
+  with the index of every entry of a hash index, in the table's order.
 
 - **New: projections.** `sort`, the two bounds and the two element searches
   take `KEY(e)`, or `KEY(ctx, e)` with a context, which turns an element into
@@ -472,7 +477,7 @@ After:
 #define RC_HASH_TRIE_FOREACH_CONST
 #define RC_HASH_TRIE_FOREACH_FUNC(c, p, i) flatten_symbol(c, p, i)
 #define RC_HASH_TRIE_FOREACH_NAME rc_hash_trie_symbol_foreach_flatten
-#include "richc/algorithms/hash_trie_foreach.template.h"
+#include "richc/algorithm/hash_trie_foreach.template.h"
 ```
 
 ## Math
@@ -545,8 +550,8 @@ What Baron uses that changed, roughly in order of effort:
   - the array headers for `u8`, `u32`, `i32`, `i64`, `str` and `bitset`
   - `random.h`, for `RND`
 - **`sort.h` and `lower_bound.h` in `symdump.c` and `expression.c`:** only
-  the include paths change, to `richc/algorithms/sort.template.h` and
-  `richc/algorithms/lower_bound.template.h`.
+  the include paths change, to `richc/algorithm/sort.template.h` and
+  `richc/algorithm/lower_bound.template.h`.
 - **`rc_str_substr`:** 11 calls in `assemble.c`, `expression.c` and `lexer.c`.
   Each already passes a difference (`x - start`), so it becomes
   `rc_str_substr(s, start, x)`.

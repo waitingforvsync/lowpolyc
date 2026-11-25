@@ -30,7 +30,7 @@ typedef struct rc_wgsl_word {
 #define RC_LOWER_BOUND_KEY(w) ((w).text)
 #define RC_LOWER_BOUND_KEY_TYPE rc_str
 #define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // Every keyword and reserved word, in byte order for the binary search.
 static const rc_wgsl_word rc_wgsl_words[] = {

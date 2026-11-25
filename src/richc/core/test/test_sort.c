@@ -28,19 +28,19 @@ typedef struct sign_ctx {
 #define RC_SORT_TYPE int32_t
 #define RC_SORT_NAME rc_sort_i32
 #define RC_SORT_SPAN rc_span_i32
-#include "richc/algorithms/sort.template.h"
+#include "richc/algorithm/sort.template.h"
 
 // A comparison of whole records
 #define RC_SORT_TYPE kv
 #define RC_SORT_CMP(a, b) ((a).key < (b).key)
-#include "richc/algorithms/sort.template.h"
+#include "richc/algorithm/sort.template.h"
 
 // The same records projected to their values, a second sort of the same type
 #define RC_SORT_TYPE kv
 #define RC_SORT_NAME rc_sort_kv_by_value
 #define RC_SORT_KEY(e) ((e).value)
 #define RC_SORT_KEY_TYPE int32_t
-#include "richc/algorithms/sort.template.h"
+#include "richc/algorithm/sort.template.h"
 
 // A context in the comparison
 #define RC_SORT_TYPE int32_t
@@ -48,7 +48,7 @@ typedef struct sign_ctx {
 #define RC_SORT_SPAN rc_span_i32
 #define RC_SORT_CTX sign_ctx
 #define RC_SORT_CMP(c, a, b) ((c)->sign * (a) < (c)->sign * (b))
-#include "richc/algorithms/sort.template.h"
+#include "richc/algorithm/sort.template.h"
 
 // Cached, with a context in the projection, which counts each call
 #define RC_SORT_TYPE kv
@@ -57,14 +57,14 @@ typedef struct sign_ctx {
 #define RC_SORT_KEY(c, e) ((c)->projections++, (c)->sign * (e).key)
 #define RC_SORT_KEY_TYPE int32_t
 #define RC_SORT_CACHED
-#include "richc/algorithms/sort.template.h"
+#include "richc/algorithm/sort.template.h"
 
 // Cached, with no context or projection
 #define RC_SORT_TYPE int32_t
 #define RC_SORT_NAME rc_sort_i32_cached
 #define RC_SORT_SPAN rc_span_i32
 #define RC_SORT_CACHED
-#include "richc/algorithms/sort.template.h"
+#include "richc/algorithm/sort.template.h"
 
 // Enough elements for several quicksort levels above insertion sort's 16
 enum { MANY = 1000 };

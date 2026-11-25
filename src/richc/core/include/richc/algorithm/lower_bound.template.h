@@ -1,4 +1,4 @@
-// algorithms/lower_bound.template.h
+// algorithm/lower_bound.template.h
 //
 // Template for a binary search on a sorted view: the index of the first element whose key does not
 // order before the key searched for, so the first element >= it, or the view's num if every
@@ -22,13 +22,13 @@
 //   #define RC_LOWER_BOUND_KEY(k) ((k).word)
 //   #define RC_LOWER_BOUND_KEY_TYPE rc_str
 //   #define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-//   #include "richc/algorithms/lower_bound.template.h"
+//   #include "richc/algorithm/lower_bound.template.h"
 //   // uint32_t rc_lower_bound_keyword(rc_view_keyword view, rc_str key)
 
 // The fallback type keeps IntelliSense happy when it parses this file on its own
 #ifndef RC_LOWER_BOUND_TYPE
 #  define RC_LOWER_BOUND_TYPE int
-#  error "RC_LOWER_BOUND_TYPE must be defined before including richc/algorithms/lower_bound.template.h"
+#  error "RC_LOWER_BOUND_TYPE must be defined before including richc/algorithm/lower_bound.template.h"
 #endif
 
 #ifndef RC_LOWER_BOUND_NAME
@@ -61,7 +61,7 @@
 #  define RC_ALGORITHM_CMP_FN_ RC_LOWER_BOUND_CMP
 #endif
 
-#include "richc/algorithms/begin.template.h"
+#include "richc/algorithm/private/begin.template.h"
 
 // ---- the search ----
 
@@ -86,7 +86,7 @@ static inline uint32_t RC_LOWER_BOUND_NAME(RC_LOWER_BOUND_VIEW view RC_ALGORITHM
 
 // ---- cleanup ----
 
-#include "richc/algorithms/end.template.h"
+#include "richc/algorithm/private/end.template.h"
 
 #undef RC_LOWER_BOUND_GET_
 

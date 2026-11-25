@@ -1,4 +1,4 @@
-// algorithms/upper_bound.template.h
+// algorithm/upper_bound.template.h
 //
 // Template for a binary search on a sorted view: the index of the first element whose key the key
 // searched for orders before, so the first element > it, or the view's num if none is greater.
@@ -23,13 +23,13 @@
 //   #define RC_UPPER_BOUND_KEY(k) ((k).word)
 //   #define RC_UPPER_BOUND_KEY_TYPE rc_str
 //   #define RC_UPPER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-//   #include "richc/algorithms/upper_bound.template.h"
+//   #include "richc/algorithm/upper_bound.template.h"
 //   // uint32_t rc_upper_bound_keyword(rc_view_keyword view, rc_str key)
 
 // The fallback type keeps IntelliSense happy when it parses this file on its own
 #ifndef RC_UPPER_BOUND_TYPE
 #  define RC_UPPER_BOUND_TYPE int
-#  error "RC_UPPER_BOUND_TYPE must be defined before including richc/algorithms/upper_bound.template.h"
+#  error "RC_UPPER_BOUND_TYPE must be defined before including richc/algorithm/upper_bound.template.h"
 #endif
 
 #ifndef RC_UPPER_BOUND_NAME
@@ -62,7 +62,7 @@
 #  define RC_ALGORITHM_CMP_FN_ RC_UPPER_BOUND_CMP
 #endif
 
-#include "richc/algorithms/begin.template.h"
+#include "richc/algorithm/private/begin.template.h"
 
 // ---- the search ----
 
@@ -87,7 +87,7 @@ static inline uint32_t RC_UPPER_BOUND_NAME(RC_UPPER_BOUND_VIEW view RC_ALGORITHM
 
 // ---- cleanup ----
 
-#include "richc/algorithms/end.template.h"
+#include "richc/algorithm/private/end.template.h"
 
 #undef RC_UPPER_BOUND_GET_
 

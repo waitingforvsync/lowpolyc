@@ -8,7 +8,7 @@
 #define RC_LOWER_BOUND_NAME rc_lower_bound_writer_word
 #define RC_LOWER_BOUND_VIEW rc_view_writer_word
 #define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // ---- state ----
 

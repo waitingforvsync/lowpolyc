@@ -11,8 +11,10 @@ add_executable(richc_core_test
     test_bytes.c
     test_file.c
     test_genpool.c
+    test_genpool_foreach.c
     test_hash.c
     test_hash_index.c
+    test_hash_index_foreach.c
     test_hash_trie.c
     test_hash_trie_foreach.c
     test_lower_bound.c
@@ -31,6 +33,7 @@ add_executable(richc_core_test
     test_min_element.c
     test_mstr.c
     test_pool.c
+    test_pool_foreach.c
     test_quatf.c
     test_rational.c
     test_solve.c

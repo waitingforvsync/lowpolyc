@@ -1,4 +1,4 @@
-// algorithms/bitset_foreach.template.h
+// algorithm/bitset_foreach.template.h
 //
 // Template for a function that visits the set bits of a bitset in ascending order, calling a
 // macro with each one's index. It is the loop in bitset.h, with first_set and next_set, named.
@@ -13,24 +13,24 @@
 //   #define RC_BITSET_FOREACH_CTX mesh
 //   #define RC_BITSET_FOREACH_FUNC(m, i) mesh_select_face(m, i)
 //   #define RC_BITSET_FOREACH_NAME select_faces
-//   #include "richc/algorithms/bitset_foreach.template.h"
+//   #include "richc/algorithm/bitset_foreach.template.h"
 //   // void select_faces(const rc_bitset *bs, mesh *ctx)
 
 // ---- shared by every instantiation ----
 
-#ifndef RC_ALGORITHMS_BITSET_FOREACH_TEMPLATE_H_
-#define RC_ALGORITHMS_BITSET_FOREACH_TEMPLATE_H_
+#ifndef RC_ALGORITHM_BITSET_FOREACH_TEMPLATE_H_
+#define RC_ALGORITHM_BITSET_FOREACH_TEMPLATE_H_
 
 #include "richc/bitset.h"
 
-#endif // RC_ALGORITHMS_BITSET_FOREACH_TEMPLATE_H_
+#endif // RC_ALGORITHM_BITSET_FOREACH_TEMPLATE_H_
 
 // ---- per-function names ----
 
 // The fallback keeps IntelliSense happy when it parses this file on its own
 #ifndef RC_BITSET_FOREACH_FUNC
 #  define RC_BITSET_FOREACH_FUNC(index) ((void)(index))
-#  error "RC_BITSET_FOREACH_FUNC must be defined before including richc/algorithms/bitset_foreach.template.h"
+#  error "RC_BITSET_FOREACH_FUNC must be defined before including richc/algorithm/bitset_foreach.template.h"
 #endif
 
 #ifndef RC_BITSET_FOREACH_NAME

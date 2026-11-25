@@ -1,4 +1,4 @@
-// algorithms/sort.template.h
+// algorithm/sort.template.h
 //
 // Template for sorting a span in place, by introsort: quicksort, which falls back to heapsort if
 // it goes too deep, so the worst case is O(n log n), and leaves spans of 16 or fewer to insertion
@@ -30,7 +30,7 @@
 //   #define RC_SORT_KEY(c, f) camera_depth(c, f)
 //   #define RC_SORT_KEY_TYPE float
 //   #define RC_SORT_CACHED
-//   #include "richc/algorithms/sort.template.h"
+//   #include "richc/algorithm/sort.template.h"
 //   // void rc_sort_face(rc_span_face span, camera *ctx, rc_arena scratch)
 //
 // How it works: each quicksort pass orders the first, middle and last items, takes the middle one
@@ -43,7 +43,7 @@
 // The fallback type keeps IntelliSense happy when it parses this file on its own
 #ifndef RC_SORT_TYPE
 #  define RC_SORT_TYPE int
-#  error "RC_SORT_TYPE must be defined before including richc/algorithms/sort.template.h"
+#  error "RC_SORT_TYPE must be defined before including richc/algorithm/sort.template.h"
 #endif
 
 #ifndef RC_SORT_NAME
@@ -92,7 +92,7 @@
 #  define RC_ALGORITHM_CMP_FN_ RC_SORT_CMP
 #endif
 
-#include "richc/algorithms/begin.template.h"
+#include "richc/algorithm/private/begin.template.h"
 
 // ---- the items sorted ----
 
@@ -351,7 +351,7 @@ static inline void RC_SORT_NAME(RC_SORT_SPAN span RC_ALGORITHM_CTX_PARAM_)
 
 // ---- cleanup ----
 
-#include "richc/algorithms/end.template.h"
+#include "richc/algorithm/private/end.template.h"
 
 #undef RC_SORT_ITEMS_AT_
 #undef RC_SORT_ITEMS_SET_

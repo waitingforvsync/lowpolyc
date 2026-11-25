@@ -27,19 +27,19 @@ typedef struct sign_ctx {
 #define RC_MAX_ELEMENT_TYPE int32_t
 #define RC_MAX_ELEMENT_NAME rc_max_element_i32
 #define RC_MAX_ELEMENT_VIEW rc_view_i32
-#include "richc/algorithms/max_element.template.h"
+#include "richc/algorithm/max_element.template.h"
 
 // A comparison of whole records
 #define RC_MAX_ELEMENT_TYPE kv
 #define RC_MAX_ELEMENT_CMP(a, b) ((a).key < (b).key)
-#include "richc/algorithms/max_element.template.h"
+#include "richc/algorithm/max_element.template.h"
 
 // The same records projected to their values, a second search of the same type
 #define RC_MAX_ELEMENT_TYPE kv
 #define RC_MAX_ELEMENT_NAME rc_max_element_kv_by_value
 #define RC_MAX_ELEMENT_KEY(e) ((e).value)
 #define RC_MAX_ELEMENT_KEY_TYPE int32_t
-#include "richc/algorithms/max_element.template.h"
+#include "richc/algorithm/max_element.template.h"
 
 // A context in the comparison
 #define RC_MAX_ELEMENT_TYPE int32_t
@@ -47,7 +47,7 @@ typedef struct sign_ctx {
 #define RC_MAX_ELEMENT_VIEW rc_view_i32
 #define RC_MAX_ELEMENT_CTX sign_ctx
 #define RC_MAX_ELEMENT_CMP(c, a, b) ((c)->sign * (a) < (c)->sign * (b))
-#include "richc/algorithms/max_element.template.h"
+#include "richc/algorithm/max_element.template.h"
 
 // A context in the projection, which counts each call
 #define RC_MAX_ELEMENT_TYPE kv
@@ -55,14 +55,14 @@ typedef struct sign_ctx {
 #define RC_MAX_ELEMENT_CTX sign_ctx
 #define RC_MAX_ELEMENT_KEY(c, e) ((c)->projections++, (c)->sign * (e).key)
 #define RC_MAX_ELEMENT_KEY_TYPE int32_t
-#include "richc/algorithms/max_element.template.h"
+#include "richc/algorithm/max_element.template.h"
 
 // A context that neither the projection nor the comparison uses
 #define RC_MAX_ELEMENT_TYPE int32_t
 #define RC_MAX_ELEMENT_NAME rc_max_element_i32_ctx
 #define RC_MAX_ELEMENT_VIEW rc_view_i32
 #define RC_MAX_ELEMENT_CTX sign_ctx
-#include "richc/algorithms/max_element.template.h"
+#include "richc/algorithm/max_element.template.h"
 
 
 RC_TEST(max_element, empty)

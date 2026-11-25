@@ -1,4 +1,4 @@
-// algorithms/min_element.template.h
+// algorithm/min_element.template.h
 //
 // Template for finding a view's smallest element: the index of the first element whose key no
 // other key orders before, so the leftmost of a tie, or RC_INDEX_NONE if the view is empty.
@@ -20,13 +20,13 @@
 //   #define RC_MIN_ELEMENT_TYPE vertex
 //   #define RC_MIN_ELEMENT_KEY(v) ((v).pos.y)
 //   #define RC_MIN_ELEMENT_KEY_TYPE float
-//   #include "richc/algorithms/min_element.template.h"
+//   #include "richc/algorithm/min_element.template.h"
 //   // uint32_t rc_min_element_vertex(rc_view_vertex view)
 
 // The fallback type keeps IntelliSense happy when it parses this file on its own
 #ifndef RC_MIN_ELEMENT_TYPE
 #  define RC_MIN_ELEMENT_TYPE int
-#  error "RC_MIN_ELEMENT_TYPE must be defined before including richc/algorithms/min_element.template.h"
+#  error "RC_MIN_ELEMENT_TYPE must be defined before including richc/algorithm/min_element.template.h"
 #endif
 
 #ifndef RC_MIN_ELEMENT_NAME
@@ -60,7 +60,7 @@
 #  define RC_ALGORITHM_CMP_FN_ RC_MIN_ELEMENT_CMP
 #endif
 
-#include "richc/algorithms/begin.template.h"
+#include "richc/algorithm/private/begin.template.h"
 
 // ---- the search ----
 
@@ -93,7 +93,7 @@ static inline uint32_t RC_MIN_ELEMENT_NAME(RC_MIN_ELEMENT_VIEW view RC_ALGORITHM
 
 // ---- cleanup ----
 
-#include "richc/algorithms/end.template.h"
+#include "richc/algorithm/private/end.template.h"
 
 #undef RC_MIN_ELEMENT_OF_SOME_
 #undef RC_MIN_ELEMENT_GET_

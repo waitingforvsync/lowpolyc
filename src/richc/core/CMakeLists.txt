@@ -66,15 +66,18 @@ add_library(richc STATIC
     include/richc/pool.template.h
     include/richc/print.h
     include/richc/str.h
-    include/richc/algorithms/begin.template.h
-    include/richc/algorithms/bitset_foreach.template.h
-    include/richc/algorithms/end.template.h
-    include/richc/algorithms/hash_trie_foreach.template.h
-    include/richc/algorithms/lower_bound.template.h
-    include/richc/algorithms/max_element.template.h
-    include/richc/algorithms/min_element.template.h
-    include/richc/algorithms/sort.template.h
-    include/richc/algorithms/upper_bound.template.h
+    include/richc/algorithm/bitset_foreach.template.h
+    include/richc/algorithm/genpool_foreach.template.h
+    include/richc/algorithm/hash_index_foreach.template.h
+    include/richc/algorithm/hash_trie_foreach.template.h
+    include/richc/algorithm/lower_bound.template.h
+    include/richc/algorithm/max_element.template.h
+    include/richc/algorithm/min_element.template.h
+    include/richc/algorithm/pool_foreach.template.h
+    include/richc/algorithm/sort.template.h
+    include/richc/algorithm/upper_bound.template.h
+    include/richc/algorithm/private/begin.template.h
+    include/richc/algorithm/private/end.template.h
     include/richc/math/box2f.h
     include/richc/math/box2i.h
     include/richc/math/mat22f.h

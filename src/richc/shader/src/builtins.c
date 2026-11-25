@@ -16,7 +16,7 @@
 #define RC_LOWER_BOUND_KEY(p) ((p).name)
 #define RC_LOWER_BOUND_KEY_TYPE rc_str
 #define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-#include "richc/algorithms/lower_bound.template.h"
+#include "richc/algorithm/lower_bound.template.h"
 
 // Rows of the table, one macro for each sort of row. A type's element is an rc_wgsl_type_id
 // without its prefix. A depth texture's sampled type is f32 by its very nature, so its class says
