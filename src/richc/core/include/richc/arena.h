@@ -7,7 +7,8 @@
 // grow in place, and so can the current chunk, into the pages after it, if they are the top of the
 // heap or have been released. Releasing an arena gives its pages back: to the top of the heap if
 // they reach it, or else to a pool of free runs, merged with their neighbours, that later chunks
-// are cut from.
+// are cut from. Free pages stay committed, for reuse, up to 16 MiB of them in all; natively, the
+// rest go back to the OS.
 //
 // Passing an arena by value gives the callee a private scratch cursor: its allocations vanish when
 // it returns, and any chunk it had to add stays in the chain for the caller to reuse later. Only
@@ -55,8 +56,9 @@ bool rc_arena_init(void);
 // to the OS; on wasm, where linear memory cannot shrink, the next rc_arena_init reuses it.
 void rc_arena_deinit(void);
 
-// Make an arena whose chunks are at least chunk_size bytes (0: the default). Sets up the page heap
-// if need be. Out of memory goes to the OOM handler, so this never fails.
+// Make an arena whose chunks are at least chunk_size bytes (0: the default), or as near as a chunk
+// can be, which is 64 KiB short of 4 GiB. Sets up the page heap if need be. Out of memory goes to
+// the OOM handler, so this never fails.
 rc_arena rc_arena_make(uint32_t chunk_size);
 
 // Give all of the arena's chunks back, to the pool or the top of the heap, and zero it.

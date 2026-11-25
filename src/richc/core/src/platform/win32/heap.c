@@ -1,9 +1,11 @@
 // heap.c
 //
 // Windows. The page heap is one large reservation of address space, committed a run of pages at a
-// time as it grows.
+// time as it grows, and decommitted the same way.
 
 #include "heap.h"
+
+#include "richc/macros.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -38,6 +40,17 @@ bool rc_heap_commit(uintptr_t base, uint32_t page, uint32_t count)
     void *first = (void *)(base + (uintptr_t)page * RC_HEAP_PAGE_SIZE);
 
     return VirtualAlloc(first, (SIZE_T)count * RC_HEAP_PAGE_SIZE, MEM_COMMIT, PAGE_READWRITE) != NULL;
+}
+
+
+void rc_heap_decommit(uintptr_t base, uint32_t page, uint32_t count)
+{
+    void *first = (void *)(base + (uintptr_t)page * RC_HEAP_PAGE_SIZE);
+
+    // A size of 0 would decommit the whole reservation. If the call fails, the pages just stay
+    // committed.
+    RC_ASSERT(count != 0);
+    VirtualFree(first, (SIZE_T)count * RC_HEAP_PAGE_SIZE, MEM_DECOMMIT);
 }
 
 

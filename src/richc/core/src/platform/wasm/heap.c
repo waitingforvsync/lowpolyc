@@ -3,9 +3,9 @@
 // wasm32. The page heap is linear memory itself: wasm pages are our pages, and memory.grow appends
 // them at the end.
 //
-// Linear memory never shrinks, so release keeps everything committed, and the next reserve hands
-// the same pages out again. richc must be the only thing that grows memory, or the heap would not
-// be contiguous.
+// Linear memory never shrinks, so decommit does nothing, release keeps everything committed, and
+// the next reserve hands the same pages out again. richc must be the only thing that grows memory,
+// or the heap would not be contiguous.
 
 #include "heap.h"
 
@@ -60,6 +60,14 @@ bool rc_heap_commit(uintptr_t base, uint32_t page, uint32_t count)
 
     rc_wasm_committed = end;
     return true;
+}
+
+
+void rc_heap_decommit(uintptr_t base, uint32_t page, uint32_t count)
+{
+    (void)base;
+    (void)page;
+    (void)count;
 }
 
 

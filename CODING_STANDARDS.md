@@ -416,6 +416,8 @@ the data, but the space it leaves stays allocated until the arena is reset.
   app, the document, a frame, a load), each holding what dies together.
 - **Reset, don't release, for work that repeats.** A reset arena keeps its
   chunks, so once warmed up it needs no new pages and nothing in it moves.
+  Released pages stay committed for reuse only up to 16 MiB in all; natively,
+  the rest go back to the OS, and come back as page faults when used again.
 - **Make long-lived arenas early, and release short-lived ones in the reverse
   order they were made.** The long-lived sit low and stay put; the short-lived
   come and go at the top, where their pages go straight back to the heap and

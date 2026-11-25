@@ -12,40 +12,54 @@
 enum {
     RC_PAGE = RC_HEAP_PAGE_SIZE,
     RC_HEADER = RC_MAX_ALIGN,           // chunk header size, so allocations start aligned
-    RC_MAX_CHUNK_PAGES = 0xFFFF         // keeps a chunk's size in bytes within uint32_t
+    RC_MAX_CHUNK_PAGES = 0xFFFF,        // keeps a chunk's size in bytes within uint32_t
+    RC_RETAIN_PAGES = 256               // free pages kept committed for reuse: 16 MiB
 };
 
 // Largest single allocation: a maximal chunk, less its header.
 #define RC_MAX_ALLOC ((uint32_t)RC_MAX_CHUNK_PAGES * RC_PAGE - RC_HEADER)
 
-// XORed with the chunk's own page index, so a stray or misplaced header fails too. A free run of
-// pages has a header of the same shape, with a sentinel of its own.
+// XORed with the header's own page index, so a stray or misplaced header fails too.
 #define RC_CHUNK_SENTINEL 0x52434348u
 #define RC_FREE_SENTINEL 0x52434652u
 
 // Lives at the start of every chunk. Chunks sit end to end in the heap, so an overrun off the end
-// of one lands on the next one's sentinel.
+// of one lands on the next one's sentinel. Every page of a chunk is committed.
 typedef struct rc_chunk_header {
     uint32_t sentinel;
-    uint32_t next;       // next chunk in an arena's chain, or the next free run in the pool
+    uint32_t next;       // next chunk in the arena's chain
     uint32_t pages;
     uint32_t min_pages;  // growth size, read from an arena's first chunk only
 } rc_chunk_header;
 
+// Lives at the start of every free run of pages in the pool, where a chunk's header would be.
+typedef struct rc_free_header {
+    uint32_t sentinel;
+    uint32_t next;       // next free run up in the pool
+    uint32_t pages;
+    uint32_t committed;  // how many pages from the first are committed (at least that one); the rest
+                         // have gone back to the OS
+} rc_free_header;
+
 RC_STATIC_ASSERT(sizeof(rc_chunk_header) == RC_HEADER);
+RC_STATIC_ASSERT(sizeof(rc_free_header) == RC_HEADER);
 RC_STATIC_ASSERT(RC_ARENA_MAX_ALIGN == RC_PAGE);
 #if !defined(_MSC_VER) || defined(__clang__)
 RC_STATIC_ASSERT(alignof(max_align_t) <= RC_MAX_ALIGN);
 #endif
 
 // The global page heap. Pages from the first one up to used_pages each belong to a chunk in an
-// arena, or to a free run in the pool. Those above used_pages may still be committed, from before
-// the top was given back, and committing them again when they are taken costs nothing.
+// arena, or to a free run in the pool. Free pages, in the pool or above the top, stay committed for
+// the next chunk to take without a platform call, until there are more than RC_RETAIN_PAGES of
+// them; past that they go back to the OS. On wasm, which cannot take pages back, they stay as they
+// were.
 typedef struct rc_page_state {
     uintptr_t base;            // address of page 0
     uint32_t used_pages;       // the top: one past the highest page in use or in the pool
     uint32_t reserved_pages;   // one past the last page we may use; 0 until init
     uint32_t pool;             // the lowest free run, linked to the rest in address order
+    uint32_t spare_pages;      // how many pages from the top up are committed; the rest are not
+    uint32_t retained_pages;   // free pages committed: the spare ones, and those of the free runs
 } rc_page_state;
 
 static rc_page_state rc_mem;
@@ -103,21 +117,45 @@ RC_NORETURN static void rc_arena_out_of_memory(uint32_t size)
 }
 
 
-// Commit count more pages at the end of the heap. Returns the first, or 0 when out of memory.
+// Give count pages from page on back to the OS, if there are any.
+static void rc_pages_decommit(uint32_t page, uint32_t count)
+{
+    if (count != 0) {
+        rc_heap_decommit(rc_mem.base, page, count);
+    }
+}
+
+
+// Take count more pages at the top of the heap, committing those past the spare ones. Returns the
+// first, or 0 when out of memory.
 static uint32_t rc_pages_grow(uint32_t count)
 {
     uint32_t page = rc_mem.used_pages;
+    uint32_t spare = rc_mem.spare_pages < count ? rc_mem.spare_pages : count;
 
     if (count > rc_mem.reserved_pages - page) {
         return 0;
     }
 
-    if (!rc_heap_commit(rc_mem.base, page, count)) {
+    if (spare < count && !rc_heap_commit(rc_mem.base, page + spare, count - spare)) {
         return 0;
     }
 
     rc_mem.used_pages += count;
+    rc_mem.spare_pages -= spare;
+    rc_mem.retained_pages -= spare;
     return page;
+}
+
+
+// Give back to the OS up to excess of the spare pages at the top, the highest first.
+static void rc_top_trim(uint32_t excess)
+{
+    uint32_t trimmed = rc_mem.spare_pages < excess ? rc_mem.spare_pages : excess;
+
+    rc_mem.spare_pages -= trimmed;
+    rc_mem.retained_pages -= trimmed;
+    rc_pages_decommit(rc_mem.used_pages + rc_mem.spare_pages, trimmed);
 }
 
 
@@ -146,11 +184,14 @@ static bool rc_chunk_fits(uint32_t page, uint32_t need)
 // side by side, and one that reaches the top of the heap is given back to it, so none ever ends
 // there and the chunk below can grow in place again. Pages are cut from the front of a run, which
 // leaves the rest straight after them, for the new chunk to grow into.
+//
+// The committed pages of a run are always its first ones, at least the one that holds its header,
+// and those cut from it that are not are committed as they are.
 
 // The header of the free run at page, checked by its sentinel.
-static rc_chunk_header *rc_free_run(uint32_t page)
+static rc_free_header *rc_free_run(uint32_t page)
 {
-    rc_chunk_header *h = (rc_chunk_header *)rc_page_ptr(page);
+    rc_free_header *h = (rc_free_header *)rc_page_ptr(page);
 
     RC_ASSERT(page != 0);
     RC_ASSERT(h->sentinel == (RC_FREE_SENTINEL ^ page));   // something wrote to released memory
@@ -158,14 +199,15 @@ static rc_chunk_header *rc_free_run(uint32_t page)
 }
 
 
-// Write the header of a free run of pages pages at page, followed in the pool by next.
-static void rc_free_run_init(uint32_t page, uint32_t pages, uint32_t next)
+// Write the header of a free run of pages pages at page, the first committed of them committed,
+// followed in the pool by next.
+static void rc_free_run_init(uint32_t page, uint32_t pages, uint32_t committed, uint32_t next)
 {
-    *(rc_chunk_header *)rc_page_ptr(page) = (rc_chunk_header) {
+    *(rc_free_header *)rc_page_ptr(page) = (rc_free_header) {
         .sentinel = RC_FREE_SENTINEL ^ page,
         .next = next,
         .pages = pages,
-        .min_pages = 0
+        .committed = committed
     };
 }
 
@@ -188,13 +230,52 @@ static bool rc_free_runs_meet(uint32_t lower, uint32_t upper)
 
 
 // Merge the free run at upper into the one at lower, which it meets and follows in the pool.
+// upper's committed pages carry on from lower's if all of those are committed; if not, they would
+// sit past pages that are not, so they go back to the OS. The header upper leaves behind is wiped
+// first, so a stale pointer to the chunk that was there fails its sentinel check.
 static void rc_free_run_absorb(uint32_t lower, uint32_t upper)
 {
-    rc_chunk_header *low = rc_free_run(lower);
-    rc_chunk_header *up = rc_free_run(upper);
+    rc_free_header *low = rc_free_run(lower);
+    rc_free_header *up_header = rc_free_run(upper);
+    rc_free_header up = *up_header;
 
-    low->pages += up->pages;
-    low->next = up->next;
+    *up_header = (rc_free_header) {0};
+    if (low->committed == low->pages) {
+        low->committed += up.committed;
+    }
+    else {
+        rc_pages_decommit(upper, up.committed);
+        rc_mem.retained_pages -= up.committed;
+    }
+
+    low->pages += up.pages;
+    low->next = up.next;
+}
+
+
+// Give back to the OS up to excess of the committed pages of the free run at page, the last first,
+// keeping the one that holds its header.
+static void rc_free_run_trim(uint32_t page, uint32_t excess)
+{
+    rc_free_header *run = rc_free_run(page);
+    uint32_t spare = run->committed - 1;
+    uint32_t trimmed = spare < excess ? spare : excess;
+
+    run->committed -= trimmed;
+    rc_mem.retained_pages -= trimmed;
+    rc_pages_decommit(page + run->committed, trimmed);
+}
+
+
+// Commit the first pages pages of the free run at page. False when out of memory.
+static bool rc_free_run_commit(uint32_t page, uint32_t pages)
+{
+    uint32_t committed = rc_free_run(page)->committed;
+
+    if (pages <= committed) {
+        return true;
+    }
+    return rc_heap_commit(rc_mem.base, page + committed, pages - committed);
 }
 
 
@@ -224,14 +305,16 @@ static uint32_t *rc_pool_link_at(uint32_t page)
 }
 
 
-// Add the pages pages at page to the pool, merged with the free runs either side if they meet.
+// Add the pages pages of a chunk at page to the pool, merged with the free runs either side if they
+// meet.
 static void rc_pool_add(uint32_t page, uint32_t pages)
 {
     uint32_t below = rc_pool_below(page);
     uint32_t *link = below != 0 ? &rc_free_run(below)->next : &rc_mem.pool;
     uint32_t above = *link;
 
-    rc_free_run_init(page, pages, above);
+    rc_free_run_init(page, pages, pages, above);
+    rc_mem.retained_pages += pages;
     *link = page;
     if (rc_free_runs_meet(page, above)) {
         rc_free_run_absorb(page, above);
@@ -240,6 +323,26 @@ static void rc_pool_add(uint32_t page, uint32_t pages)
     if (rc_free_runs_meet(below, page)) {
         rc_free_run_absorb(below, page);
     }
+}
+
+
+// Lower the top of the heap to the free run at page, which reaches it. The run's committed pages
+// become spare, and so do the spare ones above it, if they carry on from them; if not, they go back
+// to the OS.
+static void rc_top_lower_to(uint32_t page)
+{
+    rc_free_header *run = rc_free_run(page);
+    uint32_t spare = run->committed;
+
+    if (run->committed == run->pages) {
+        spare += rc_mem.spare_pages;
+    }
+    else {
+        rc_top_trim(rc_mem.spare_pages);
+    }
+
+    rc_mem.used_pages = page;
+    rc_mem.spare_pages = spare;
 }
 
 
@@ -255,8 +358,26 @@ static void rc_pool_give_back_top(void)
     }
 
     if (*link != 0 && rc_free_run_end(*link) == rc_mem.used_pages) {
-        rc_mem.used_pages = *link;
+        rc_top_lower_to(*link);
         *link = 0;
+    }
+}
+
+
+// How many more free pages are committed than are kept for reuse.
+static uint32_t rc_retained_excess(void)
+{
+    return rc_mem.retained_pages > RC_RETAIN_PAGES ? rc_mem.retained_pages - RC_RETAIN_PAGES : 0;
+}
+
+
+// Give pages back to the OS until the free pages committed are within RC_RETAIN_PAGES: the spare
+// ones at the top first, then those of each free run in turn, from the lowest.
+static void rc_pool_trim(void)
+{
+    rc_top_trim(rc_retained_excess());
+    for (uint32_t run = rc_mem.pool; run != 0 && rc_retained_excess() != 0; run = rc_free_run(run)->next) {
+        rc_free_run_trim(run, rc_retained_excess());
     }
 }
 
@@ -270,7 +391,9 @@ static void rc_pool_release_chain(uint32_t page)
         rc_pool_add(page, rc_chunk(page)->pages);
         page = next;
     }
+
     rc_pool_give_back_top();
+    rc_pool_trim();
 }
 
 
@@ -307,25 +430,38 @@ static uint32_t *rc_pool_best_fit(uint32_t pages)
 }
 
 
-// Cut pages pages from the front of the free run that link points at, leaving the rest of it, if
-// any, as a free run in its place. Returns the first page cut.
+// Cut pages pages from the front of the free run that link points at, committed, leaving the rest
+// of it, if any, as a free run in its place. Returns the first page cut; 0 when out of memory, with
+// nothing cut.
 static uint32_t rc_pool_cut(uint32_t *link, uint32_t pages)
 {
     uint32_t page = *link;
-    rc_chunk_header *run = rc_free_run(page);
+    rc_free_header run = *rc_free_run(page);
+    uint32_t rest = run.pages - pages;
 
-    if (run->pages == pages) {
-        *link = run->next;
+    // The rest needs its first page committed too, for its header
+    uint32_t commit = rest != 0 ? pages + 1 : pages;
+    uint32_t committed = run.committed > commit ? run.committed : commit;
+    uint32_t rest_committed = rest != 0 ? committed - pages : 0;
+
+    if (!rc_free_run_commit(page, commit)) {
+        return 0;
+    }
+
+    rc_mem.retained_pages = rc_mem.retained_pages - run.committed + rest_committed;
+    if (rest == 0) {
+        *link = run.next;
         return page;
     }
 
-    rc_free_run_init(page + pages, run->pages - pages, run->next);
+    rc_free_run_init(page + pages, rest, rest_committed, run.next);
     *link = page + pages;
     return page;
 }
 
 
-// pages pages cut from the best-fitting free run, returning the first; 0 if none is big enough.
+// pages pages cut from the best-fitting free run, returning the first; 0 if none is big enough, or
+// when out of memory.
 static uint32_t rc_pool_take(uint32_t pages)
 {
     uint32_t *best = rc_pool_best_fit(pages);
@@ -338,7 +474,8 @@ static uint32_t rc_pool_take(uint32_t pages)
 
 
 // Pages cut from the front of the free run starting at page, if there is one of at least needed:
-// wanted of them, or all of it if it has fewer. Returns how many; 0 if there is no such run.
+// wanted of them, or all of it if it has fewer. Returns how many; 0 if there is no such run, or
+// when out of memory.
 static uint32_t rc_pool_take_at(uint32_t page, uint32_t needed, uint32_t wanted)
 {
     uint32_t *link = rc_pool_link_at(page);
@@ -349,8 +486,7 @@ static uint32_t rc_pool_take_at(uint32_t page, uint32_t needed, uint32_t wanted)
         return 0;
     }
 
-    rc_pool_cut(link, taken);
-    return taken;
+    return rc_pool_cut(link, taken) != 0 ? taken : 0;
 }
 
 
@@ -381,6 +517,18 @@ static uint32_t rc_chunk_acquire(uint32_t pages)
     return page;
 }
 
+
+// A chunk of wanted pages, else of needed, the fewest that will do. 0 when out of memory.
+static uint32_t rc_chunk_acquire_at_least(uint32_t needed, uint32_t wanted)
+{
+    uint32_t page = rc_chunk_acquire(wanted);
+
+    if (page != 0 || wanted == needed) {
+        return page;
+    }
+    return rc_chunk_acquire(needed);
+}
+
 // ---- making room ----
 
 // Make page the arena's current chunk, empty.
@@ -408,13 +556,24 @@ static uint32_t rc_chunk_growth(uint32_t have, uint32_t extra, uint32_t min_page
 }
 
 
-// Pages to grow a chunk ending at end by: wanted of them, committed at the top of the heap if the
-// chunk ends there, or as many of wanted as the free run starting at end has, if that is at least
-// needed. 0 if there is no room after the chunk.
+// Pages committed at the top of the heap: wanted of them, or failing that needed. Returns how many;
+// 0 when out of memory.
+static uint32_t rc_pages_at_top(uint32_t needed, uint32_t wanted)
+{
+    if (rc_pages_grow(wanted)) {
+        return wanted;
+    }
+    return rc_pages_grow(needed) ? needed : 0;
+}
+
+
+// Pages to grow a chunk ending at end by, wanted of them if there is room, else fewer but never
+// under needed: committed at the top of the heap if the chunk ends there, or else cut from the free
+// run starting at end. Returns how many; 0 if there is no room after the chunk.
 static uint32_t rc_pages_after(uint32_t end, uint32_t needed, uint32_t wanted)
 {
     if (end == rc_mem.used_pages) {
-        return rc_pages_grow(wanted) ? wanted : 0;
+        return rc_pages_at_top(needed, wanted);
     }
     return rc_pool_take_at(end, needed, wanted);
 }
@@ -457,7 +616,7 @@ static void rc_arena_add_chunk(rc_arena *a, uint32_t need)
 {
     uint32_t pages = rc_pages_for(need + RC_HEADER);
     uint32_t min_pages = rc_chunk(a->first)->min_pages;
-    uint32_t page = rc_chunk_acquire(pages > min_pages ? pages : min_pages);
+    uint32_t page = rc_chunk_acquire_at_least(pages, pages > min_pages ? pages : min_pages);
 
     if (!page) {
         rc_arena_out_of_memory(need);
@@ -670,7 +829,9 @@ static bool rc_arena_adopt_heap(rc_heap heap)
         .base = heap.base,
         .used_pages = heap.first,
         .reserved_pages = heap.limit,
-        .pool = 0
+        .pool = 0,
+        .spare_pages = 0,
+        .retained_pages = 0
     };
     return true;
 }
@@ -726,8 +887,8 @@ rc_arena rc_arena_make(uint32_t chunk_size)
         rc_arena_out_of_memory(size);
     }
 
-    RC_ASSERT(pages <= RC_MAX_CHUNK_PAGES);
-    return rc_arena_make_pages(pages, size);
+    // Within a few KiB of 4 GiB, the largest chunk there can be is the closest
+    return rc_arena_make_pages(pages < RC_MAX_CHUNK_PAGES ? pages : RC_MAX_CHUNK_PAGES, size);
 }
 
 

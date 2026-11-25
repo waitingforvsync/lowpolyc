@@ -10,6 +10,7 @@
 
 #include <setjmp.h>
 
+#include "richc/mem.h"
 #include "richc/random.h"
 #include "richc/test.h"
 
@@ -442,6 +443,181 @@ RC_TEST(arena, reset_arena_regrows_in_place)
     RC_CHECK_TRUE(check_fill(filler, 10 * PAGE, 5));
     rc_arena_release(&b);
     rc_arena_release(&a);
+}
+
+
+// ---- giving pages back to the OS ----
+//
+// Linux and Windows hand back zeroed pages once they have taken them, so the zero pages in a chunk
+// filled before its release are the ones that went back. macOS takes them lazily, and wasm not at
+// all, so these tests are skipped there.
+
+#if defined(__linux__) || defined(_WIN32)
+#  define RC_TEST_DECOMMIT RC_TEST
+#else
+#  define RC_TEST_DECOMMIT RC_TEST_SKIP
+#endif
+
+// Free pages kept committed, as arena.c has it.
+enum {
+    RETAINED = 256
+};
+
+
+// True if the second half of the page at index page of chunk is all zeros. The first half is left
+// out, as headers come and go there.
+static bool is_zeroed_page(const uint8_t *chunk, uint32_t page)
+{
+    const uint8_t *half = chunk + (size_t)page * PAGE + PAGE / 2;
+
+    for (uint32_t i = 0; i < PAGE / 2; i++) {
+        if (half[i] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+// How many of the pages pages from chunk are not zeroed, when they are the first ones and the
+// rest are; RC_INDEX_NONE if a zeroed page comes before one that is not.
+static uint32_t pages_before_zeroed(const uint8_t *chunk, uint32_t pages)
+{
+    uint32_t front = 0;
+
+    while (front < pages && !is_zeroed_page(chunk, front)) {
+        front++;
+    }
+
+    for (uint32_t page = front; page < pages; page++) {
+        if (!is_zeroed_page(chunk, page)) {
+            return RC_INDEX_NONE;
+        }
+    }
+    return front;
+}
+
+
+// A new arena of pages pages, its first chunk filled with 0xAB.
+static rc_arena filled_arena(uint32_t pages)
+{
+    rc_arena a = rc_arena_make(pages * PAGE);
+
+    rc_memset(rc_arena_alloc(&a, pages * PAGE - 16), 0xAB, pages * PAGE - 16);
+    return a;
+}
+
+
+// How many pages at the front of a's first chunk, of pages pages, which is empty, still hold what
+// was there before, with the rest zeroed.
+static uint32_t kept_pages(rc_arena *a, uint32_t pages)
+{
+    return pages_before_zeroed((const uint8_t *)rc_arena_alloc(a, 16) - 16, pages);
+}
+
+
+// kept_pages of a new arena of pages pages, which is released again.
+static uint32_t kept_pages_of_new_arena(uint32_t pages)
+{
+    rc_arena a = rc_arena_make(pages * PAGE);
+    uint32_t kept = kept_pages(&a, pages);
+
+    rc_arena_release(&a);
+    return kept;
+}
+
+
+RC_TEST_DECOMMIT(arena, few_free_pages_stay_committed)
+{
+    rc_arena low = rc_arena_make(PAGE);
+    rc_arena a = filled_arena(40);
+    rc_arena blocker = rc_arena_make(PAGE);
+
+    rc_arena_release(&a);
+    RC_CHECK(kept_pages_of_new_arena(40), ==, 40u);
+    rc_arena_release(&low);
+    rc_arena_release(&blocker);
+}
+
+
+RC_TEST_DECOMMIT(arena, pool_gives_back_pages_past_those_retained)
+{
+    rc_arena low = rc_arena_make(PAGE);
+    rc_arena a = filled_arena(300);
+    rc_arena blocker = rc_arena_make(PAGE);
+
+    rc_arena_release(&a);
+    RC_CHECK(kept_pages_of_new_arena(300), ==, (uint32_t)RETAINED);
+    rc_arena_release(&low);
+    rc_arena_release(&blocker);
+}
+
+
+RC_TEST_DECOMMIT(arena, top_gives_back_pages_past_those_retained)
+{
+    rc_arena a = filled_arena(300);
+
+    rc_arena_release(&a);
+    RC_CHECK(kept_pages_of_new_arena(300), ==, (uint32_t)RETAINED);
+}
+
+
+RC_TEST_DECOMMIT(arena, top_gives_back_before_the_pool)
+{
+    // a's pages are in the pool when b's go back to the top, and the top gives back the excess;
+    // then c takes a's run from the pool, and d the top
+    rc_arena a = filled_arena(200);
+    rc_arena blocker = rc_arena_make(PAGE);
+    rc_arena b = filled_arena(200);
+    rc_arena c = release_two_and_make(&a, &b, 200 * PAGE);
+    rc_arena d = rc_arena_make(200 * PAGE);
+
+    RC_CHECK(kept_pages(&c, 200), ==, 200u);
+    RC_CHECK(kept_pages(&d, 200), ==, (uint32_t)RETAINED - 200u);
+    rc_arena_release(&c);
+    rc_arena_release(&d);
+    rc_arena_release(&blocker);
+}
+
+
+RC_TEST_DECOMMIT(arena, merging_after_a_trimmed_run_gives_back_the_new_pages)
+{
+    // b's pages come after a's run, which no longer has all its pages, so they all go back
+    rc_arena a = filled_arena(300);
+    rc_arena b = filled_arena(4);
+    rc_arena blocker = rc_arena_make(PAGE);
+    rc_arena c = release_two_and_make(&a, &b, 304 * PAGE);
+
+    RC_CHECK(kept_pages(&c, 304), ==, (uint32_t)RETAINED);
+    rc_arena_release(&c);
+    rc_arena_release(&blocker);
+}
+
+
+RC_TEST_DECOMMIT(arena, merging_before_a_trimmed_run_keeps_the_front)
+{
+    // a's pages come before b's run, so they and b's first ones are the front of the new run
+    rc_arena a = filled_arena(4);
+    rc_arena b = filled_arena(300);
+    rc_arena blocker = rc_arena_make(PAGE);
+    rc_arena c = release_two_and_make(&b, &a, 304 * PAGE);
+
+    RC_CHECK(kept_pages(&c, 304), ==, (uint32_t)RETAINED);
+    rc_arena_release(&c);
+    rc_arena_release(&blocker);
+}
+
+
+RC_TEST_DECOMMIT(arena, top_merges_spare_pages)
+{
+    // b's first pages are spare at the top, then a's go back below them, and the excess goes from
+    // the end of b's
+    rc_arena a = filled_arena(4);
+    rc_arena b = filled_arena(300);
+    rc_arena c = release_two_and_make(&b, &a, 304 * PAGE);
+
+    RC_CHECK(kept_pages(&c, 304), ==, (uint32_t)RETAINED);
+    rc_arena_release(&c);
 }
 
 
