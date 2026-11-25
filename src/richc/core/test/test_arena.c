@@ -10,6 +10,7 @@
 
 #include <setjmp.h>
 
+#include "richc/random.h"
 #include "richc/test.h"
 
 enum {
@@ -199,9 +200,10 @@ RC_TEST(arena, release_recycles_whole_chain)
 
     RC_CHECK(second, !=, first);
 
-    // The pool is a stack: last chunk in, first out
-    RC_CHECK(b.first, ==, second);
-    RC_CHECK(c.first, !=, 0u);
+    // a's first chunk, below the blocker, went to the pool; its second, at the top of the heap,
+    // went back to the heap, which hands the same pages out again
+    RC_CHECK(b.first, ==, first);
+    RC_CHECK(c.first, ==, second);
     rc_arena_release(&b);
     rc_arena_release(&c);
     rc_arena_release(&blocker);
@@ -281,14 +283,19 @@ static bool release_and_restart_heap(rc_arena *a)
 
 RC_TEST(arena, deinit_empties_pool)
 {
+    // a's chunk is pooled, between two arenas, which the restart forgets along with it
+    rc_arena low = rc_arena_make(PAGE);
     rc_arena a = rc_arena_make(7 * PAGE);
+    rc_arena blocker = rc_arena_make(PAGE);
     bool restarted = release_and_restart_heap(&a);
     rc_arena b = rc_arena_make(PAGE);
 
+    RC_CHECK(low.first, ==, 1u);
+    RC_CHECK(blocker.first, ==, 9u);
     RC_CHECK_TRUE(restarted);
 
-    // From the pool this would be the 7-page chunk; fresh, it is one page
-    RC_CHECK(b.end, ==, (uint32_t)PAGE);
+    // From the pool this would be page 2; fresh, it is the first page
+    RC_CHECK(b.first, ==, 1u);
     rc_arena_release(&b);
 }
 
@@ -300,6 +307,292 @@ RC_TEST(arena, deinit_twice_is_noop)
     RC_CHECK_TRUE(rc_arena_init());
 }
 
+
+// ---- the pool ----
+
+RC_TEST(arena, pool_cuts_from_the_front_of_a_run)
+{
+    rc_arena a = rc_arena_make(7 * PAGE);
+    rc_arena blocker = rc_arena_make(PAGE);
+    uint32_t first = a.first;
+    rc_arena b = release_and_make(&a, 2 * PAGE);
+    rc_arena c = rc_arena_make(5 * PAGE);
+    rc_arena d = rc_arena_make(PAGE);
+
+    // Two pages from the front of the seven, then the other five, and then the pool is empty
+    RC_CHECK(b.first, ==, first);
+    RC_CHECK(b.end, ==, 2u * PAGE);
+    RC_CHECK(c.first, ==, first + 2u);
+    RC_CHECK(c.end, ==, 5u * PAGE);
+    RC_CHECK(d.first, ==, blocker.first + 1u);
+    rc_arena_release(&b);
+    rc_arena_release(&c);
+    rc_arena_release(&d);
+    rc_arena_release(&blocker);
+}
+
+
+// Release first, second and third, in that order, then make an arena of chunk_size.
+static rc_arena release_three_and_make(rc_arena *first, rc_arena *second, rc_arena *third, uint32_t chunk_size)
+{
+    rc_arena_release(first);
+    rc_arena_release(second);
+    return release_and_make(third, chunk_size);
+}
+
+
+RC_TEST(arena, pool_merges_neighbours)
+{
+    // The middle one goes last, and merges with both sides at once
+    rc_arena a = rc_arena_make(2 * PAGE);
+    rc_arena b = rc_arena_make(3 * PAGE);
+    rc_arena c = rc_arena_make(2 * PAGE);
+    rc_arena blocker = rc_arena_make(PAGE);
+    uint32_t first = a.first;
+    rc_arena d = release_three_and_make(&a, &c, &b, 7 * PAGE);
+
+    // Only all three together hold seven pages
+    RC_CHECK(d.first, ==, first);
+    RC_CHECK(d.end, ==, 7u * PAGE);
+    RC_CHECK(blocker.first, ==, first + 7u);
+    rc_arena_release(&d);
+    rc_arena_release(&blocker);
+}
+
+
+// Release first, then make an arena of chunk_size after releasing second.
+static rc_arena release_two_and_make(rc_arena *first, rc_arena *second, uint32_t chunk_size)
+{
+    rc_arena_release(first);
+    return release_and_make(second, chunk_size);
+}
+
+
+RC_TEST(arena, release_at_the_top_gives_pages_back)
+{
+    // b is at the top, so it goes back to the heap, and a after it, as it then reaches the top
+    rc_arena a = rc_arena_make(2 * PAGE);
+    rc_arena b = rc_arena_make(3 * PAGE);
+    uint32_t first = a.first;
+    rc_arena c = release_two_and_make(&b, &a, PAGE);
+    uint8_t *p = alloc_filled(&c, 20 * PAGE, 3);
+
+    // c starts where a did, at the top of the heap, so its chunk grows in place
+    RC_CHECK(c.first, ==, first);
+    RC_CHECK(c.chunk, ==, first);
+    RC_CHECK_TRUE(check_fill(p, 20 * PAGE, 3));
+    rc_arena_release(&c);
+}
+
+
+// Release other, then grow p, the last allocation in a, from size to new_size.
+static uint8_t *release_and_grow(rc_arena *other, rc_arena *a, uint8_t *p, uint32_t size, uint32_t new_size)
+{
+    rc_arena_release(other);
+    return rc_arena_realloc(a, p, size, new_size);
+}
+
+
+RC_TEST(arena, chunk_grows_into_a_released_neighbour)
+{
+    rc_arena a = rc_arena_make(PAGE);
+    rc_arena b = rc_arena_make(4 * PAGE);
+    rc_arena blocker = rc_arena_make(PAGE);
+    uint8_t *p = alloc_filled(&a, PAGE / 2, 4);
+    uint8_t *grown = release_and_grow(&b, &a, p, PAGE / 2, 2 * PAGE);
+    rc_arena c = rc_arena_make(PAGE);
+
+    // a took the two pages it needed from b's four, leaving the rest free after it
+    RC_CHECK_TRUE(grown == p);
+    RC_CHECK(a.chunk, ==, a.first);
+    RC_CHECK(a.end, ==, 3u * PAGE);
+    RC_CHECK_TRUE(check_fill(grown, PAGE / 2, 4));
+    RC_CHECK(c.first, ==, a.first + 3u);
+    rc_arena_release(&a);
+    rc_arena_release(&c);
+    rc_arena_release(&blocker);
+}
+
+
+// Reset a, and grow a block in it, from empty to size, in steps, returning where it ended up.
+static uint8_t *reset_and_grow(rc_arena *a, uint32_t size)
+{
+    uint8_t *p = NULL;
+
+    rc_arena_reset(a);
+    for (uint32_t have = 0; have < size; have += PAGE) {
+        p = rc_arena_realloc(a, p, have, have + PAGE);
+    }
+    return p;
+}
+
+
+RC_TEST(arena, reset_arena_regrows_in_place)
+{
+    // a grows to 10 pages, then b fills the pages after it; once reset, a grows the same block
+    // again within its own chunk, with no new pages and no copies
+    rc_arena a = rc_arena_make(PAGE);
+    uint8_t *first = reset_and_grow(&a, 10 * PAGE);
+    rc_arena b = rc_arena_make(PAGE);
+    uint8_t *filler = alloc_filled(&b, 10 * PAGE, 5);
+    uint8_t *again = reset_and_grow(&a, 10 * PAGE);
+
+    RC_CHECK_TRUE(again == first);
+    RC_CHECK(a.chunk, ==, a.first);
+    RC_CHECK_TRUE(check_fill(filler, 10 * PAGE, 5));
+    rc_arena_release(&b);
+    rc_arena_release(&a);
+}
+
+
+enum {
+    STRESS_ARENAS = 6,
+    STRESS_BLOCKS = 12,
+    STRESS_STEPS = 2000
+};
+
+// A block a stress test has filled, to check later.
+typedef struct stress_block {
+    uint8_t *p;
+    uint32_t size;
+    uint8_t seed;
+} stress_block;
+
+// An arena in the stress test, and the blocks in it, while it is made.
+typedef struct stress_arena {
+    rc_arena arena;
+    stress_block blocks[STRESS_BLOCKS];
+    uint32_t num;
+} stress_arena;
+
+
+// The number of s's blocks that no longer hold their pattern.
+static uint32_t stress_damaged(const stress_arena *s)
+{
+    uint32_t damaged = 0;
+
+    for (uint32_t i = 0; i < s->num; i++) {
+        damaged += check_fill(s->blocks[i].p, s->blocks[i].size, s->blocks[i].seed) ? 0u : 1u;
+    }
+    return damaged;
+}
+
+
+// A random block size: mostly up to a page, sometimes up to three.
+static uint32_t stress_size(rc_random *random)
+{
+    uint32_t limit = rc_random_next(random) % 8 == 0 ? 3 * PAGE : PAGE;
+
+    return 16 + rc_random_next(random) % limit;
+}
+
+
+// Grow s's last block by a random amount, refilling it.
+static void stress_grow(stress_arena *s, rc_random *random)
+{
+    stress_block *last = &s->blocks[s->num - 1];
+    uint32_t size = last->size + stress_size(random);
+
+    last->p = rc_arena_realloc(&s->arena, last->p, last->size, size);
+    last->size = size;
+    fill(last->p, size, last->seed);
+}
+
+
+// Add a block to s, or grow its last one, at random.
+static void stress_alloc(stress_arena *s, rc_random *random)
+{
+    bool grow = s->num == STRESS_BLOCKS || (s->num > 0 && rc_random_next(random) % 3 == 0);
+    uint32_t size = stress_size(random);
+    uint8_t seed = (uint8_t)rc_random_next(random);
+
+    if (grow) {
+        stress_grow(s, random);
+        return;
+    }
+
+    s->blocks[s->num] = (stress_block) {.p = alloc_filled(&s->arena, size, seed), .size = size, .seed = seed};
+    s->num++;
+}
+
+
+// Release s, or reset it, after checking its blocks. Returns how many were damaged.
+static uint32_t stress_clear(stress_arena *s, bool release)
+{
+    uint32_t damaged = stress_damaged(s);
+
+    if (release) {
+        rc_arena_release(&s->arena);
+    }
+    else {
+        rc_arena_reset(&s->arena);
+    }
+
+    s->num = 0;
+    return damaged;
+}
+
+
+// One random step on one of the arenas: make it, release it, reset it, or allocate in it. Returns
+// how many blocks were found damaged.
+static uint32_t stress_step(stress_arena *arenas, rc_random *random)
+{
+    stress_arena *s = &arenas[rc_random_next(random) % STRESS_ARENAS];
+    uint32_t action = rc_random_next(random) % 16;
+
+    if (s->arena.first == 0) {
+        s->arena = rc_arena_make((1 + action % 4) * PAGE);
+        return 0;
+    }
+
+    if (action < 2) {
+        return stress_clear(s, action == 0);
+    }
+
+    stress_alloc(s, random);
+    return 0;
+}
+
+
+// Release every arena still made, returning how many blocks were found damaged.
+static uint32_t stress_release_all(stress_arena *arenas)
+{
+    uint32_t damaged = 0;
+
+    for (uint32_t i = 0; i < STRESS_ARENAS; i++) {
+        damaged += arenas[i].arena.first != 0 ? stress_clear(&arenas[i], true) : 0u;
+    }
+    return damaged;
+}
+
+
+// The first page of a new one-page arena, which is released again.
+static uint32_t first_page_of_new_arena(void)
+{
+    rc_arena a = rc_arena_make(PAGE);
+    uint32_t first = a.first;
+
+    rc_arena_release(&a);
+    return first;
+}
+
+
+RC_TEST(arena, stress_many_arenas)
+{
+    // Arenas made, grown, reset and released at random, interleaved in the heap, never damage one
+    // another's blocks; and once all are released, every page is back at the top
+    stress_arena arenas[STRESS_ARENAS] = {0};
+    rc_random random = rc_random_make(12345);
+    uint32_t damaged = 0;
+
+    for (uint32_t step = 0; step < STRESS_STEPS; step++) {
+        damaged += stress_step(arenas, &random);
+    }
+
+    damaged += stress_release_all(arenas);
+    RC_CHECK(damaged, ==, 0u);
+    RC_CHECK(first_page_of_new_arena(), ==, 1u);
+}
 
 // ---- alloc ----
 

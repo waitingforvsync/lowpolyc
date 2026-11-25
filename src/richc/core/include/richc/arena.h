@@ -4,8 +4,10 @@
 //
 // An arena is a chain of chunks, each a run of 64 KiB pages taken from one global page heap (linear
 // memory on wasm, a reserved address range natively). Pointers never move. The last allocation can
-// grow in place, and when the current chunk is the newest in the heap, the chunk itself grows with
-// it. Releasing an arena hands its chunks to a global pool for the next arena to reuse.
+// grow in place, and so can the current chunk, into the pages after it, if they are the top of the
+// heap or have been released. Releasing an arena gives its pages back: to the top of the heap if
+// they reach it, or else to a pool of free runs, merged with their neighbours, that later chunks
+// are cut from.
 //
 // Passing an arena by value gives the callee a private scratch cursor: its allocations vanish when
 // it returns, and any chunk it had to add stays in the chain for the caller to reuse later. Only
@@ -57,7 +59,7 @@ void rc_arena_deinit(void);
 // if need be. Out of memory goes to the OOM handler, so this never fails.
 rc_arena rc_arena_make(uint32_t chunk_size);
 
-// Hand all of the arena's chunks back to the pool and zero it.
+// Give all of the arena's chunks back, to the pool or the top of the heap, and zero it.
 void rc_arena_release(rc_arena *a);
 
 // Allocate size (non-zero) bytes aligned to RC_MAX_ALIGN. Not zeroed; never NULL.

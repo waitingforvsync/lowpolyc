@@ -142,9 +142,11 @@ find them.
 The model changed. An old arena was its own virtual memory reservation (256 MB
 by default, a hard cap), with pages committed as needed. A new arena is a chain
 of chunks, each a whole number of 64 KiB pages. The chunks come from one global
-page heap (64 GiB reserved natively, 4 GiB on wasm), and a released arena's
-chunks go to a global pool for reuse. That global state is not thread-safe,
-even between different arenas.
+page heap (64 GiB reserved natively, 4 GiB on wasm). A chunk grows in place
+into the pages after it when they are the top of the heap or free. A released
+arena's pages go back to the top of the heap if they reach it, or else to a
+global pool of free runs, merged with their neighbours, that later chunks are
+cut from. That global state is not thread-safe, even between different arenas.
 
 | Old | New | Notes |
 |---|---|---|

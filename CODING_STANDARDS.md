@@ -404,6 +404,39 @@ core. Nothing outside the platform backends knows which target it is running on.
   and cast back at the reading accessor or switch head. This keeps the layout
   exact and `-Wswitch` honest.
 
+### Using arenas well
+
+Every arena takes its chunks from one linear page heap, which is all wasm
+offers. An allocation grows in place only while it is the last in its arena,
+and its chunk only grows into the pages straight after it, when they are free or
+the top of the heap. Anything else moves: one copy, cheap next to whatever made
+the data, but the space it leaves stays allocated until the arena is reset.
+
+- **Arenas follow lifetimes, not types.** A few arenas, one per lifetime (the
+  app, the document, a frame, a load), each holding what dies together.
+- **Reset, don't release, for work that repeats.** A reset arena keeps its
+  chunks, so once warmed up it needs no new pages and nothing in it moves.
+- **Make long-lived arenas early, and release short-lived ones in the reverse
+  order they were made.** The long-lived sit low and stay put; the short-lived
+  come and go at the top, where their pages go straight back to the heap and
+  the chunk below can grow in place again.
+- **Reserve sizes you know**, exactly or as an upper bound: `_make(n, arena)`
+  for an array, `minimum_capacity` for inflate. That is the only way a buffer
+  never grows at all.
+- **Nothing else goes in an arena while an array in it grows.** Temporaries go
+  in a by-value scratch arena; build the array first, then allocate what comes
+  after it.
+- **Don't grow big things in several arenas at once.** Side by side, they block
+  each other, and every blocked growth moves.
+- **An arena for one big growing buffer can take a large chunk up front**
+  (`rc_arena_make(size)`). Growth within its own chunk never moves, whatever
+  its neighbours do, though on wasm memory grows to that size at once.
+- **Scratch is passed by value.** Its allocations vanish when the callee
+  returns, and any chunk it adds stays in the owner's chain for next time.
+- **`rc_arena_save` and `rc_arena_restore` handle nested temporary work in one
+  arena, and errors.** Restoring gives back everything since the mark, including
+  space a growing array moved out of.
+
 ## Naming
 
 - **snake_case everywhere.** No CamelCase.

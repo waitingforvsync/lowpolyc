@@ -1,6 +1,6 @@
 // arena.c
 //
-// Chunked arenas over the global page heap, plus the pool of chunks that release hands back.
+// Chunked arenas over the global page heap, plus the pool of free pages that release gives back.
 
 #include "richc/arena.h"
 
@@ -18,14 +18,16 @@ enum {
 // Largest single allocation: a maximal chunk, less its header.
 #define RC_MAX_ALLOC ((uint32_t)RC_MAX_CHUNK_PAGES * RC_PAGE - RC_HEADER)
 
-// XORed with the chunk's own page index, so a stray or misplaced header fails too.
+// XORed with the chunk's own page index, so a stray or misplaced header fails too. A free run of
+// pages has a header of the same shape, with a sentinel of its own.
 #define RC_CHUNK_SENTINEL 0x52434348u
+#define RC_FREE_SENTINEL 0x52434652u
 
 // Lives at the start of every chunk. Chunks sit end to end in the heap, so an overrun off the end
 // of one lands on the next one's sentinel.
 typedef struct rc_chunk_header {
     uint32_t sentinel;
-    uint32_t next;       // next chunk in an arena's chain, or in the pool
+    uint32_t next;       // next chunk in an arena's chain, or the next free run in the pool
     uint32_t pages;
     uint32_t min_pages;  // growth size, read from an arena's first chunk only
 } rc_chunk_header;
@@ -36,13 +38,14 @@ RC_STATIC_ASSERT(RC_ARENA_MAX_ALIGN == RC_PAGE);
 RC_STATIC_ASSERT(alignof(max_align_t) <= RC_MAX_ALIGN);
 #endif
 
-// The global page heap. Pages from the first one up to used_pages are committed, and each belongs
-// to a chunk, in an arena or in the pool.
+// The global page heap. Pages from the first one up to used_pages each belong to a chunk in an
+// arena, or to a free run in the pool. Those above used_pages may still be committed, from before
+// the top was given back, and committing them again when they are taken costs nothing.
 typedef struct rc_page_state {
     uintptr_t base;            // address of page 0
-    uint32_t used_pages;       // one past the newest page handed out
+    uint32_t used_pages;       // the top: one past the highest page in use or in the pool
     uint32_t reserved_pages;   // one past the last page we may use; 0 until init
-    uint32_t pool;             // released chunks, linked through their headers
+    uint32_t pool;             // the lowest free run, linked to the rest in address order
 } rc_page_state;
 
 static rc_page_state rc_mem;
@@ -137,46 +140,159 @@ static bool rc_chunk_fits(uint32_t page, uint32_t need)
 }
 
 // ---- the pool ----
+//
+// The pool holds the runs of pages that arenas have released, in address order, linked through
+// their headers. A run released next to a free one merges with it, so no two free runs are ever
+// side by side, and one that reaches the top of the heap is given back to it, so none ever ends
+// there and the chunk below can grow in place again. Pages are cut from the front of a run, which
+// leaves the rest straight after them, for the new chunk to grow into.
 
-// Put one chunk at the front of the pool.
-static void rc_pool_push(uint32_t page)
+// The header of the free run at page, checked by its sentinel.
+static rc_chunk_header *rc_free_run(uint32_t page)
 {
-    rc_chunk(page)->next = rc_mem.pool;
-    rc_mem.pool = page;
+    rc_chunk_header *h = (rc_chunk_header *)rc_page_ptr(page);
+
+    RC_ASSERT(page != 0);
+    RC_ASSERT(h->sentinel == (RC_FREE_SENTINEL ^ page));   // something wrote to released memory
+    return h;
 }
 
 
-// Put a whole chain of chunks, from page on, into the pool.
-static void rc_pool_push_chain(uint32_t page)
+// Write the header of a free run of pages pages at page, followed in the pool by next.
+static void rc_free_run_init(uint32_t page, uint32_t pages, uint32_t next)
 {
-    while (page) {
-        uint32_t next = rc_chunk(page)->next;
+    *(rc_chunk_header *)rc_page_ptr(page) = (rc_chunk_header) {
+        .sentinel = RC_FREE_SENTINEL ^ page,
+        .next = next,
+        .pages = pages,
+        .min_pages = 0
+    };
+}
 
-        rc_pool_push(page);
-        page = next;
+
+// One past the last page of the free run at page.
+static uint32_t rc_free_run_end(uint32_t page)
+{
+    return page + rc_free_run(page)->pages;
+}
+
+
+// True if the free run at lower ends where the one at upper starts. Either may be 0, for none.
+static bool rc_free_runs_meet(uint32_t lower, uint32_t upper)
+{
+    if (lower == 0 || upper == 0) {
+        return false;
+    }
+    return rc_free_run_end(lower) == upper;
+}
+
+
+// Merge the free run at upper into the one at lower, which it meets and follows in the pool.
+static void rc_free_run_absorb(uint32_t lower, uint32_t upper)
+{
+    rc_chunk_header *low = rc_free_run(lower);
+    rc_chunk_header *up = rc_free_run(upper);
+
+    low->pages += up->pages;
+    low->next = up->next;
+}
+
+
+// The last free run below page, or 0 if there is none.
+static uint32_t rc_pool_below(uint32_t page)
+{
+    uint32_t below = 0;
+    uint32_t run = rc_mem.pool;
+
+    while (run != 0 && run < page) {
+        below = run;
+        run = rc_free_run(run)->next;
+    }
+    return below;
+}
+
+
+// The link to the first free run at or above page, which is where a run at page belongs.
+static uint32_t *rc_pool_link_at(uint32_t page)
+{
+    uint32_t *link = &rc_mem.pool;
+
+    while (*link != 0 && *link < page) {
+        link = &rc_free_run(*link)->next;
+    }
+    return link;
+}
+
+
+// Add the pages pages at page to the pool, merged with the free runs either side if they meet.
+static void rc_pool_add(uint32_t page, uint32_t pages)
+{
+    uint32_t below = rc_pool_below(page);
+    uint32_t *link = below != 0 ? &rc_free_run(below)->next : &rc_mem.pool;
+    uint32_t above = *link;
+
+    rc_free_run_init(page, pages, above);
+    *link = page;
+    if (rc_free_runs_meet(page, above)) {
+        rc_free_run_absorb(page, above);
+    }
+
+    if (rc_free_runs_meet(below, page)) {
+        rc_free_run_absorb(below, page);
     }
 }
 
 
-// True if a chunk of have pages holds pages, and fits them better than the one at best (if any).
+// Give the highest free run back to the top of the heap, if it reaches the top. Free runs never
+// meet, so no other can reach the new top.
+static void rc_pool_give_back_top(void)
+{
+    uint32_t *link = &rc_mem.pool;
+
+    // The highest run is the last
+    while (*link != 0 && rc_free_run(*link)->next != 0) {
+        link = &rc_free_run(*link)->next;
+    }
+
+    if (*link != 0 && rc_free_run_end(*link) == rc_mem.used_pages) {
+        rc_mem.used_pages = *link;
+        *link = 0;
+    }
+}
+
+
+// Release a whole chain of chunks, from page on, to the pool.
+static void rc_pool_release_chain(uint32_t page)
+{
+    while (page != 0) {
+        uint32_t next = rc_chunk(page)->next;
+
+        rc_pool_add(page, rc_chunk(page)->pages);
+        page = next;
+    }
+    rc_pool_give_back_top();
+}
+
+
+// True if a free run of have pages holds pages, and fits them better than the one at best (if any).
 static bool rc_pool_is_better_fit(uint32_t have, uint32_t pages, const uint32_t *best)
 {
     if (have < pages) {
         return false;
     }
 
-    return !best || have < rc_chunk(*best)->pages;
+    return !best || have < rc_free_run(*best)->pages;
 }
 
 
-// The link to the smallest pooled chunk of at least pages pages, stopping early at an exact match;
+// The link to the smallest free run of at least pages pages, stopping early at an exact match;
 // NULL if none is big enough.
 static uint32_t *rc_pool_best_fit(uint32_t pages)
 {
     uint32_t *best = NULL;
 
-    for (uint32_t *link = &rc_mem.pool; *link; link = &rc_chunk(*link)->next) {
-        uint32_t have = rc_chunk(*link)->pages;
+    for (uint32_t *link = &rc_mem.pool; *link; link = &rc_free_run(*link)->next) {
+        uint32_t have = rc_free_run(*link)->pages;
 
         if (rc_pool_is_better_fit(have, pages, best)) {
             best = link;
@@ -191,23 +307,54 @@ static uint32_t *rc_pool_best_fit(uint32_t pages)
 }
 
 
-// Unlink the best fit for pages from the pool; 0 if none is big enough.
-static uint32_t rc_pool_take(uint32_t pages)
+// Cut pages pages from the front of the free run that link points at, leaving the rest of it, if
+// any, as a free run in its place. Returns the first page cut.
+static uint32_t rc_pool_cut(uint32_t *link, uint32_t pages)
 {
-    uint32_t *best = rc_pool_best_fit(pages);
-    uint32_t page = best ? *best : 0;
+    uint32_t page = *link;
+    rc_chunk_header *run = rc_free_run(page);
 
-    if (!page) {
-        return 0;
+    if (run->pages == pages) {
+        *link = run->next;
+        return page;
     }
 
-    *best = rc_chunk(page)->next;
-    rc_chunk(page)->next = 0;
+    rc_free_run_init(page + pages, run->pages - pages, run->next);
+    *link = page + pages;
     return page;
 }
 
 
-// A new chunk of pages pages at the end of the heap; 0 when out of memory.
+// pages pages cut from the best-fitting free run, returning the first; 0 if none is big enough.
+static uint32_t rc_pool_take(uint32_t pages)
+{
+    uint32_t *best = rc_pool_best_fit(pages);
+
+    if (!best) {
+        return 0;
+    }
+    return rc_pool_cut(best, pages);
+}
+
+
+// Pages cut from the front of the free run starting at page, if there is one of at least needed:
+// wanted of them, or all of it if it has fewer. Returns how many; 0 if there is no such run.
+static uint32_t rc_pool_take_at(uint32_t page, uint32_t needed, uint32_t wanted)
+{
+    uint32_t *link = rc_pool_link_at(page);
+    uint32_t have = *link == page ? rc_free_run(page)->pages : 0;
+    uint32_t taken = have < wanted ? have : wanted;
+
+    if (have < needed) {
+        return 0;
+    }
+
+    rc_pool_cut(link, taken);
+    return taken;
+}
+
+
+// A new chunk of pages pages at the top of the heap; 0 when out of memory.
 static uint32_t rc_chunk_fresh(uint32_t pages)
 {
     uint32_t page = rc_pages_grow(pages);
@@ -220,13 +367,18 @@ static uint32_t rc_chunk_fresh(uint32_t pages)
 }
 
 
-// A chunk of at least pages pages: the best fit from the pool, else fresh from the heap. 0 when out
-// of memory.
+// A chunk of pages pages: cut from the best-fitting free run, else fresh from the top of the heap.
+// 0 when out of memory.
 static uint32_t rc_chunk_acquire(uint32_t pages)
 {
     uint32_t page = rc_pool_take(pages);
 
-    return page ? page : rc_chunk_fresh(pages);
+    if (page == 0) {
+        return rc_chunk_fresh(pages);
+    }
+
+    rc_chunk_init(page, pages);
+    return page;
 }
 
 // ---- making room ----
@@ -256,37 +408,47 @@ static uint32_t rc_chunk_growth(uint32_t have, uint32_t extra, uint32_t min_page
 }
 
 
-// Commit extra pages straight after the current chunk and take them into it.
-static bool rc_arena_extend_by(rc_arena *a, uint32_t extra)
+// Pages to grow a chunk ending at end by: wanted of them, committed at the top of the heap if the
+// chunk ends there, or as many of wanted as the free run starting at end has, if that is at least
+// needed. 0 if there is no room after the chunk.
+static uint32_t rc_pages_after(uint32_t end, uint32_t needed, uint32_t wanted)
+{
+    if (end == rc_mem.used_pages) {
+        return rc_pages_grow(wanted) ? wanted : 0;
+    }
+    return rc_pool_take_at(end, needed, wanted);
+}
+
+
+// Grow the current chunk in place to at least pages pages, from the pages straight after it.
+// False if they are in use.
+static bool rc_arena_grow_chunk(rc_arena *a, uint32_t pages)
 {
     rc_chunk_header *h = rc_chunk(a->chunk);
+    uint32_t needed = pages - h->pages;
+    uint32_t wanted = rc_chunk_growth(h->pages, needed, rc_chunk(a->first)->min_pages);
+    uint32_t taken = rc_pages_after(a->chunk + h->pages, needed, wanted);
 
-    if (!rc_pages_grow(extra)) {
+    if (taken == 0) {
         return false;
     }
 
-    h->pages += extra;
+    h->pages += taken;
     a->end = h->pages * (uint32_t)RC_PAGE;
     return true;
 }
 
 
-// Grow the current chunk in place so need more bytes fit after top. Only the newest chunk in the
-// heap can grow, since the pages after it are free.
+// Grow the current chunk in place so need more bytes fit after top: into the top of the heap, or
+// into a free run that follows it.
 static bool rc_arena_extend(rc_arena *a, uint32_t need)
 {
-    rc_chunk_header *h = rc_chunk(a->chunk);
     uint64_t pages = ((uint64_t)a->top + need + RC_PAGE - 1) / RC_PAGE;
-
-    if (a->chunk + h->pages != rc_mem.used_pages) {
-        return false;
-    }
 
     if (pages > RC_MAX_CHUNK_PAGES) {
         return false;
     }
-
-    return rc_arena_extend_by(a, rc_chunk_growth(h->pages, (uint32_t)pages - h->pages, rc_chunk(a->first)->min_pages));
+    return rc_arena_grow_chunk(a, (uint32_t)pages);
 }
 
 
@@ -573,7 +735,7 @@ void rc_arena_release(rc_arena *a)
 {
     RC_ASSERT(a);
 
-    rc_pool_push_chain(a->first);
+    rc_pool_release_chain(a->first);
     *a = (rc_arena) {0};
 }
 
