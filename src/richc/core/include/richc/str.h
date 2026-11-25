@@ -150,4 +150,149 @@ rc_str_pair rc_str_last_split(rc_str s, rc_str split_by);
 // after the text.
 const char *rc_str_as_cstr(rc_str s, char *buf, uint32_t buf_size);
 
+// ---- numbers ----
+
+// Parsing reads a number from the start of a string and hands back the text after it, as C++'s
+// std::from_chars does: no whitespace is skipped, the text never depends on a locale, and the
+// longest number there is taken, so "12e" gives 12 with "e" left. The as_ functions take all of
+// the string or fail. Nothing is written through a pointer: each returns an rc_parsed_<type>.
+//
+// Integers take base 2 to 36, with digits past 9 as letters in either case, or base 0, which
+// reads a 0x or 0b prefix as hex or binary and anything else as decimal (a leading 0 is never
+// octal). Floats take base 10, base 16 (hex digits with a p exponent of two, as in 0x1.8p3 without
+// the 0x), or base 0, which reads a 0x prefix as hex. Floats also read inf, infinity and nan in
+// any case. A minus sign may lead, except for unsigned types; a plus sign never may, though an
+// exponent's may.
+//
+// Floats round correctly, to nearest with ties to even, so the same text gives the same bits on
+// every target. Underflow rounds to a subnormal or zero, which is no error; overflow is.
+
+// Why a parse failed. The zero is no error.
+typedef enum rc_parse_error {
+    RC_PARSE_ERROR_NONE,
+    RC_PARSE_ERROR_SYNTAX,  // no number at the start, which rest is then all of
+    RC_PARSE_ERROR_RANGE    // a number too big for the type, whose text rest is after
+} rc_parse_error;
+
+// What a parse found: the value, 0 on any error, and the text after it.
+typedef struct rc_parsed_i8 {
+    int8_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_i8;
+
+typedef struct rc_parsed_i16 {
+    int16_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_i16;
+
+typedef struct rc_parsed_i32 {
+    int32_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_i32;
+
+typedef struct rc_parsed_i64 {
+    int64_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_i64;
+
+typedef struct rc_parsed_u8 {
+    uint8_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_u8;
+
+typedef struct rc_parsed_u16 {
+    uint16_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_u16;
+
+typedef struct rc_parsed_u32 {
+    uint32_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_u32;
+
+typedef struct rc_parsed_u64 {
+    uint64_t value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_u64;
+
+typedef struct rc_parsed_f32 {
+    float value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_f32;
+
+typedef struct rc_parsed_f64 {
+    double value;
+    rc_str rest;
+    uint8_t error;  // rc_parse_error
+} rc_parsed_f64;
+
+// Parse an int8_t from the start of s in base, and the text after it.
+rc_parsed_i8 rc_str_parse_i8(rc_str s, uint32_t base);
+
+// Parse all of s as an int8_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_i8 rc_str_as_i8(rc_str s, uint32_t base);
+
+// Parse an int16_t from the start of s in base, and the text after it.
+rc_parsed_i16 rc_str_parse_i16(rc_str s, uint32_t base);
+
+// Parse all of s as an int16_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_i16 rc_str_as_i16(rc_str s, uint32_t base);
+
+// Parse an int32_t from the start of s in base, and the text after it.
+rc_parsed_i32 rc_str_parse_i32(rc_str s, uint32_t base);
+
+// Parse all of s as an int32_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_i32 rc_str_as_i32(rc_str s, uint32_t base);
+
+// Parse an int64_t from the start of s in base, and the text after it.
+rc_parsed_i64 rc_str_parse_i64(rc_str s, uint32_t base);
+
+// Parse all of s as an int64_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_i64 rc_str_as_i64(rc_str s, uint32_t base);
+
+// Parse an uint8_t from the start of s in base, and the text after it.
+rc_parsed_u8 rc_str_parse_u8(rc_str s, uint32_t base);
+
+// Parse all of s as an uint8_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_u8 rc_str_as_u8(rc_str s, uint32_t base);
+
+// Parse an uint16_t from the start of s in base, and the text after it.
+rc_parsed_u16 rc_str_parse_u16(rc_str s, uint32_t base);
+
+// Parse all of s as an uint16_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_u16 rc_str_as_u16(rc_str s, uint32_t base);
+
+// Parse an uint32_t from the start of s in base, and the text after it.
+rc_parsed_u32 rc_str_parse_u32(rc_str s, uint32_t base);
+
+// Parse all of s as an uint32_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_u32 rc_str_as_u32(rc_str s, uint32_t base);
+
+// Parse an uint64_t from the start of s in base, and the text after it.
+rc_parsed_u64 rc_str_parse_u64(rc_str s, uint32_t base);
+
+// Parse all of s as an uint64_t in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_u64 rc_str_as_u64(rc_str s, uint32_t base);
+
+// Parse a float from the start of s in base, and the text after it.
+rc_parsed_f32 rc_str_parse_f32(rc_str s, uint32_t base);
+
+// Parse all of s as a float in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_f32 rc_str_as_f32(rc_str s, uint32_t base);
+
+// Parse a double from the start of s in base, and the text after it.
+rc_parsed_f64 rc_str_parse_f64(rc_str s, uint32_t base);
+
+// Parse all of s as a double in base: RC_PARSE_ERROR_SYNTAX if anything follows the number.
+rc_parsed_f64 rc_str_as_f64(rc_str s, uint32_t base);
+
 #endif // RC_STR_H_

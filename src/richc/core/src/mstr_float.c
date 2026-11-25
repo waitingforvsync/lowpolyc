@@ -13,11 +13,9 @@
 
 #include "richc/math/math.h"
 
-enum {
-    // Enough 32-bit words for the biggest integer part (1024 bits) and the longest fraction (1074
-    // bits) with room to multiply it by 10
-    RC_FLOAT_BIG_WORDS = 36,
+#include "float_big.h"
 
+enum {
     // The most digits we ever keep: 309 before the point, 255 after it, one to round on and one
     // for a carry
     RC_FLOAT_MAX_DIGITS = 600,
@@ -31,13 +29,6 @@ enum {
     // The precision used when none is given
     RC_FLOAT_DEFAULT_PRECISION = 6
 };
-
-// An unsigned integer of up to RC_FLOAT_BIG_WORDS words, least significant first. num counts the
-// words in use, so zero has none.
-typedef struct rc_float_big {
-    uint32_t words[RC_FLOAT_BIG_WORDS];
-    uint32_t num;
-} rc_float_big;
 
 // A value's leading decimal digits (each 0 to 9) and where the point goes: the value is
 // 0.d1 d2 d3 ... x 10^exp10.
@@ -54,15 +45,6 @@ typedef struct rc_float_text {
 } rc_float_text;
 
 // ---- the bignum ----
-
-// Drop zero words from the top.
-static void rc_float_big_trim(rc_float_big *big)
-{
-    while (big->num > 0 && big->words[big->num - 1] == 0) {
-        big->num--;
-    }
-}
-
 
 // value << shift, where the result fits.
 static rc_float_big rc_float_big_from_shifted(uint64_t value, uint32_t shift)
@@ -84,40 +66,6 @@ static rc_float_big rc_float_big_from_shifted(uint64_t value, uint32_t shift)
     big.num = word + 3;
     rc_float_big_trim(&big);
     return big;
-}
-
-
-// Divide by divisor in place, returning the remainder.
-static uint32_t rc_float_big_divide(rc_float_big *big, uint32_t divisor)
-{
-    uint64_t remainder = 0;
-
-    for (uint32_t i = big->num; i-- > 0;) {
-        uint64_t part = (remainder << 32) | big->words[i];
-
-        big->words[i] = (uint32_t)(part / divisor);
-        remainder = part % divisor;
-    }
-    rc_float_big_trim(big);
-    return (uint32_t)remainder;
-}
-
-
-// Multiply by factor in place.
-static void rc_float_big_multiply(rc_float_big *big, uint32_t factor)
-{
-    uint64_t carry = 0;
-
-    for (uint32_t i = 0; i < big->num; i++) {
-        uint64_t part = (uint64_t)big->words[i] * factor + carry;
-
-        big->words[i] = (uint32_t)part;
-        carry = part >> 32;
-    }
-    if (carry != 0) {
-        RC_ASSERT(big->num < RC_FLOAT_BIG_WORDS);
-        big->words[big->num++] = (uint32_t)carry;
-    }
 }
 
 
@@ -158,7 +106,7 @@ static uint8_t rc_float_big_take_digit(rc_float_big *big, uint32_t bits)
 static uint8_t rc_float_big_next_digit(rc_float_big *big, uint32_t bits)
 {
     // big < 2^bits, so big x 10 < 2^(bits + 4): the digit is the four bits from bits up
-    rc_float_big_multiply(big, 10);
+    rc_float_big_multiply_add(big, 10, 0);
     return rc_float_big_take_digit(big, bits);
 }
 

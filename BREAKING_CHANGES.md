@@ -220,6 +220,18 @@ even between different arenas.
 - **The case-insensitive compares fold ASCII `A` to `Z` only**, where the old
   ones used the locale's `tolower`. They're the same in the C locale.
 - **New:** `rc_str_drop_last(s, n)`.
+- **New: number parsing**, where code called `strtol`, `strtoul`, `strtod` or
+  `strtof`. `rc_str_parse_<type>(s, base)` reads an `i8` to `i64`, `u8` to
+  `u64`, `f32` or `f64` from the start of `s`, and returns an
+  `rc_parsed_<type>`: the value, the text after it, and an `rc_parse_error`.
+  `rc_str_as_<type>` takes all of `s` or fails. They follow C++'s
+  `std::from_chars` rather than C:
+  - No leading whitespace is skipped, and a `+` sign is not read.
+  - Base 0 reads `0x` and `0b` prefixes, but a leading `0` is never octal.
+  - Overflow is `RC_PARSE_ERROR_RANGE` with the value 0, not a clamped value
+    and `ERANGE`. Underflow to zero or a subnormal is no error.
+  - Floats are correctly rounded, as glibc's are, so the same text gives the
+    same bits everywhere. Hex floats are base 16, or base 0 behind `0x`.
 - **Unchanged:** everything else, including the `find`, `split`, prefix and
   suffix functions and `rc_str_as_cstr`.
 
@@ -532,7 +544,6 @@ The headers keep their names under `richc/math/`, and their arrays under
 | `richc/rect_pack.h` | a rectangle packer |
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
 | `richc/zip/inflate.h` | DEFLATE and zlib decompression |
-| number parsing | nothing yet stood in for `strtod` and `strtol` |
 
 ## Porting Baron
 

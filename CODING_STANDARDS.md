@@ -428,6 +428,9 @@ core. Nothing outside the platform backends knows which target it is running on.
     (`rc_view_u32_from_ptr`, `rc_str_from_ptr`).
   - `rc_<type>_as_<other>(...)`: reinterpret without allocating; the source
     stays usable.
+  - `rc_<type>_parse_<other>(...)`: read an `<other>` from the start of the
+    source, returning it in a small struct with the rest of the source and an
+    error (`rc_str_parse_i32`). The matching `as_` reads all of the source.
   - `rc_<type>_to_<other>(...)`: convert by moving; the source is reset so only
     the result owns the resource.
   - `rc_<type>_is_<predicate>(...)`: returns `bool`.

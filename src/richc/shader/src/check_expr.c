@@ -68,40 +68,22 @@ static bool rc_wgsl_fits(rc_wgsl_typeinfo_type type, int64_t value)
 
 // ---- literals ----
 
-// The value of a decimal or hex integer's digits, or -1 if it is past what 64 bits hold.
-static int64_t rc_wgsl_parse_digits(rc_str digits, uint32_t base)
-{
-    uint64_t value = 0;
-
-    for (uint32_t i = 0; i < digits.len; i++) {
-        uint32_t digit = rc_wgsl_hex_digit(digits.data[i]);
-
-        if (value > ((uint64_t)INT64_MAX - digit) / base) {
-            return -1;
-        }
-
-        value = value * base + digit;
-    }
-    return (int64_t)value;
-}
-
-
-// An integer literal: AbstractInt, or i32 or u32 by its suffix.
+// An integer literal: AbstractInt, or i32 or u32 by its suffix. The lexer has checked its digits,
+// so parsing only fails on range: an abstract integer holds what an i64 does.
 static rc_wgsl_sema rc_wgsl_check_int(rc_wgsl_checker *c, uint32_t node)
 {
     rc_str text = rc_wgsl_ast_text(c->ast, node);
     char suffix = text.data[text.len - 1];
     bool suffixed = suffix == 'i' || suffix == 'u';
-    rc_str digits = rc_str_drop_last(text, suffixed ? 1 : 0);
-    bool hex = rc_wgsl_is_hex_literal(digits);
-    int64_t value = rc_wgsl_parse_digits(rc_str_drop_first(digits, hex ? 2 : 0), hex ? 16 : 10);
+    rc_parsed_i64 parsed = rc_str_as_i64(rc_str_drop_last(text, suffixed ? 1 : 0), 0);
     uint32_t type = suffix == 'i' ? RC_WGSL_TYPE_ID_I32 : suffix == 'u' ? RC_WGSL_TYPE_ID_U32 : RC_WGSL_TYPE_ID_ABSTRACT_INT;
 
-    if (value < 0 || !rc_wgsl_fits(rc_wgsl_check_typeinfo_type(c, type), value)) {
+    RC_ASSERT(parsed.error != RC_PARSE_ERROR_SYNTAX);
+    if (parsed.error != RC_PARSE_ERROR_NONE || !rc_wgsl_fits(rc_wgsl_check_typeinfo_type(c, type), parsed.value)) {
         rc_wgsl_check_fail(c, node, RC_STR("this integer is too big for its type"));
     }
 
-    return rc_wgsl_constant_of(type, value);
+    return rc_wgsl_constant_of(type, parsed.value);
 }
 
 
@@ -123,6 +105,19 @@ static bool rc_wgsl_float_suffixed(rc_str text)
 }
 
 
+// True if the float literal's value, rounded to its type, overflows it: f32 when suffixed, and an
+// abstract float holds what an f64 does. The lexer has checked its text.
+static bool rc_wgsl_float_overflows(rc_str text, bool suffixed)
+{
+    rc_str number = rc_str_drop_last(text, suffixed ? 1 : 0);
+
+    if (suffixed) {
+        return rc_str_as_f32(number, 0).error == RC_PARSE_ERROR_RANGE;
+    }
+    return rc_str_as_f64(number, 0).error == RC_PARSE_ERROR_RANGE;
+}
+
+
 // A floating-point literal: AbstractFloat, or f32 by its suffix.
 static rc_wgsl_sema rc_wgsl_check_float(rc_wgsl_checker *c, uint32_t node)
 {
@@ -131,6 +126,10 @@ static rc_wgsl_sema rc_wgsl_check_float(rc_wgsl_checker *c, uint32_t node)
 
     if (suffixed && text.data[text.len - 1] == 'h') {
         rc_wgsl_check_fail(c, node, RC_STR("f16 isn't supported yet"));
+    }
+
+    if (rc_wgsl_float_overflows(text, suffixed)) {
+        rc_wgsl_check_fail(c, node, RC_STR("this float is too big for its type"));
     }
 
     return rc_wgsl_value_of(suffixed ? RC_WGSL_TYPE_ID_F32 : RC_WGSL_TYPE_ID_ABSTRACT_FLOAT, RC_WGSL_SEMA_CONST);

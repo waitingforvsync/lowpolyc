@@ -10,6 +10,8 @@ add_library(richc STATIC
     src/mstr_float.c
     src/random.c
     src/str.c
+    src/str_parse.c
+    src/str_parse_float.c
     src/math/acos_f32.c
     src/math/acos_f64.c
     src/math/asin_f32.c
@@ -124,8 +126,10 @@ add_library(richc STATIC
     include/richc/math/array/vec3f.h
     include/richc/math/array/vec3i.h
     include/richc/math/array/vec4f.h
+    src/float_big.h
     src/fs.h
     src/heap.h
+    src/str_parse.h
     src/math/arc.h
     src/math/exp_log_f32.h
     src/math/exp_log_f64.h

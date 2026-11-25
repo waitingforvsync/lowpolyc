@@ -130,12 +130,6 @@ static inline rc_str rc_wgsl_token_text(rc_str source, rc_wgsl_token token)
     return rc_str_substr(source, token.offset, token.offset + token.len);
 }
 
-// The value of a hex digit.
-static inline uint32_t rc_wgsl_hex_digit(char c)
-{
-    return c <= '9' ? (uint32_t)(c - '0') : (uint32_t)((c | 0x20) - 'a' + 10);
-}
-
 // True if a number literal's text is in hex: 0x or 0X, then the digits.
 static inline bool rc_wgsl_is_hex_literal(rc_str text)
 {

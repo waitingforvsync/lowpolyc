@@ -41,6 +41,8 @@ add_executable(richc_core_test
     test_solve.c
     test_sort.c
     test_str.c
+    test_str_parse.c
+    test_str_parse_float.c
     test_time.c
     test_upper_bound.c
     test_vec2f.c
@@ -62,7 +64,7 @@ add_custom_command(
     VERBATIM
 )
 
-# ---- math accuracy tool ----
+# ---- accuracy tools ----
 
 # Measures the transcendentals against libm, every f32 input included. It takes minutes, so it is
 # built but not run: run richc_math_accuracy by hand after changing one. POSIX only, for pthreads.
@@ -70,4 +72,9 @@ if(NOT WIN32)
     find_package(Threads REQUIRED)
     add_executable(richc_math_accuracy math_accuracy.c)
     target_link_libraries(richc_math_accuracy PRIVATE richc m Threads::Threads)
+
+    # Checks the float parser against strtod and strtof, every float included; run it by hand
+    # after changing str_parse_float.c.
+    add_executable(richc_parse_accuracy parse_accuracy.c)
+    target_link_libraries(richc_parse_accuracy PRIVATE richc m Threads::Threads)
 endif()

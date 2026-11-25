@@ -210,6 +210,23 @@ RC_TEST_STEP(glsl, literals, fix)
 }
 
 
+RC_TEST_STEP(glsl, hex_floats_are_exact, fix)
+{
+    // Rounded correctly, an f32 straight to f32: 0x1.000001p0f is a tie between 1 and the next
+    // float, so goes to even, while 0x1.0000018p0f is past it. An abstract float keeps a double's
+    // precision, every hex digit counting.
+    rc_str code = fragment(
+        "let a = 0x1.000001p0f; let b = 0x1.0000018p0f; let c = 0x1.8p1; let d = 0x.8; let e = 0x1.0000000000000801p0;",
+        "a + b + c + d + e", &fix->a);
+
+    RC_CHECK_TRUE(holds(code, "float a = 1.0;"));
+    RC_CHECK_TRUE(holds(code, "float b = 1.00000012;"));
+    RC_CHECK_TRUE(holds(code, "float c = 3.0;"));
+    RC_CHECK_TRUE(holds(code, "float d = 0.5;"));
+    RC_CHECK_TRUE(holds(code, "float e = 1.0000000000000002;"));
+}
+
+
 RC_TEST_STEP(glsl, abstract_consts_take_each_use_s_type, fix)
 {
     rc_str code = glsl(

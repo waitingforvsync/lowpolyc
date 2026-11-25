@@ -208,6 +208,43 @@ RC_TEST_STEP(check, literal_ranges, fix)
 }
 
 
+RC_TEST_STEP(check, hex_literal_ranges, fix)
+{
+    rc_str too_big = RC_STR("this integer is too big for its type");
+
+    RC_CHECK(let_type("0x7fffffffi", &fix->a), ==, RC_STR("i32"));
+    RC_CHECK(let_type("0x80000000i", &fix->a), ==, too_big);
+    RC_CHECK(let_type("0XFFFFFFFFu", &fix->a), ==, RC_STR("u32"));
+    RC_CHECK(let_type("0x100000000u", &fix->a), ==, too_big);
+    RC_CHECK(const_value("0x1F", &fix->a), ==, 31);
+
+    // An abstract integer holds what an i64 does
+    RC_CHECK(const_value("0x7fffffffffffffff", &fix->a), ==, INT64_MAX);
+    RC_CHECK(const_value("9223372036854775807", &fix->a), ==, INT64_MAX);
+    RC_CHECK(const_type("0x8000000000000000", &fix->a), ==, too_big);
+    RC_CHECK(const_type("9223372036854775808", &fix->a), ==, too_big);
+}
+
+
+RC_TEST_STEP(check, float_literal_ranges, fix)
+{
+    rc_str too_big = RC_STR("this float is too big for its type");
+
+    // An f32 literal must round to a finite f32
+    RC_CHECK(let_type("3.4028235e38f", &fix->a), ==, RC_STR("f32"));
+    RC_CHECK(let_type("3.4028236e38f", &fix->a), ==, too_big);
+    RC_CHECK(let_type("1e39f", &fix->a), ==, too_big);
+    RC_CHECK(let_type("0x1.fffffep127f", &fix->a), ==, RC_STR("f32"));
+    RC_CHECK(let_type("0x1p128f", &fix->a), ==, too_big);
+
+    // An abstract float holds what an f64 does, and underflow is no error
+    RC_CHECK(const_type("1e300", &fix->a), ==, RC_STR("a number"));
+    RC_CHECK(const_type("1e309", &fix->a), ==, too_big);
+    RC_CHECK(const_type("0x1p1024", &fix->a), ==, too_big);
+    RC_CHECK(let_type("1e-50f", &fix->a), ==, RC_STR("f32"));
+}
+
+
 RC_TEST_STEP(check, names, fix)
 {
     RC_CHECK(let_type("q", &fix->a), ==, RC_STR("there is nothing called 'q'"));

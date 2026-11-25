@@ -249,48 +249,6 @@ void rc_writer_append_name(rc_mstr *out, rc_str name, rc_writer_reserved reserve
 
 // ---- literals ----
 
-// The value of a hex float literal, without its 0x and suffix: digits, a point and a binary
-// exponent. Mantissas past 53 bits lose their lowest bits.
-static double rc_writer_parse_hex_float(rc_str text)
-{
-    double mantissa = 0.0;
-    int32_t exponent = 0;
-    int32_t written = 0;
-    bool after_point = false;
-    bool negative = false;
-    uint32_t i = 0;
-
-    for (; i < text.len && (text.data[i] | 0x20) != 'p'; i++) {
-        if (text.data[i] == '.') {
-            after_point = true;
-            continue;
-        }
-
-        mantissa = mantissa * 16.0 + rc_wgsl_hex_digit(text.data[i]);
-        exponent -= after_point ? 4 : 0;
-    }
-
-    if (i + 1 < text.len) {
-        negative = text.data[i + 1] == '-';
-        for (i += (text.data[i + 1] == '-' || text.data[i + 1] == '+') ? 2 : 1; i < text.len; i++) {
-            written = written * 10 + (text.data[i] - '0');
-            if (written > 2000) {
-                written = 2000;
-            }
-        }
-    }
-
-    exponent += negative ? -written : written;
-    for (; exponent > 0; exponent--) {
-        mantissa *= 2.0;
-    }
-    for (; exponent < 0; exponent++) {
-        mantissa *= 0.5;
-    }
-    return mantissa;
-}
-
-
 // True if the float literal ends in a suffix, f or h.
 static bool rc_writer_has_float_suffix(rc_str literal)
 {
@@ -300,16 +258,23 @@ static bool rc_writer_has_float_suffix(rc_str literal)
 }
 
 
-// The hex float literal written in decimal, to 17 significant digits. Its suffix only counts as
-// one after an exponent, where f is no hex digit.
+// The hex float literal written in decimal. An f32 literal is rounded to f32 and written to 9
+// significant digits, which read back as that float; rounding it as a double first could land a
+// tie on the wrong float. Anything else is an abstract float, written as a double to 17 digits.
+// The suffix only counts as one after an exponent, where f is no hex digit.
 static rc_str rc_writer_hex_float_as_decimal(rc_str literal, rc_arena *arena)
 {
     bool exponent = rc_str_contains(literal, RC_STR("p")) || rc_str_contains(literal, RC_STR("P"));
     bool suffix = exponent && rc_writer_has_float_suffix(literal);
-    rc_str body = rc_str_drop_last(rc_str_drop_first(literal, 2), suffix ? 1 : 0);
+    rc_str number = rc_str_drop_last(literal, suffix ? 1 : 0);
     rc_mstr decimal = {0};
 
-    rc_mstr_append_f64(&decimal, rc_writer_parse_hex_float(body), (rc_float_format) {.precision = 17}, arena);
+    if (suffix) {
+        rc_mstr_append_f32(&decimal, rc_str_as_f32(number, 0).value, (rc_float_format) {.precision = 9}, arena);
+        return decimal.view;
+    }
+
+    rc_mstr_append_f64(&decimal, rc_str_as_f64(number, 0).value, (rc_float_format) {.precision = 17}, arena);
     return decimal.view;
 }
 
