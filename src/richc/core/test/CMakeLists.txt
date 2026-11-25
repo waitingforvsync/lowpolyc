@@ -50,9 +50,18 @@ add_executable(richc_core_test
     test_vec3f.c
     test_vec3i.c
     test_vec4f.c
+    test_zip_inflate.c
 )
 
 target_link_libraries(richc_core_test PRIVATE richc_test)
+
+# Bundled fixtures are staged next to the test binary, before the tests run
+add_custom_command(
+    TARGET richc_core_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/data
+        $<TARGET_FILE_DIR:richc_core_test>/data
+    VERBATIM
+)
 
 # ---- run tests as a post-build step ----
 

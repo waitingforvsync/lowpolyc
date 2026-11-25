@@ -12,6 +12,7 @@ add_library(richc STATIC
     src/str.c
     src/str_parse.c
     src/str_parse_float.c
+    src/zip/inflate.c
     src/math/acos_f32.c
     src/math/acos_f64.c
     src/math/asin_f32.c
@@ -126,6 +127,7 @@ add_library(richc STATIC
     include/richc/math/array/vec3f.h
     include/richc/math/array/vec3i.h
     include/richc/math/array/vec4f.h
+    include/richc/zip/inflate.h
     src/float_big.h
     src/fs.h
     src/heap.h

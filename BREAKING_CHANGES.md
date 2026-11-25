@@ -29,6 +29,7 @@ richc.
 - [The hash trie](#the-hash-trie)
 - [Math](#math)
 - [test.h](#testh)
+- [zip/inflate.h](#zipinflateh)
 - [Not ported yet](#not-ported-yet)
 - [Porting Baron](#porting-baron)
 
@@ -539,13 +540,31 @@ The headers keep their names under `richc/math/`, and their arrays under
 - **A skipped test is marked by `.skip = true`** in its `rc_test`, not by a
   `NULL` function.
 
+## zip/inflate.h
+
+`rc_zip_inflate` and `rc_zip_inflate_zlib` decode the same streams, and take a
+scratch arena after the output's.
+
+| Old | New | Notes |
+|---|---|---|
+| `rc_zip_inflate(compressed, minimum_capacity, arena)` | `rc_zip_inflate(compressed, minimum_capacity, arena, scratch)` | the Huffman tables, about 8 KiB, too big for the wasm stack; likewise `rc_zip_inflate_zlib` |
+| `RC_ZIP_OK` | `RC_ZIP_ERROR_NONE` | still zero, so the enum and its values share a stem |
+| `rc_zip_inflate_result.error` an `rc_zip_error` | a `uint8_t` | holding an `rc_zip_error`, as struct members never have enum types |
+| none | `RC_ZIP_ERROR_TOO_LARGE` | output that would reach 4 GiB, which used to trap in the array |
+
+- **A fixed block using distance code 30 or 31** is `RC_ZIP_ERROR_BAD_DATA`,
+  as in zlib. The old decoder read on past it, and usually reported
+  `RC_ZIP_ERROR_TRUNCATED`.
+- **On an error, `arena` is rewound** to where it was before the call. The
+  old decoder freed only the output's last buffer, so any it had grown out of
+  stayed allocated.
+
 ## Not ported yet
 
 | Old | What it was |
 |---|---|
 | `richc/rect_pack.h` | a rectangle packer |
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
-| `richc/zip/inflate.h` | DEFLATE and zlib decompression |
 
 ## Porting Baron
 
