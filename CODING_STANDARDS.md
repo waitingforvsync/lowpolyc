@@ -619,6 +619,13 @@ Each element type is instantiated once, in a header-guarded convenience header
 same generated type. Instantiate `array.template.h` directly only for a one-off
 type private to a single `.c`.
 
+Algorithms live in `richc/algorithms/`, and their `NAME` is the function's full
+name. Those over a view or span all take the same control macros, `TYPE`,
+`NAME`, `VIEW` or `SPAN`, `CTX`, `KEY`, `KEY_TYPE` and `CMP`, and take the
+container first, then the context, then anything else. They get the context,
+projection and comparison from `algorithms/begin.template.h`, so a new one
+behaves like the rest.
+
 ## Testing
 
 - **richc:** every module has a `test_<module>.c` in its layer's `test/`

@@ -5,9 +5,10 @@
 #include "writer.h"
 
 #define RC_LOWER_BOUND_TYPE rc_str
-#define RC_LOWER_BOUND_NAME writer_word
+#define RC_LOWER_BOUND_NAME rc_lower_bound_writer_word
+#define RC_LOWER_BOUND_VIEW rc_view_writer_word
 #define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
-#include "richc/lower_bound.template.h"
+#include "richc/algorithms/lower_bound.template.h"
 
 // ---- state ----
 

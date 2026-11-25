@@ -4,13 +4,15 @@
 // bits of each key's 32-bit hash. The nodes are stored a block at a time, in a pool of blocks that
 // any number of tries can share.
 //
-//   RC_HASH_TRIE_KEY_TYPE    the key type (required)
-//   RC_HASH_TRIE_VALUE_TYPE  the value type: define it for a map, leave it out for a set
-//   RC_HASH_TRIE_HASH(key)   the key's hash, converted to uint32_t (required)
-//   RC_HASH_TRIE_EQUAL(a, b) key equality; defaults to (a) == (b)
-//   RC_HASH_TRIE_WIDTH       the nodes in a block: 2, 4, 8 or 16; defaults to 4
-//   RC_HASH_TRIE_NAME        the name suffix; defaults to RC_HASH_TRIE_KEY_TYPE, which must then
-//                            be one identifier
+//   RC_HASH_TRIE_KEY_TYPE      the key type (required)
+//   RC_HASH_TRIE_VALUE_TYPE    the value type: define it for a map, leave it out for a set
+//   RC_HASH_TRIE_HASH(key)     the key's hash, converted to uint32_t (required)
+//   RC_HASH_TRIE_EQUAL(a, b)   key equality; defaults to (a) == (b)
+//   RC_HASH_TRIE_WIDTH         the nodes in a block: 2, 4, 8 or 16; defaults to 4
+//   RC_HASH_TRIE_NAME          the name suffix; defaults to RC_HASH_TRIE_KEY_TYPE, which must
+//                              then be one identifier
+//   RC_HASH_TRIE_DECLARE_ONLY  generate only the types
+//   RC_HASH_TRIE_IMPL_ONLY     generate only the functions, after a DECLARE_ONLY pass
 //
 // The trie is rc_hash_trie_<name> and its pool rc_hash_trie_<name>_pool; {0} is an empty one of
 // each. The trie is only its root block's index, so it is copied freely, and copies share their
@@ -27,6 +29,10 @@
 //
 // Wider blocks make shallower tries, but leave more slots empty: at width 4 a trie uses about 2
 // slots per key, and at width 16 about 5.
+//
+// A key or value type holding a trie or its pool, or a type not yet complete, needs two passes, as
+// array.template.h does: DECLARE_ONLY while it is still incomplete, then IMPL_ONLY once it is
+// defined, each with the same control macros.
 //
 // How it works
 //
@@ -171,23 +177,16 @@ static inline rc_hash_trie_place_ rc_hash_trie_nowhere_(void)
 
 // ---- types ----
 
-// A slot of a block: empty, or a key with its value.
-typedef struct RC_HASH_TRIE_NODE_ {
-    RC_HASH_TRIE_KEY_TYPE key;
-#ifdef RC_HASH_TRIE_VALUE_TYPE
-    RC_HASH_TRIE_VALUE_TYPE value;
-#endif
-    uint32_t hash_;
-    uint32_t child_;  // empty, a leaf, or the child block's index plus RC_HASH_TRIE_BLOCK_LINK_
-} RC_HASH_TRIE_NODE_;
+// The nodes hold keys and values, so their types are only completed with the functions; until
+// then the pool of blocks needs no more than a pointer to them.
+#ifndef RC_HASH_TRIE_IMPL_ONLY
 
-// A block of nodes, one for each slot a level's hash bits can pick.
-typedef struct RC_HASH_TRIE_BLOCK_ {
-    RC_HASH_TRIE_NODE_ nodes[RC_HASH_TRIE_WIDTH];
-} RC_HASH_TRIE_BLOCK_;
+typedef struct RC_HASH_TRIE_NODE_ RC_HASH_TRIE_NODE_;
+typedef struct RC_HASH_TRIE_BLOCK_ RC_HASH_TRIE_BLOCK_;
 
 #define RC_POOL_TYPE RC_HASH_TRIE_BLOCK_
 #define RC_POOL_NAME RC_CONCAT(hash_trie_, RC_CONCAT(RC_HASH_TRIE_NAME, _block_))
+#define RC_POOL_DECLARE_ONLY
 #include "richc/pool.template.h"
 
 // The blocks every trie on it lives in. A block emptied by remove or release is reused.
@@ -200,13 +199,38 @@ typedef struct RC_HASH_TRIE_ {
     uint32_t root_;  // the root block's index plus one; 0 before the first add
 } RC_HASH_TRIE_;
 
-// For walks, here and in hash_trie_foreach.template.h: the width, and the most blocks a walk can
-// have waiting. Only the first levels' blocks can hold more than one key (see How it works), and
-// each of those leaves at most width - 1 children waiting while the walk goes down another.
+// For walks, here and in algorithms/hash_trie_foreach.template.h: the width, and the most
+// blocks a walk can have waiting. Only the first levels' blocks can hold more than one
+// key (see How it works), and each of those leaves at most width - 1 children waiting while
+// the walk goes down another.
 enum {
     RC_HASH_TRIE_WIDTH_CONST_ = RC_HASH_TRIE_WIDTH,
     RC_HASH_TRIE_WALK_MAX_ = (RC_HASH_TRIE_WIDTH - 1) * (int)RC_HASH_TRIE_LEVELS_ + 1
 };
+
+#endif // RC_HASH_TRIE_IMPL_ONLY
+
+#ifndef RC_HASH_TRIE_DECLARE_ONLY
+
+// A slot of a block: empty, or a key with its value.
+struct RC_HASH_TRIE_NODE_ {
+    RC_HASH_TRIE_KEY_TYPE key;
+#ifdef RC_HASH_TRIE_VALUE_TYPE
+    RC_HASH_TRIE_VALUE_TYPE value;
+#endif
+    uint32_t hash_;
+    uint32_t child_;  // empty, a leaf, or the child block's index plus RC_HASH_TRIE_BLOCK_LINK_
+};
+
+// A block of nodes, one for each slot a level's hash bits can pick.
+struct RC_HASH_TRIE_BLOCK_ {
+    RC_HASH_TRIE_NODE_ nodes[RC_HASH_TRIE_WIDTH];
+};
+
+#define RC_POOL_TYPE RC_HASH_TRIE_BLOCK_
+#define RC_POOL_NAME RC_CONCAT(hash_trie_, RC_CONCAT(RC_HASH_TRIE_NAME, _block_))
+#define RC_POOL_IMPL_ONLY
+#include "richc/pool.template.h"
 
 // ---- the pool ----
 
@@ -243,7 +267,7 @@ static inline uint32_t RC_HASH_TRIE_ADD_BLOCK_(RC_HASH_TRIE_POOL_ *pool, rc_aren
     return RC_HASH_TRIE_BLOCKS_ADD_(&pool->blocks_, (RC_HASH_TRIE_BLOCK_) {0}, arena);
 }
 
-// The block at an index; hash_trie_foreach.template.h uses the const one too.
+// The block at an index; algorithms/hash_trie_foreach.template.h uses the const one too.
 static inline RC_HASH_TRIE_BLOCK_ *RC_HASH_TRIE_BLOCK_AT_(RC_HASH_TRIE_POOL_ *pool, uint32_t index)
 {
     return RC_HASH_TRIE_BLOCKS_AT_(&pool->blocks_, index);
@@ -571,6 +595,8 @@ static inline RC_HASH_TRIE_VALUE_TYPE *RC_HASH_TRIE_VALUE_AT_(RC_HASH_TRIE_POOL_
 
 #endif // RC_HASH_TRIE_VALUE_TYPE
 
+#endif // RC_HASH_TRIE_DECLARE_ONLY
+
 // ---- cleanup ----
 
 #undef RC_HASH_TRIE_POOL_MAKE_
@@ -629,3 +655,5 @@ static inline RC_HASH_TRIE_VALUE_TYPE *RC_HASH_TRIE_VALUE_AT_(RC_HASH_TRIE_POOL_
 #undef RC_HASH_TRIE_HASH
 #undef RC_HASH_TRIE_VALUE_TYPE
 #undef RC_HASH_TRIE_KEY_TYPE
+#undef RC_HASH_TRIE_DECLARE_ONLY
+#undef RC_HASH_TRIE_IMPL_ONLY

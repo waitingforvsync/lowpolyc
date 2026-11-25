@@ -48,6 +48,28 @@
 #define RC_HASH_TRIE_NAME w16
 #include "richc/hash_trie.template.h"
 
+// A value holding a trie of its own type, which needs the two-pass instantiation. Every trie of
+// them lives in the one pool.
+typedef struct folder folder;
+#define RC_HASH_TRIE_KEY_TYPE uint32_t
+#define RC_HASH_TRIE_VALUE_TYPE folder
+#define RC_HASH_TRIE_HASH(key) rc_hash_u32(key)
+#define RC_HASH_TRIE_NAME folder
+#define RC_HASH_TRIE_DECLARE_ONLY
+#include "richc/hash_trie.template.h"
+
+struct folder {
+    rc_hash_trie_folder children;
+    int32_t size;
+};
+
+#define RC_HASH_TRIE_KEY_TYPE uint32_t
+#define RC_HASH_TRIE_VALUE_TYPE folder
+#define RC_HASH_TRIE_HASH(key) rc_hash_u32(key)
+#define RC_HASH_TRIE_NAME folder
+#define RC_HASH_TRIE_IMPL_ONLY
+#include "richc/hash_trie.template.h"
+
 // Most tests run against a fresh default arena.
 RC_TEST_GROUP_DATA(hash_trie) {
     rc_arena a;
@@ -538,3 +560,20 @@ RC_TEST_STEP(hash_trie, emptied_blocks_are_reused, fix)
 WIDTH_TEST(w2)
 WIDTH_TEST(w8)
 WIDTH_TEST(w16)
+
+
+RC_TEST_STEP(hash_trie, two_pass_value_holding_itself, fix)
+{
+    rc_hash_trie_folder_pool pool = {0};
+    rc_hash_trie_folder root = {0};
+    uint32_t top = rc_hash_trie_folder_add(&root, &pool, 1, (folder) {.size = 10}, &fix->a);
+    rc_hash_trie_folder inner = rc_hash_trie_folder_value_get(&pool, top).children;
+    uint32_t sub = rc_hash_trie_folder_add(&inner, &pool, 2, (folder) {.size = 20}, &fix->a);
+
+    // The add may have grown the pool, so the inner trie is stored back through a fresh pointer
+    rc_hash_trie_folder_value_at(&pool, top)->children = inner;
+    RC_CHECK(rc_hash_trie_folder_value_get(&pool, top).size, ==, 10);
+    RC_CHECK(rc_hash_trie_folder_value_get(&pool, sub).size, ==, 20);
+    RC_CHECK(rc_hash_trie_folder_find(rc_hash_trie_folder_value_get(&pool, top).children, &pool, 2), ==, sub);
+    RC_CHECK(rc_hash_trie_folder_find(root, &pool, 2), ==, RC_INDEX_NONE);
+}

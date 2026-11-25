@@ -5,6 +5,7 @@ add_executable(richc_core_test
     test_arena.c
     test_array.c
     test_bitset.c
+    test_bitset_foreach.c
     test_box2f.c
     test_box2i.c
     test_bytes.c
@@ -20,18 +21,22 @@ add_executable(richc_core_test
     test_mat33f.c
     test_mat34f.c
     test_mat44f.c
+    test_max_element.c
     test_math.c
     test_math_arc.c
     test_math_cbrt.c
     test_math_exp_log_f32.c
     test_math_exp_log_f64.c
     test_math_trig.c
+    test_min_element.c
     test_mstr.c
     test_pool.c
     test_quatf.c
     test_rational.c
     test_solve.c
+    test_sort.c
     test_str.c
+    test_upper_bound.c
     test_vec2f.c
     test_vec2i.c
     test_vec3f.c

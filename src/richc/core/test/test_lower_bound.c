@@ -8,12 +8,7 @@
 #define RC_ARRAY_NAME i32
 #include "richc/array.template.h"
 
-// The default comparison
-#define RC_LOWER_BOUND_TYPE int32_t
-#define RC_LOWER_BOUND_NAME i32
-#include "richc/lower_bound.template.h"
-
-// Records sorted by key, searched by a whole record
+// Records, searched by key
 typedef struct kv {
     int32_t key;
     int32_t value;
@@ -22,45 +17,51 @@ typedef struct kv {
 #define RC_ARRAY_TYPE kv
 #include "richc/array.template.h"
 
-#define RC_LOWER_BOUND_TYPE kv
-#define RC_LOWER_BOUND_CMP(a, b) ((a).key < (b).key)
-#include "richc/lower_bound.template.h"
-
-// The same records under another name, searched by the key alone
-typedef kv kv_by_key;
-
-#define RC_ARRAY_TYPE kv_by_key
-#include "richc/array.template.h"
-
-#define RC_LOWER_BOUND_TYPE kv_by_key
-#define RC_LOWER_BOUND_KEY_TYPE int32_t
-#define RC_LOWER_BOUND_CMP(a, b) ((a).key < (b))
-#include "richc/lower_bound.template.h"
-
 // A context whose sign flips the order, so one search serves ascending and descending views
 typedef struct sign_ctx {
     int32_t sign;
 } sign_ctx;
 
-typedef int32_t i32_signed;
+// The default comparison
+#define RC_LOWER_BOUND_TYPE int32_t
+#define RC_LOWER_BOUND_NAME rc_lower_bound_i32
+#define RC_LOWER_BOUND_VIEW rc_view_i32
+#include "richc/algorithms/lower_bound.template.h"
 
-#define RC_ARRAY_TYPE i32_signed
-#include "richc/array.template.h"
+// A comparison of whole records, searched for by a record
+#define RC_LOWER_BOUND_TYPE kv
+#define RC_LOWER_BOUND_CMP(a, b) ((a).key < (b).key)
+#include "richc/algorithms/lower_bound.template.h"
 
-#define RC_LOWER_BOUND_TYPE i32_signed
+// The same records projected to their keys, searched for by a key
+#define RC_LOWER_BOUND_TYPE kv
+#define RC_LOWER_BOUND_NAME rc_lower_bound_kv_by_key
+#define RC_LOWER_BOUND_KEY(e) ((e).key)
+#define RC_LOWER_BOUND_KEY_TYPE int32_t
+#include "richc/algorithms/lower_bound.template.h"
+
+// A context in the comparison
+#define RC_LOWER_BOUND_TYPE int32_t
+#define RC_LOWER_BOUND_NAME rc_lower_bound_i32_signed
+#define RC_LOWER_BOUND_VIEW rc_view_i32
 #define RC_LOWER_BOUND_CTX sign_ctx
 #define RC_LOWER_BOUND_CMP(c, a, b) ((c)->sign * (a) < (c)->sign * (b))
-#include "richc/lower_bound.template.h"
+#include "richc/algorithms/lower_bound.template.h"
 
-// A context with the default comparison, which ignores it
-typedef int32_t i32_ctx;
-
-#define RC_ARRAY_TYPE i32_ctx
-#include "richc/array.template.h"
-
-#define RC_LOWER_BOUND_TYPE i32_ctx
+// A context in the projection, with the default comparison
+#define RC_LOWER_BOUND_TYPE kv
+#define RC_LOWER_BOUND_NAME rc_lower_bound_kv_signed
 #define RC_LOWER_BOUND_CTX sign_ctx
-#include "richc/lower_bound.template.h"
+#define RC_LOWER_BOUND_KEY(c, e) ((c)->sign * (e).key)
+#define RC_LOWER_BOUND_KEY_TYPE int32_t
+#include "richc/algorithms/lower_bound.template.h"
+
+// A context that neither the projection nor the comparison uses
+#define RC_LOWER_BOUND_TYPE int32_t
+#define RC_LOWER_BOUND_NAME rc_lower_bound_i32_ctx
+#define RC_LOWER_BOUND_VIEW rc_view_i32
+#define RC_LOWER_BOUND_CTX sign_ctx
+#include "richc/algorithms/lower_bound.template.h"
 
 
 RC_TEST(lower_bound, empty)
@@ -132,10 +133,10 @@ RC_TEST(lower_bound, custom_comparison)
 }
 
 
-RC_TEST(lower_bound, key_type)
+RC_TEST(lower_bound, projection)
 {
-    static const kv_by_key a[] = {{1, 100}, {3, 300}, {5, 500}, {5, 501}, {9, 900}};
-    rc_view_kv_by_key v = RC_VIEW(a);
+    static const kv a[] = {{1, 100}, {3, 300}, {5, 500}, {5, 501}, {9, 900}};
+    rc_view_kv v = RC_VIEW(a);
 
     RC_CHECK(rc_lower_bound_kv_by_key(v, 5), ==, 2u);
     RC_CHECK(rc_lower_bound_kv_by_key(v, 6), ==, 4u);
@@ -143,37 +144,42 @@ RC_TEST(lower_bound, key_type)
 }
 
 
-RC_TEST(lower_bound, context_ascending)
+RC_TEST(lower_bound, context_in_the_comparison)
 {
-    static const i32_signed a[] = {10, 20, 30, 40, 50};
-    rc_view_i32_signed v = RC_VIEW(a);
-    sign_ctx ctx = {.sign = 1};
+    // Ascending, then ascending under the flipped order, so the first value <= the key
+    static const int32_t up[] = {10, 20, 30, 40, 50};
+    static const int32_t down[] = {50, 40, 30, 20, 10};
+    rc_view_i32 v_up = RC_VIEW(up);
+    rc_view_i32 v_down = RC_VIEW(down);
+    sign_ctx ascending = {.sign = 1};
+    sign_ctx descending = {.sign = -1};
 
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 30), ==, 2u);
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 25), ==, 2u);
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 5), ==, 0u);
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 55), ==, 5u);
+    RC_CHECK(rc_lower_bound_i32_signed(v_up, &ascending, 30), ==, 2u);
+    RC_CHECK(rc_lower_bound_i32_signed(v_up, &ascending, 25), ==, 2u);
+    RC_CHECK(rc_lower_bound_i32_signed(v_up, &ascending, 55), ==, 5u);
+    RC_CHECK(rc_lower_bound_i32_signed(v_down, &descending, 30), ==, 2u);
+    RC_CHECK(rc_lower_bound_i32_signed(v_down, &descending, 35), ==, 2u);
+    RC_CHECK(rc_lower_bound_i32_signed(v_down, &descending, 5), ==, 5u);
 }
 
 
-RC_TEST(lower_bound, context_descending)
+RC_TEST(lower_bound, context_in_the_projection)
 {
-    // Ascending under the flipped order, so the first value <= the key
-    static const i32_signed a[] = {50, 40, 30, 20, 10};
-    rc_view_i32_signed v = RC_VIEW(a);
-    sign_ctx ctx = {.sign = -1};
+    // Keys descending, so negated they ascend; the key searched for is already negated
+    static const kv a[] = {{9, 900}, {5, 500}, {5, 501}, {3, 300}, {1, 100}};
+    rc_view_kv v = RC_VIEW(a);
+    sign_ctx descending = {.sign = -1};
 
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 30), ==, 2u);
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 35), ==, 2u);
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 55), ==, 0u);
-    RC_CHECK(rc_lower_bound_i32_signed(v, &ctx, 5), ==, 5u);
+    RC_CHECK(rc_lower_bound_kv_signed(v, &descending, -5), ==, 1u);
+    RC_CHECK(rc_lower_bound_kv_signed(v, &descending, -4), ==, 3u);
+    RC_CHECK(rc_lower_bound_kv_signed(v, &descending, -10), ==, 0u);
 }
 
 
-RC_TEST(lower_bound, context_with_default_comparison)
+RC_TEST(lower_bound, unused_context)
 {
-    static const i32_ctx a[] = {2, 4, 6, 8};
-    rc_view_i32_ctx v = RC_VIEW(a);
+    static const int32_t a[] = {2, 4, 6, 8};
+    rc_view_i32 v = RC_VIEW(a);
     sign_ctx ctx = {.sign = 0};
 
     RC_CHECK(rc_lower_bound_i32_ctx(v, &ctx, 5), ==, 2u);

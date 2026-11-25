@@ -1,4 +1,4 @@
-// hash_trie_foreach.template.h
+// algorithms/hash_trie_foreach.template.h
 //
 // Template for a function that visits every entry of a hash trie, made with hash_trie.template.h.
 // It walks the trie's blocks from the root, calling a macro with the pool and each entry's node
@@ -20,12 +20,12 @@
 // The fallbacks keep IntelliSense happy when it parses this file on its own
 #ifndef RC_HASH_TRIE_FOREACH_TRIE
 #  define RC_HASH_TRIE_FOREACH_TRIE rc_hash_trie_int
-#  error "RC_HASH_TRIE_FOREACH_TRIE must be defined before including richc/hash_trie_foreach.template.h"
+#  error "RC_HASH_TRIE_FOREACH_TRIE must be defined before including richc/algorithms/hash_trie_foreach.template.h"
 #endif
 
 #ifndef RC_HASH_TRIE_FOREACH_FUNC
 #  define RC_HASH_TRIE_FOREACH_FUNC(pool, index) ((void)(pool), (void)(index))
-#  error "RC_HASH_TRIE_FOREACH_FUNC must be defined before including richc/hash_trie_foreach.template.h"
+#  error "RC_HASH_TRIE_FOREACH_FUNC must be defined before including richc/algorithms/hash_trie_foreach.template.h"
 #endif
 
 #ifndef RC_HASH_TRIE_FOREACH_NAME

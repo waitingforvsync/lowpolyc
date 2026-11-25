@@ -25,10 +25,12 @@ typedef struct rc_wgsl_word {
 #include "richc/array.template.h"
 
 #define RC_LOWER_BOUND_TYPE rc_wgsl_word
-#define RC_LOWER_BOUND_NAME wgsl_word
+#define RC_LOWER_BOUND_NAME rc_lower_bound_wgsl_word
+#define RC_LOWER_BOUND_VIEW rc_view_wgsl_word
+#define RC_LOWER_BOUND_KEY(w) ((w).text)
 #define RC_LOWER_BOUND_KEY_TYPE rc_str
-#define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a).text, (b)) < 0)
-#include "richc/lower_bound.template.h"
+#define RC_LOWER_BOUND_CMP(a, b) (rc_str_compare((a), (b)) < 0)
+#include "richc/algorithms/lower_bound.template.h"
 
 // Every keyword and reserved word, in byte order for the binary search.
 static const rc_wgsl_word rc_wgsl_words[] = {

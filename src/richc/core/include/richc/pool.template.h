@@ -3,8 +3,11 @@
 // Template for a pool: elements at stable indices, with removed elements' slots reused before the
 // pool grows.
 //
-//   RC_POOL_TYPE  the element type (required)
-//   RC_POOL_NAME  the name suffix; defaults to RC_POOL_TYPE, which must then be one identifier
+//   RC_POOL_TYPE          the element type (required)
+//   RC_POOL_NAME          the name suffix; defaults to RC_POOL_TYPE, which must then be one
+//                         identifier
+//   RC_POOL_DECLARE_ONLY  generate only the types
+//   RC_POOL_IMPL_ONLY     generate only the functions, after a DECLARE_ONLY pass
 //
 // The pool is rc_pool_<name>, and {0} is an empty pool. add returns the new element's index, which
 // stays valid until the element is removed, however much the pool grows. Nothing marks a removed
@@ -17,6 +20,10 @@
 //
 // Only the free list knows which slots are live. To visit the live elements, ask free_bitset for
 // the free slots, and take the clear bits.
+//
+// An element type holding a pool of itself, or of a type not yet complete, needs two passes, as
+// array.template.h does: DECLARE_ONLY while it is still incomplete, then IMPL_ONLY once it is
+// defined, each with the same control macros.
 
 // ---- shared by every instantiation ----
 
@@ -69,14 +76,15 @@
 
 // ---- types ----
 
-// An element, or while the slot is free, the link to the next free slot.
-typedef union RC_POOL_SLOT_ {
-    uint32_t next_free_;
-    RC_POOL_TYPE value;
-} RC_POOL_SLOT_;
+// The slots hold elements, so their type is only completed with the functions; until then the
+// pool needs no more than a pointer to them.
+#ifndef RC_POOL_IMPL_ONLY
+
+typedef union RC_POOL_SLOT_ RC_POOL_SLOT_;
 
 #define RC_ARRAY_TYPE RC_POOL_SLOT_
 #define RC_ARRAY_NAME RC_CONCAT(pool_, RC_CONCAT(RC_POOL_NAME, _slot_))
+#define RC_ARRAY_DECLARE_ONLY
 #include "richc/array.template.h"
 
 // The pool: its slots, and the head of the free list.
@@ -84,6 +92,21 @@ typedef struct RC_POOL_ {
     RC_POOL_SLOTS_ slots_;
     uint32_t first_free_;  // the first free slot's index plus one; 0 if none is free
 } RC_POOL_;
+
+#endif // RC_POOL_IMPL_ONLY
+
+#ifndef RC_POOL_DECLARE_ONLY
+
+// An element, or while the slot is free, the link to the next free slot.
+union RC_POOL_SLOT_ {
+    uint32_t next_free_;
+    RC_POOL_TYPE value;
+};
+
+#define RC_ARRAY_TYPE RC_POOL_SLOT_
+#define RC_ARRAY_NAME RC_CONCAT(pool_, RC_CONCAT(RC_POOL_NAME, _slot_))
+#define RC_ARRAY_IMPL_ONLY
+#include "richc/array.template.h"
 
 // ---- lifecycle ----
 
@@ -189,6 +212,8 @@ static inline rc_bitset RC_POOL_FREE_BITSET_(const RC_POOL_ *pool, rc_arena *are
     return free_slots;
 }
 
+#endif // RC_POOL_DECLARE_ONLY
+
 // ---- cleanup ----
 
 #undef RC_POOL_MAKE_
@@ -220,3 +245,5 @@ static inline rc_bitset RC_POOL_FREE_BITSET_(const RC_POOL_ *pool, rc_arena *are
 
 #undef RC_POOL_NAME
 #undef RC_POOL_TYPE
+#undef RC_POOL_DECLARE_ONLY
+#undef RC_POOL_IMPL_ONLY

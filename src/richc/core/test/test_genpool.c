@@ -25,6 +25,22 @@ typedef struct point {
 #define RC_GENPOOL_HANDLE point_id
 #include "richc/genpool.template.h"
 
+// A type holding a genpool of itself, and a handle into one, which needs the two-pass instantiation
+typedef struct part part;
+#define RC_GENPOOL_TYPE part
+#define RC_GENPOOL_DECLARE_ONLY
+#include "richc/genpool.template.h"
+
+struct part {
+    rc_genpool_part pieces;
+    rc_handle_part twin;
+    int32_t id;
+};
+
+#define RC_GENPOOL_TYPE part
+#define RC_GENPOOL_IMPL_ONLY
+#include "richc/genpool.template.h"
+
 // Most tests run against a fresh default arena.
 RC_TEST_GROUP_DATA(genpool) {
     rc_arena a;
@@ -383,4 +399,17 @@ RC_TEST_STEP(genpool, handle_at, fix)
     RC_CHECK_TRUE(rc_handle_i32_is_equal(rc_genpool_i32_handle_at(&pool, 0), a));
     RC_CHECK_TRUE(rc_handle_i32_is_equal(rc_genpool_i32_handle_at(&pool, 1), b2));
     RC_CHECK_FALSE(rc_handle_i32_is_equal(rc_genpool_i32_handle_at(&pool, 1), b));
+}
+
+
+RC_TEST_STEP(genpool, two_pass_type_holding_itself, fix)
+{
+    part whole = {.id = 0};
+    rc_handle_part first = rc_genpool_part_add(&whole.pieces, (part) {.id = 1}, &fix->a);
+    rc_handle_part second = rc_genpool_part_add(&whole.pieces, (part) {.id = 2, .twin = first}, &fix->a);
+    part got = rc_genpool_part_get(&whole.pieces, second);
+
+    RC_CHECK(got.id, ==, 2);
+    RC_CHECK(rc_genpool_part_get(&whole.pieces, got.twin).id, ==, 1);
+    RC_CHECK_TRUE(rc_handle_part_is_none(rc_genpool_part_get(&whole.pieces, first).twin));
 }

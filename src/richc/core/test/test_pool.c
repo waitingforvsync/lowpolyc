@@ -17,6 +17,21 @@ typedef struct point {
 #define RC_POOL_TYPE point
 #include "richc/pool.template.h"
 
+// A type holding a pool of itself, which needs the two-pass instantiation
+typedef struct tree tree;
+#define RC_POOL_TYPE tree
+#define RC_POOL_DECLARE_ONLY
+#include "richc/pool.template.h"
+
+struct tree {
+    rc_pool_tree children;
+    int32_t id;
+};
+
+#define RC_POOL_TYPE tree
+#define RC_POOL_IMPL_ONLY
+#include "richc/pool.template.h"
+
 // Most tests run against a fresh default arena.
 RC_TEST_GROUP_DATA(pool) {
     rc_arena a;
@@ -281,4 +296,16 @@ RC_TEST(pool, free_bitset_empty)
     rc_bitset free_slots = rc_pool_i32_free_bitset(&pool, NULL);
 
     RC_CHECK(free_slots.num, ==, 0u);
+}
+
+
+RC_TEST_STEP(pool, two_pass_type_holding_itself, fix)
+{
+    tree root = {.id = 0};
+    uint32_t child = rc_pool_tree_add(&root.children, (tree) {.id = 1}, &fix->a);
+    tree *at = rc_pool_tree_at(&root.children, child);
+    uint32_t grandchild = rc_pool_tree_add(&at->children, (tree) {.id = 2}, &fix->a);
+
+    RC_CHECK(rc_pool_tree_get(&root.children, child).id, ==, 1);
+    RC_CHECK(rc_pool_tree_get(&at->children, grandchild).id, ==, 2);
 }

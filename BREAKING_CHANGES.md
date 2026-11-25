@@ -24,7 +24,7 @@ richc.
 - [bitset.h](#bitseth)
 - [Pools](#pools)
 - [Genpools and handles](#genpools-and-handles)
-- [lower_bound](#lower_bound)
+- [Algorithms](#algorithms)
 - [The hash trie](#the-hash-trie)
 - [Math](#math)
 - [test.h](#testh)
@@ -119,12 +119,12 @@ find them.
   | `richc/template/genpool.h` | `richc/genpool.template.h` |
   | `richc/genpool_handle.h` | `richc/handle.template.h` |
   | `richc/template/hash_trie.h` | `richc/hash_trie.template.h` |
-  | `richc/template/algorithm/hash_trie_foreach.h` | `richc/hash_trie_foreach.template.h` |
-  | `richc/template/algorithm/lower_bound.h` | `richc/lower_bound.template.h` |
+  | `richc/template/algorithm/<name>.h` | `richc/algorithms/<name>.template.h` |
 
-- **Template `NAME` macros are a suffix**, never the full type name: the type
-  is always `rc_pool_<NAME>`, `rc_genpool_<NAME>` or `rc_hash_trie_<NAME>`.
-  The array template already worked this way.
+- **Container templates' `NAME` macros are a suffix**, never the full type
+  name: the type is always `rc_pool_<NAME>`, `rc_genpool_<NAME>` or
+  `rc_hash_trie_<NAME>`. The array template already worked this way. An
+  algorithm's `NAME` is still its function's full name.
 - **Slicing has no `get_` prefix:** `first`, `last`, `drop_first`,
   `drop_last`, and `substr` / `subview` / `subspan(x, start, end)`.
 - **`make` allocates; `from_ptr` wraps memory you already have.**
@@ -348,6 +348,10 @@ Note that the old `richc/array/bitset.h` made arrays of bitsets
 `make`, `reserve`, `reset`, `get`, `set`, `at`, `at_const` and `free_bitset`
 are unchanged apart from the type name.
 
+- **New: `RC_POOL_DECLARE_ONLY` and `RC_POOL_IMPL_ONLY`**, the array
+  template's two passes, for an element type holding a pool of itself. The
+  genpool and the hash trie have them too.
+
 ## Genpools and handles
 
 - **Each genpool has its own handle type**, made by `handle.template.h`
@@ -375,18 +379,32 @@ are unchanged apart from the type name.
 | `free_bitset` | none | loop to `num_slots`, using `is_live` |
 | `template/algorithm/genpool_foreach.h` | none | the same loop, with no scratch arena |
 
-## lower_bound
+- **New: `RC_GENPOOL_DECLARE_ONLY` and `RC_GENPOOL_IMPL_ONLY`**, for an
+  element type holding a genpool of itself. The declaring pass makes the
+  handle type too.
 
-| Old | New | Notes |
-|---|---|---|
-| `RC_LOWER_BOUND_NAME` the function name | `RC_LOWER_BOUND_NAME` a suffix | the function is `rc_lower_bound_<NAME>`, searching `rc_view_<NAME>` |
-| `RC_LOWER_BOUND_VIEW` | none | the view is always `rc_view_<NAME>` |
+## Algorithms
 
-- **New:** `RC_LOWER_BOUND_KEY_TYPE`, so the key searched for can be a
-  different type from the elements (a name, searching records by name).
-- **Unchanged:** `RC_LOWER_BOUND_TYPE`, `RC_LOWER_BOUND_CMP` and
-  `RC_LOWER_BOUND_CTX`, and the arguments, `(view, key)` or
-  `(view, ctx, key)`.
+`sort`, `lower_bound`, `upper_bound`, `min_element`, `max_element`,
+`bitset_foreach` and `hash_trie_foreach` are all in `richc/algorithms/`. Their
+control macros, function names and arguments are unchanged, apart from the
+hash trie foreach's (see [The hash trie](#the-hash-trie)).
+
+- **New: projections.** `sort`, the two bounds and the two element searches
+  take `KEY(e)`, or `KEY(ctx, e)` with a context, which turns an element into
+  the key that is compared, and `KEY_TYPE`, the key's type; one needs the
+  other. `CMP` then compares keys. Without `KEY`, the element is its own key,
+  as before.
+  - The bounds search for a key, not an element.
+  - `min_element` and `max_element` project each element once.
+  - `sort` keeps the key of whichever side of a comparison stays put.
+- **New: `RC_SORT_CACHED`.** The sort projects each element once, into
+  scratch memory, and takes a scratch arena by value as its last argument:
+  `NAME(span, scratch)` or `NAME(span, ctx, scratch)`.
+- **The same macros everywhere.** Every one of the five takes `TYPE`, `NAME`,
+  `VIEW` (`SPAN` for `sort`), `CTX`, `KEY`, `KEY_TYPE` and `CMP`, with the same
+  meanings, and the arguments are always the container, then the context, then
+  anything else.
 
 ## The hash trie
 
@@ -407,6 +425,8 @@ are unchanged apart from the type name.
 | none | `release(&trie, pool)` | gives a trie's blocks back to the pool and sets it to `{0}` |
 | node index `block * 16 + slot` | `block * WIDTH + slot` | |
 
+- **New: `RC_HASH_TRIE_DECLARE_ONLY` and `RC_HASH_TRIE_IMPL_ONLY`**, for a
+  key or value type holding a trie of itself.
 - **Each slot stores its key's hash.** Lookups compare it before calling
   `EQUAL`, so `EQUAL` must never match keys with different hashes.
 - **Remove, release and the foreach don't recurse**, so long chains of
@@ -452,7 +472,7 @@ After:
 #define RC_HASH_TRIE_FOREACH_CONST
 #define RC_HASH_TRIE_FOREACH_FUNC(c, p, i) flatten_symbol(c, p, i)
 #define RC_HASH_TRIE_FOREACH_NAME rc_hash_trie_symbol_foreach_flatten
-#include "richc/hash_trie_foreach.template.h"
+#include "richc/algorithms/hash_trie_foreach.template.h"
 ```
 
 ## Math
@@ -506,17 +526,9 @@ The headers keep their names under `richc/math/`, and their arrays under
 | `richc/random.h` | `rc_random`, a PRNG |
 | `richc/time.h` | a monotonic nanosecond clock |
 | `richc/rect_pack.h` | a rectangle packer |
-| `template/algorithm/sort.h` | introsort on a span |
-| `template/algorithm/upper_bound.h` | binary search on a view (`lower_bound` is ported) |
-| `template/algorithm/min_element.h`, `max_element.h` | index of the smallest or largest element |
-| `template/algorithm/bitset_foreach.h` | visit the set bits (or loop with `first_set` and `next_set`) |
 | `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
 | `richc/zip/inflate.h` | DEFLATE and zlib decompression |
 | number parsing | nothing yet stood in for `strtod` and `strtol` |
-
-To use an old algorithm template before it is ported, copy it and update its
-calls: `get_head` to `first`, `get_tail` to `drop_first`, and the bitset
-renames.
 
 ## Porting Baron
 
@@ -532,10 +544,9 @@ What Baron uses that changed, roughly in order of effort:
 - **Missing modules:**
   - the array headers for `u8`, `u32`, `i32`, `i64`, `str` and `bitset`
   - `random.h`, for `RND`
-  - `sort.h` (3 uses)
-- **`lower_bound.h` in `symdump.c`:** include `richc/lower_bound.template.h`,
-  set `RC_LOWER_BOUND_NAME` to `u32` and drop `RC_LOWER_BOUND_VIEW`. The one
-  call becomes `rc_lower_bound_u32(own, pos)`.
+- **`sort.h` and `lower_bound.h` in `symdump.c` and `expression.c`:** only
+  the include paths change, to `richc/algorithms/sort.template.h` and
+  `richc/algorithms/lower_bound.template.h`.
 - **`rc_str_substr`:** 11 calls in `assemble.c`, `expression.c` and `lexer.c`.
   Each already passes a difference (`x - start`), so it becomes
   `rc_str_substr(s, start, x)`.

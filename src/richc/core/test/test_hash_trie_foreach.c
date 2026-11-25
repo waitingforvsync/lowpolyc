@@ -56,13 +56,13 @@ static void visit_chain(visits *v, const rc_hash_trie_fe_chain_pool *pool, uint3
 #define RC_HASH_TRIE_FOREACH_CTX visits
 #define RC_HASH_TRIE_FOREACH_CONST
 #define RC_HASH_TRIE_FOREACH_FUNC(ctx, pool, index) visit(ctx, pool, index)
-#include "richc/hash_trie_foreach.template.h"
+#include "richc/algorithms/hash_trie_foreach.template.h"
 
 // A mutable walk with a context: rc_hash_trie_fe_chain_foreach
 #define RC_HASH_TRIE_FOREACH_TRIE rc_hash_trie_fe_chain
 #define RC_HASH_TRIE_FOREACH_CTX visits
 #define RC_HASH_TRIE_FOREACH_FUNC(ctx, pool, index) visit_chain(ctx, pool, index)
-#include "richc/hash_trie_foreach.template.h"
+#include "richc/algorithms/hash_trie_foreach.template.h"
 
 // The entries the context-free walks have seen
 static uint32_t visit_count;
@@ -89,13 +89,13 @@ static void count_weak(const rc_hash_trie_fe_weak_pool *pool, uint32_t index)
 #define RC_HASH_TRIE_FOREACH_TRIE rc_hash_trie_fe_weak
 #define RC_HASH_TRIE_FOREACH_CONST
 #define RC_HASH_TRIE_FOREACH_FUNC(pool, index) count_weak(pool, index)
-#include "richc/hash_trie_foreach.template.h"
+#include "richc/algorithms/hash_trie_foreach.template.h"
 
 // No context, under another name
 #define RC_HASH_TRIE_FOREACH_TRIE rc_hash_trie_fe
 #define RC_HASH_TRIE_FOREACH_FUNC(pool, index) count_one(pool, index)
 #define RC_HASH_TRIE_FOREACH_NAME count_entries
-#include "richc/hash_trie_foreach.template.h"
+#include "richc/algorithms/hash_trie_foreach.template.h"
 
 
 // Double the value at index.
@@ -108,7 +108,7 @@ static void double_value(rc_hash_trie_fe_pool *pool, uint32_t index)
 #define RC_HASH_TRIE_FOREACH_TRIE rc_hash_trie_fe
 #define RC_HASH_TRIE_FOREACH_FUNC(pool, index) double_value(pool, index)
 #define RC_HASH_TRIE_FOREACH_NAME double_values
-#include "richc/hash_trie_foreach.template.h"
+#include "richc/algorithms/hash_trie_foreach.template.h"
 
 // Most tests run against a fresh default arena.
 RC_TEST_GROUP_DATA(hash_trie_foreach) {

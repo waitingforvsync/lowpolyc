@@ -5,11 +5,13 @@
 // element moves the generation on, so a handle that outlives its element is caught rather than
 // quietly reaching whatever takes the slot next.
 //
-//   RC_GENPOOL_TYPE    the element type (required)
-//   RC_GENPOOL_NAME    the name suffix; defaults to RC_GENPOOL_TYPE, which must then be one
-//                      identifier
-//   RC_GENPOOL_HANDLE  the handle type, made with handle.template.h; defaults to rc_handle_<name>,
-//                      which this generates
+//   RC_GENPOOL_TYPE          the element type (required)
+//   RC_GENPOOL_NAME          the name suffix; defaults to RC_GENPOOL_TYPE, which must then be one
+//                            identifier
+//   RC_GENPOOL_HANDLE        the handle type, made with handle.template.h; defaults to
+//                            rc_handle_<name>, which this generates
+//   RC_GENPOOL_DECLARE_ONLY  generate only the types, and the handle
+//   RC_GENPOOL_IMPL_ONLY     generate only the functions, after a DECLARE_ONLY pass
 //
 // The pool is rc_genpool_<name>, and {0} is an empty pool. Like a pool, freed slots are reused
 // first. Everything that takes a handle asserts it is valid; is_valid is the check that does not.
@@ -20,6 +22,10 @@
 //
 // reset and release start the generations again from 0, so a handle from before can match one
 // from after. A slot's generation also wraps after 2^31 lifetimes. Neither is guarded against.
+//
+// An element type holding a genpool of itself, or of a type not yet complete, needs two passes, as
+// array.template.h does: DECLARE_ONLY while it is still incomplete, then IMPL_ONLY once it is
+// defined, each with the same control macros.
 
 // ---- shared by every instantiation ----
 
@@ -42,10 +48,13 @@
 #  define RC_GENPOOL_NAME RC_GENPOOL_TYPE
 #endif
 
+// The handle is made with the types, so an IMPL_ONLY pass only names it
 #ifndef RC_GENPOOL_HANDLE
 #  define RC_GENPOOL_HANDLE RC_CONCAT(rc_handle_, RC_GENPOOL_NAME)
-#  define RC_HANDLE_TYPE RC_GENPOOL_HANDLE
-#  include "richc/handle.template.h"
+#  ifndef RC_GENPOOL_IMPL_ONLY
+#    define RC_HANDLE_TYPE RC_GENPOOL_HANDLE
+#    include "richc/handle.template.h"
+#  endif
 #endif
 
 #define RC_GENPOOL_ RC_CONCAT(rc_genpool_, RC_GENPOOL_NAME)
@@ -79,18 +88,15 @@
 
 // ---- types ----
 
-// An element, or while the slot is free, the link to the next free slot; and the generation,
-// which outlives both.
-typedef struct RC_GENPOOL_SLOT_ {
-    union {
-        uint32_t next_free_;
-        RC_GENPOOL_TYPE value;
-    };
-    uint32_t gen;  // odd while the slot is live
-} RC_GENPOOL_SLOT_;
+// The slots hold elements, so their type is only completed with the functions; until then the
+// pool needs no more than a pointer to them.
+#ifndef RC_GENPOOL_IMPL_ONLY
+
+typedef struct RC_GENPOOL_SLOT_ RC_GENPOOL_SLOT_;
 
 #define RC_ARRAY_TYPE RC_GENPOOL_SLOT_
 #define RC_ARRAY_NAME RC_CONCAT(genpool_, RC_CONCAT(RC_GENPOOL_NAME, _slot_))
+#define RC_ARRAY_DECLARE_ONLY
 #include "richc/array.template.h"
 
 // The pool: its slots, and the head of the free list.
@@ -98,6 +104,25 @@ typedef struct RC_GENPOOL_ {
     RC_GENPOOL_SLOTS_ slots_;
     uint32_t first_free_;  // the first free slot's index plus one; 0 if none is free
 } RC_GENPOOL_;
+
+#endif // RC_GENPOOL_IMPL_ONLY
+
+#ifndef RC_GENPOOL_DECLARE_ONLY
+
+// An element, or while the slot is free, the link to the next free slot; and the generation,
+// which outlives both.
+struct RC_GENPOOL_SLOT_ {
+    union {
+        uint32_t next_free_;
+        RC_GENPOOL_TYPE value;
+    };
+    uint32_t gen;  // odd while the slot is live
+};
+
+#define RC_ARRAY_TYPE RC_GENPOOL_SLOT_
+#define RC_ARRAY_NAME RC_CONCAT(genpool_, RC_CONCAT(RC_GENPOOL_NAME, _slot_))
+#define RC_ARRAY_IMPL_ONLY
+#include "richc/array.template.h"
 
 // ---- lifecycle ----
 
@@ -233,6 +258,8 @@ static inline RC_GENPOOL_HANDLE RC_GENPOOL_HANDLE_AT_(const RC_GENPOOL_ *pool, u
     return (RC_GENPOOL_HANDLE) {.index_ = index, .gen_ = RC_GENPOOL_SLOTS_VIEW_AT_(pool->slots_.view, index)->gen};
 }
 
+#endif // RC_GENPOOL_DECLARE_ONLY
+
 // ---- cleanup ----
 
 #undef RC_GENPOOL_MAKE_
@@ -267,3 +294,5 @@ static inline RC_GENPOOL_HANDLE RC_GENPOOL_HANDLE_AT_(const RC_GENPOOL_ *pool, u
 #undef RC_GENPOOL_HANDLE
 #undef RC_GENPOOL_NAME
 #undef RC_GENPOOL_TYPE
+#undef RC_GENPOOL_DECLARE_ONLY
+#undef RC_GENPOOL_IMPL_ONLY
