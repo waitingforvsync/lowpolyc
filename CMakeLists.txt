@@ -23,10 +23,12 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
     set(RICHC_WASM_MAX_MEMORY 1073741824 CACHE STRING "Most memory a threaded wasm32 build can grow to, in bytes")
     if(RICHC_WASM_THREADS)
         add_compile_options(-matomics -mbulk-memory)
+        # rc_wasm_threads_init gives the main thread its thread-local storage, so it must be in the
+        # module, and the host must call it, even when nothing starts a thread
         add_link_options(
             -Wl,--shared-memory -Wl,--import-memory -Wl,--export-memory
             -Wl,--max-memory=${RICHC_WASM_MAX_MEMORY}
-            -Wl,--export=__stack_pointer)
+            -Wl,--export=__stack_pointer -Wl,--undefined=rc_wasm_threads_init)
     endif()
 else()
     set(RICHC_WASM OFF)

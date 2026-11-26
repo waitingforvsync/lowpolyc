@@ -2,8 +2,11 @@
 #
 # serve_site.sh
 #
-# Serves the wasm build's page (build/wasm/site) at http://127.0.0.1:8090 for trying it in a
-# browser, using Python's own HTTP server. The site is static files, so nothing more is needed.
+# Serves the wasm builds' page at http://127.0.0.1:8090 for trying it in a browser: build/wasm/site
+# and build/wasm-threads/site laid one over the other, as CI lays them for GitHub Pages, so the
+# page has both lowpoly.wasm and lowpoly-threads.wasm if both are built. Unlike GitHub Pages, it
+# sends the headers that make the page cross-origin isolated, so the page runs the threaded build.
+# tools/serve_site.py is the server.
 #
 #   tools/serve_site.sh start  start the server in the background, or keep the one already running,
 #                              and return once it answers
@@ -27,13 +30,14 @@ is_running() {
 
 case "${1:-}" in
     start)
-        if [ ! -d build/wasm/site ]; then
-            echo "No build/wasm/site: build the wasm variant first." >&2
+        if [ ! -d build/wasm/site ] && [ ! -d build/wasm-threads/site ]; then
+            echo "No build/wasm/site or build/wasm-threads/site: build a wasm variant first." >&2
             exit 1
         fi
+        mkdir -p build/wasm
         if ! is_running; then
             # setsid puts the server in its own session, so it outlives the task's terminal
-            setsid python3 -m http.server "$port" --bind 127.0.0.1 --directory build/wasm/site \
+            setsid python3 tools/serve_site.py "$port" build/wasm/site build/wasm-threads/site \
                 >"$log_file" 2>&1 < /dev/null &
             echo $! > "$pid_file"
         fi

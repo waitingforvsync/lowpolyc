@@ -221,7 +221,9 @@ function runFrames(rc_wasm_frame) {
 export function createApp(canvas) {
     let memory = null;
     const decoder = new TextDecoder();
-    const text = (data, len) => decoder.decode(new Uint8Array(memory.buffer, data, len));
+
+    // From a copy, as some browsers will not decode shared memory, which a threaded module's is
+    const text = (data, len) => decoder.decode(new Uint8Array(memory.buffer, data >>> 0, len >>> 0).slice());
 
     const imports = {
         app_set_title: (data, len) => {

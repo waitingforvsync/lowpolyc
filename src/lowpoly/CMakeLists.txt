@@ -50,11 +50,16 @@ endif()
 # ---- web page (wasm only) ----
 
 # The site GitHub Pages serves: lowpoly.wasm, the files in web/ and richc's
-# scripts (in richc/), gathered in <build>/site. tools/serve_site.sh serves
-# build/wasm/site over http to try it locally.
+# scripts (in richc/), gathered in <build>/site. A build with threads makes
+# lowpoly-threads.wasm instead, which the page loads when it is cross-origin
+# isolated, so the two sites can be laid one over the other. tools/serve_site.sh
+# serves build/wasm/site and build/wasm-threads/site over http to try it locally.
 if(RICHC_WASM)
     set(LOWPOLY_SITE_DIR ${CMAKE_BINARY_DIR}/site)
     set_target_properties(lowpoly PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${LOWPOLY_SITE_DIR})
+    if(RICHC_WASM_THREADS)
+        set_target_properties(lowpoly PROPERTIES OUTPUT_NAME lowpoly-threads)
+    endif()
 
     set(LOWPOLY_SITE_FILES)
     foreach(file index.html lowpoly.js)

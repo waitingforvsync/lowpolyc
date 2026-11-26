@@ -1,7 +1,12 @@
 // lowpoly.js
 //
-// Loads lowpoly.wasm and runs it on the page's canvas. richc's app.js, gl.js, fs.js, print.js and
+// Loads lowpoly and runs it on the page's canvas. richc's app.js, gl.js, fs.js, print.js and
 // time.js supply the module's imports and drive it; lowpoly itself adds nothing to them yet.
+//
+// There are two builds. lowpoly-threads.wasm needs shared memory, which a browser allows only on
+// a page that is cross-origin isolated, so the page loads it only then, and only if the site has
+// it; otherwise it loads lowpoly.wasm, which has no threads. GitHub Pages cannot send the headers
+// that isolate a page, so there it is always lowpoly.wasm.
 
 import { createApp } from './richc/app.js';
 import { createFs } from './richc/fs.js';
@@ -12,17 +17,26 @@ import { createTime } from './richc/time.js';
 const canvas = document.getElementById('canvas');
 const status = document.getElementById('status');
 
-// Streaming compile needs the server to send application/wasm; fall back to compiling from the
-// bytes when it does not.
-async function load(url, imports) {
-    try {
-        return await WebAssembly.instantiateStreaming(fetch(url), imports);
+
+// The bytes of the build to run, and whether it is the one with threads.
+async function fetchBuild() {
+    if (crossOriginIsolated) {
+        const response = await fetch('lowpoly-threads.wasm');
+
+        if (response.ok) {
+            return { bytes: await response.arrayBuffer(), threaded: true };
+        }
     }
-    catch {
-        const bytes = await (await fetch(url)).arrayBuffer();
-        return WebAssembly.instantiate(bytes, imports);
+
+    const response = await fetch('lowpoly.wasm');
+
+    if (!response.ok) {
+        throw new Error(`lowpoly.wasm: ${response.status} ${response.statusText}`);
     }
+
+    return { bytes: await response.arrayBuffer(), threaded: false };
 }
+
 
 try {
     // The GL context comes first: the module expects it ready when it starts
@@ -32,13 +46,28 @@ try {
     const print = createPrint();
     const time = createTime();
     const imports = { richc: { ...app.imports, ...gl.imports, ...fs.imports, ...print.imports, ...time.imports } };
-    const { instance } = await load('lowpoly.wasm', imports);
+    const { bytes, threaded } = await fetchBuild();
+    const module = await WebAssembly.compile(bytes);
+
+    // Only the threaded build needs threads.js, which only its site has
+    const threads = threaded ? await import('./richc/threads.js') : null;
+    const memory = threads ? threads.createMemory(bytes) : null;
+
+    if (memory) {
+        imports.env = { memory };
+    }
+
+    const instance = await WebAssembly.instantiate(module, imports);
 
     app.bind(instance);
     gl.bind(instance);
     fs.bind(instance);
     print.bind(instance);
     time.bind(instance);
+
+    if (threads) {
+        await threads.startThreads(instance, module, memory);
+    }
 
     const result = instance.exports.start();
     if (result !== 0) {

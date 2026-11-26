@@ -319,20 +319,28 @@ core. Nothing outside the platform backends knows which target it is running on.
   -mbulk-memory`, and memory that is imported, shared, and at most
   `RICHC_WASM_MAX_MEMORY` (1 GiB by default). Its threads run on a pool of 16
   workers that `threads.js` starts before the module runs, each on a static
-  256 KiB stack. A page can run it only when cross-origin isolated.
+  256 KiB stack. A page can run it only when cross-origin isolated, and its
+  host must call `startThreads` before anything else in the module, even if
+  nothing starts a thread, as that gives the main thread its thread-local
+  storage.
 - Floating point, every gcc/clang build including wasm: `-ffp-contract=off
   -fno-math-errno`. Native x86-64 also uses `-march=x86-64-v2` (for SSE4.1).
   MSVC: `/fp:precise`. See [Scalar math](#scalar-math) and
   [Floating point](#floating-point).
 - MSVC also needs `/Zc:preprocessor` (CMake adds `/std:c17`).
 - The wasm build gathers the web page in `<build>/site`: `lowpoly.wasm` plus
-  `src/lowpoly/web/`. To try it locally, serve that directory over http (for
-  example `python3 -m http.server -d build-wasm/site`); browsers will not load
-  wasm from `file://`.
+  `src/lowpoly/web/`. A build with threads makes `lowpoly-threads.wasm`
+  instead, so the two sites can be laid one over the other, and the page loads
+  the threaded one only when it is cross-origin isolated. To try it locally,
+  `tools/serve_site.sh start` serves `build/wasm/site` and
+  `build/wasm-threads/site` together, with the headers that isolate the page;
+  browsers will not load wasm from `file://`.
 - Every push to `main` runs `.github/workflows/deploy.yml`: a native debug
   build, a wasm release build and a wasm release build with threads, each
-  running the tests, then deploys the wasm build without threads to GitHub
-  Pages.
+  running the tests, then both wasm builds' tests again in headless Chrome.
+  It deploys both wasm builds' sites, laid together, to GitHub Pages, which
+  cannot send the isolating headers, so there the page always runs the build
+  without threads.
 - Dead-code stripping: gcc/clang native use `-ffunction-sections
   -fdata-sections` with `--gc-sections` (Linux) or `-dead_strip` (macOS);
   MSVC `/Gy /Gw` with `/OPT:REF`. wasm-ld strips unused functions by default.
@@ -695,7 +703,9 @@ callback is handed the container.
   found) and `LOWPOLY_BUILD_TESTS` (on by default natively) build and run them; `RICHC_BUILD_APP` (on by default) builds the app layer
   as well as core, and lowpoly needs it.
 - richc's tests build natively and for wasm32, where node runs them after the
-  build through `tools/run_wasm_tests.mjs`. A test that cannot run on wasm is
+  build through `tools/run_wasm_tests.mjs`, and
+  `tools/run_wasm_tests_chrome.mjs` runs them in headless Chrome, where a
+  page's main thread may not block and some APIs refuse shared memory. A test that cannot run on wasm is
   skipped there, and one that compares against libc is built natively only.
   lowpoly's tests are native only.
 - The test framework is libc-free, and reports through `rc_print`. It leaves a

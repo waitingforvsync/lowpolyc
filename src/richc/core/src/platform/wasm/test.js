@@ -42,10 +42,14 @@ export function createTest(filter) {
                 throw new Leave(level);
             },
 
+            // Encoded into a buffer of our own and copied, as browsers will not encode into shared
+            // memory, which a threaded module's is
             test_filter: (data, cap) => {
-                const bytes = new Uint8Array(exports.memory.buffer, data >>> 0, cap >>> 0);
+                const encoded = new Uint8Array(cap >>> 0);
+                const written = encoder.encodeInto(filter, encoded).written;
 
-                return encoder.encodeInto(filter, bytes).written;
+                new Uint8Array(exports.memory.buffer, data >>> 0, written).set(encoded.subarray(0, written));
+                return written;
             },
         },
 

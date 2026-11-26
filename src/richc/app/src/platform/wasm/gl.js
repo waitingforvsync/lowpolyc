@@ -28,7 +28,8 @@ export function createGl(canvas) {
             gl.bindFramebuffer(target, null);
         },
         glClearBufferfv: (buffer, drawbuffer, value) => {
-            gl.clearBufferfv(buffer, drawbuffer, new Float32Array(memory.buffer, value, 4));
+            // Copies, as WebGL may refuse a view of shared memory, which a threaded module's is
+            gl.clearBufferfv(buffer, drawbuffer, new Float32Array(memory.buffer, value >>> 0, 4).slice());
         },
         glColorMask: (red, green, blue, alpha) => {
             gl.colorMask(red !== 0, green !== 0, blue !== 0, alpha !== 0);
@@ -36,7 +37,7 @@ export function createGl(canvas) {
         glDisable: (cap) => gl.disable(cap),
         glGetError: () => gl.getError(),
         glInvalidateFramebuffer: (target, count, attachments) => {
-            gl.invalidateFramebuffer(target, Array.from(new Uint32Array(memory.buffer, attachments, count)));
+            gl.invalidateFramebuffer(target, Array.from(new Uint32Array(memory.buffer, attachments >>> 0, count >>> 0)));
         },
     };
 

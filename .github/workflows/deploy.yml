@@ -51,12 +51,28 @@ jobs:
           cmake -S . -B build-wasm -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release
           cmake --build build-wasm
 
-      # The same with threads, whose tests run on node's workers. Only the build without threads
-      # is deployed, as GitHub Pages cannot serve the headers a page needs for shared memory.
+      # The same with threads, whose tests run on node's workers
       - name: Build and test (wasm32 with threads)
         run: |
-          cmake -S . -B build-wasm-threads -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release -DRICHC_WASM_THREADS=ON
+          cmake -S . -B build-wasm-threads -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release \
+            -DRICHC_WASM_THREADS=ON
           cmake --build build-wasm-threads
+
+      # Both builds' tests again in the runner's Chrome, where a page's main thread may not block
+      # and some APIs refuse shared memory, as node's do not
+      - name: Test in Chrome (wasm32, with and without threads)
+        run: |
+          for build in build-wasm build-wasm-threads; do
+            for test in core/test/richc_core_test shader/test/richc_shader_test app/test/richc_app_test; do
+              node tools/run_wasm_tests_chrome.mjs "$build/src/richc/$test.wasm"
+            done
+          done
+
+      # The site has both builds, and the page picks lowpoly-threads.wasm only when it is
+      # cross-origin isolated. GitHub Pages cannot send the headers for that, so there the page
+      # always runs lowpoly.wasm; elsewhere they give it threads.
+      - name: Add the threaded build to the site
+        run: cp -r --update=none build-wasm-threads/site/. build-wasm/site/
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
