@@ -59,6 +59,8 @@ add_library(richc STATIC
     src/thread/once.c
     src/thread/rwlock.c
     src/thread/semaphore.c
+    src/thread/thread.c
+    src/thread/tls.c
     include/richc/arena.h
     include/richc/array.template.h
     include/richc/bitset.h
@@ -140,6 +142,8 @@ add_library(richc STATIC
     include/richc/thread/rwlock.h
     include/richc/thread/semaphore.h
     include/richc/thread/spinlock.h
+    include/richc/thread/thread.h
+    include/richc/thread/tls.h
     include/richc/thread/private/atomic.template.h
     include/richc/thread/private/atomic_msvc.template.h
     include/richc/zip/inflate.h
@@ -147,6 +151,7 @@ add_library(richc STATIC
     src/fs.h
     src/futex.h
     src/heap.h
+    src/os_thread.h
     src/str_parse.h
     src/math/arc.h
     src/math/exp_log_f32.h
@@ -164,6 +169,7 @@ if(RICHC_WASM)
         src/platform/wasm/fs.c
         src/platform/wasm/futex.c
         src/platform/wasm/heap.c
+        src/platform/wasm/os_thread.c
         src/platform/wasm/print.c
         src/platform/wasm/runtime.c
         src/platform/wasm/time.c)
@@ -179,6 +185,7 @@ elseif(WIN32)
         src/platform/win32/fs.c
         src/platform/win32/futex.c
         src/platform/win32/heap.c
+        src/platform/win32/os_thread.c
         src/platform/win32/print.c
         src/platform/win32/time.c)
 
@@ -188,8 +195,13 @@ else()
     target_sources(richc PRIVATE
         src/platform/posix/fs.c
         src/platform/posix/heap.c
+        src/platform/posix/os_thread.c
         src/platform/posix/print.c
         src/platform/posix/time.c)
+
+    # pthreads, which older glibc keeps out of libc
+    find_package(Threads REQUIRED)
+    target_link_libraries(richc PUBLIC Threads::Threads)
 
     # The futex is the one call Linux and macOS do differently
     if(APPLE)

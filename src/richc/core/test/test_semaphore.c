@@ -1,6 +1,6 @@
 // test_semaphore.c
 //
-// Tests for rc_semaphore, on one thread. Threads posting to each other come with the threads.
+// Tests for rc_semaphore, on one thread. Threads posting to each other are in test_thread.c.
 
 #include "richc/test.h"
 #include "richc/thread/semaphore.h"

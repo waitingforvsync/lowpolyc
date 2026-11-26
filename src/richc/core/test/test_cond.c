@@ -1,7 +1,7 @@
 // test_cond.c
 //
 // Tests for rc_cond, on one thread, where nothing can signal a waiter, so only timeouts end a
-// wait. Threads signalling each other come with the threads.
+// wait. Threads signalling each other are in test_thread.c.
 
 #include "richc/test.h"
 #include "richc/thread/cond.h"

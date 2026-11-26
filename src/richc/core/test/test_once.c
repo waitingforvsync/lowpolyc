@@ -1,6 +1,6 @@
 // test_once.c
 //
-// Tests for rc_once, on one thread. Threads racing to run one come with the threads.
+// Tests for rc_once, on one thread. Threads racing to run one are in test_thread.c.
 
 #include "richc/test.h"
 #include "richc/thread/once.h"

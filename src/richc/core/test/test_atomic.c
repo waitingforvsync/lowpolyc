@@ -1,7 +1,7 @@
 // test_atomic.c
 //
 // Tests for richc/thread/atomic.h, on one thread: each operation's result, wrapping at every
-// width, and every order each operation takes. Threads racing on them come with the threads.
+// width, and every order each operation takes. Threads racing on them are in test_thread.c.
 
 #include "richc/test.h"
 #include "richc/thread/atomic.h"

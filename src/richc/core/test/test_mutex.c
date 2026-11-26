@@ -1,6 +1,6 @@
 // test_mutex.c
 //
-// Tests for rc_mutex, on one thread. Threads contending for one come with the threads.
+// Tests for rc_mutex, on one thread. Threads contending for one are in test_thread.c.
 
 #include "richc/test.h"
 #include "richc/thread/mutex.h"

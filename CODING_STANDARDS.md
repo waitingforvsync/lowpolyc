@@ -283,9 +283,9 @@ core. Nothing outside the platform backends knows which target it is running on.
 - **Function pointers must match exactly.** Calling through a pointer of a
   different signature "works" on native but traps on wasm (`call_indirect`
   checks the type). Never cast between function pointer types.
-- **The stack is small** (64 KiB by default under wasm-ld). Keep large buffers
-  out of local variables: a scratch arena is the place for anything over about
-  4 KiB.
+- **The stack is small** (64 KiB by default under wasm-ld, and 256 KiB for
+  every thread richc starts, on every target). Keep large buffers out of local
+  variables: a scratch arena is the place for anything over about 4 KiB.
 - **Nothing blocks.** In the browser the host drives the frame loop. App code is
   callback-driven (init, event, update, render) and never spins waiting for an
   event, a file or a timer.
@@ -691,6 +691,9 @@ callback is handed the container.
   failing test (and still deinits its fixture) by `longjmp` natively and a
   JavaScript throw on wasm, so tests never use `setjmp` themselves: code that
   must leave without returning calls `rc_test_bail` within `rc_test_try`.
+- Checks run only on the test's own thread, as leaving a test from any other
+  would wreck it. A worker thread records what it saw, and the test checks
+  that after joining it.
 - Bundled fixtures live in `test/data/` and are staged next to the test binary.
 - Purely graphical code that cannot be asserted on is exercised through example
   programs instead.

@@ -1,6 +1,6 @@
 // test_rwlock.c
 //
-// Tests for rc_rwlock, on one thread. Readers and writers on threads come with the threads.
+// Tests for rc_rwlock, on one thread. Readers and writers on threads are in test_thread.c.
 
 #include "richc/test.h"
 #include "richc/thread/rwlock.h"

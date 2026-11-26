@@ -606,7 +606,7 @@ OS object behind them. A zeroed one is ready to use, and nothing needs freeing.
 | `rc_mutex_trylock` | `rc_mutex_try_lock` | |
 | `rc_rwlock_read_trylock`, `rc_rwlock_write_trylock` | `rc_rwlock_try_read_lock`, `rc_rwlock_try_write_lock` | |
 | `rc_mutex_recursive` and its functions | none | a thread must not lock a mutex it holds |
-| none | `rc_once`, `rc_once_call(once, fn, context)` | runs `fn` once, however many threads call it |
+| `rc_once_run(once, fn)`, in `thread.h`, with `fn` taking nothing | `rc_once_call(once, fn, context)`, in `once.h` | `fn` takes `context` |
 
 - **`rc_rwlock` puts writers first:** a reader does not join while a writer
   waits, so a thread must not take a read lock it already holds, which could
@@ -619,6 +619,37 @@ OS object behind them. A zeroed one is ready to use, and nothing needs freeing.
   `rc_cond_wait_for`, `rc_cond_signal`, `rc_cond_broadcast`,
   `rc_semaphore_wait`, `_try_wait`, `_wait_for` and `_post`, timeouts in
   nanoseconds included.
+
+### thread.h and tls.h
+
+A thread is now a small handle by value, naming a slot in a static table richc
+keeps, so nothing the caller owns has to stay put while the thread runs. A TLS
+key is likewise a slot in a thread-local array, with no OS key behind it.
+
+| Old | New | Notes |
+|---|---|---|
+| `rc_thread t; rc_thread_create(&t, fn, arg)`, returning `bool` | `rc_thread t = rc_thread_make(fn, context)` | check it started with `rc_thread_is_valid(t)` |
+| `rc_thread_join(&t)` | `rc_thread_join(&t)` | also zeroes `t` |
+| `rc_thread_detach` | none | join every thread |
+| `rc_thread_func` | none | write `void (*)(void *)` |
+| `rc_tls_create()` | `rc_tls_make()` | |
+| `rc_tls_destroy(&key)` | `rc_tls_release(&key)` | also zeroes `key` |
+
+- **Every thread gets a 256 KiB stack** (`RC_THREAD_STACK_SIZE`) on every
+  target, where the OS defaults ranged from 512 KiB to 8 MiB.
+- **At most `RC_THREAD_MAX` (256) threads** can be started and not yet joined,
+  and **at most `RC_TLS_MAX` (64) TLS keys** can exist at once; making one
+  more key traps.
+- **`RC_THREAD_LOCAL` is `_Thread_local`** on clang and gcc, and still
+  `__declspec(thread)` on MSVC.
+- **`thread.h` and `tls.h` no longer include `<windows.h>` or
+  `<pthread.h>`.**
+- **`rc_thread_current_id` is the address of a thread-local,** not the OS's
+  thread id, so it means nothing outside the process.
+- **On wasm without threads, `rc_thread_make` always fails,** and
+  `rc_thread_hardware_concurrency` is 1.
+- **Unchanged:** `rc_thread_yield`, `rc_thread_sleep_ns`,
+  `rc_thread_hardware_concurrency`, `rc_tls_get` and `rc_tls_set`.
 
 ## zip/inflate.h
 
@@ -644,7 +675,7 @@ scratch arena after the output's.
 | Old | What it was |
 |---|---|
 | `richc/rect_pack.h` | a rectangle packer |
-| `template/future.h`, `richc/thread/` | futures, threads, thread-local storage and a task scheduler; the atomics and locks are in |
+| `template/future.h`, `richc/thread/scheduler.h` | futures and a task scheduler |
 
 ## Porting Baron
 
