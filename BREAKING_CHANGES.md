@@ -154,8 +154,9 @@ into the pages after it when they are the top of the heap or free. A released
 arena's pages go back to the top of the heap if they reach it, or else to a
 global pool of free runs, merged with their neighbours, that later chunks are
 cut from. Natively, free pages past the first 16 MiB of them go back to the OS
-(on wasm, linear memory cannot shrink). That global state is not thread-safe,
-even between different arenas.
+(on wasm, linear memory cannot shrink). That global state has a lock of its
+own, so arenas on different threads can be used at once, but an arena itself,
+like an old one, belongs to one thread at a time.
 
 | Old | New | Notes |
 |---|---|---|
@@ -178,6 +179,9 @@ even between different arenas.
 - **New:** `rc_arena_init`, `rc_arena_alloc_aligned` (alignment up to 64 KiB),
   `rc_arena_is_same`, `rc_arena_set_oom_handler`, and the `rc_arena_mark` and
   `rc_arena_oom_fn` types.
+- **New:** `rc_arena_ts` in `richc/arena_ts.h`, one arena that threads share:
+  an `rc_arena` behind a mutex, with the same calls bar save and restore, and
+  `rc_arena_ts_lock`/`rc_arena_ts_unlock` to work on the arena underneath.
 - **Functions that allocate take the arena last**, followed by any scratch
   arena by value, and assert that the two are not the same arena.
 - **On wasm**, richc must be the only code that grows linear memory.
@@ -665,8 +669,6 @@ key is likewise a slot in a thread-local array, with no OS key behind it.
 - **On wasm without threads, `rc_thread_make` always fails,** and
   `rc_thread_hardware_concurrency` is 1. With threads, at most 16 threads run
   at once, on a pool of workers, and each has 4 KiB of thread-local storage.
-- **The arena's page heap is not thread-safe yet,** so only one thread at a
-  time may make, grow or release arenas.
 - **Unchanged:** `rc_thread_yield`, `rc_thread_sleep_ns`,
   `rc_thread_hardware_concurrency`, `rc_tls_get` and `rc_tls_set`.
 

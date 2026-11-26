@@ -2,7 +2,7 @@
 //
 // The page heap's view of memory: reserve address space, commit pages and give them back, and give
 // it all back. Private to core, and implemented once per target in platform/<target>/heap.c, chosen
-// by the build.
+// by the build. arena.c holds the page heap's lock for every call, so none need be thread-safe.
 
 #ifndef RC_PLATFORM_HEAP_H_
 #define RC_PLATFORM_HEAP_H_

@@ -1,11 +1,15 @@
 // test_thread.c
 //
-// Tests for rc_thread, and for every primitive in thread/ with threads racing on it. Workers never
+// Tests for rc_thread, and for every primitive in thread/ and the arenas with threads racing on
+// them. Workers never
 // check anything themselves, as a failing check leaves the test from the test's own thread only:
 // they record what they saw, and the test checks it after joining them.
 //
 // wasm without threads cannot start any, so the tests that need them are skipped there.
 
+#include "richc/arena_ts.h"
+#include "richc/mem.h"
+#include "richc/random.h"
 #include "richc/test.h"
 #include "richc/thread/cond.h"
 #include "richc/thread/once.h"
@@ -596,4 +600,366 @@ RC_TEST_THREADS(thread, once_runs_once_across_threads)
     RC_CHECK_TRUE(run_workers(start_and_race, (void *)workers, sizeof(workers[0])));
     RC_CHECK(shared_once.calls, ==, 1);
     RC_CHECK(rc_atomic_u32_load(&shared_once.saw_value, RC_MEMORY_ORDER_RELAXED), ==, WORKERS);
+}
+
+
+// ---- arenas ----
+
+enum {
+    ARENA_PAGE = 65536,
+    CHURN_ROUNDS = 100,
+    CHURN_BLOCKS = 8,
+    SHARED_STEPS = 600
+};
+
+// Byte i of the pattern that seed fills a block with. Patterns of different seeds never line up,
+// however they are offset, so blocks that overlapped would show it.
+static uint8_t pattern_byte(uint32_t seed, uint32_t i)
+{
+    return (uint8_t)(((seed ^ (i * 0x9E3779B1u)) * 0x85EBCA6Bu) >> 24);
+}
+
+
+// Fill bytes from to to of p with seed's pattern.
+static void fill_pattern(uint8_t *p, uint32_t from, uint32_t to, uint32_t seed)
+{
+    for (uint32_t i = from; i < to; i++) {
+        p[i] = pattern_byte(seed, i);
+    }
+}
+
+
+// True if the size bytes at p still hold seed's pattern.
+static bool holds_pattern(const uint8_t *p, uint32_t size, uint32_t seed)
+{
+    for (uint32_t i = 0; i < size; i++) {
+        if (p[i] != pattern_byte(seed, i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+// True if the size bytes at p are all zero.
+static bool is_zeroed(const uint8_t *p, uint32_t size)
+{
+    for (uint32_t i = 0; i < size; i++) {
+        if (p[i] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+// A random block size: mostly small, now and then more than a page.
+static uint32_t random_block_size(rc_random *random)
+{
+    uint32_t limit = rc_random_next(random) % 16 == 0 ? 2 * ARENA_PAGE : 2048;
+
+    return 16 + rc_random_next(random) % limit;
+}
+
+
+// The first page of a new one-page arena, released again: the top of the page heap, once every
+// other arena is released.
+static uint32_t top_of_heap(void)
+{
+    rc_arena arena = rc_arena_make(ARENA_PAGE);
+    uint32_t first = arena.first;
+
+    rc_arena_release(&arena);
+    return first;
+}
+
+
+// Grow a block of size bytes holding seed's pattern to grown bytes, and carry the pattern on.
+static uint8_t *grow_block(rc_arena *arena, uint8_t *block, uint32_t size, uint32_t grown, uint32_t seed)
+{
+    uint8_t *result = rc_arena_realloc(arena, block, size, grown);
+
+    fill_pattern(result, size, grown, seed);
+    return result;
+}
+
+
+// What one worker with arenas of its own saw.
+typedef struct arena_churn {
+    uint32_t seed;
+    uint32_t damaged;   // blocks that lost their pattern
+} arena_churn;
+
+
+// Make an arena, fill it with blocks, grow the last, then check them all and release it. Returns
+// how many were damaged.
+static uint32_t churn_once(rc_random *random, uint32_t seed)
+{
+    rc_arena arena = rc_arena_make((1 + rc_random_next(random) % 4) * ARENA_PAGE);
+    uint32_t extra = random_block_size(random);
+    uint8_t *blocks[CHURN_BLOCKS] = {0};
+    uint32_t sizes[CHURN_BLOCKS] = {0};
+    uint32_t damaged = 0;
+
+    for (uint32_t i = 0; i < CHURN_BLOCKS; i++) {
+        sizes[i] = random_block_size(random);
+        blocks[i] = rc_arena_alloc(&arena, sizes[i]);
+        fill_pattern(blocks[i], 0, sizes[i], seed + i);
+    }
+
+    blocks[CHURN_BLOCKS - 1] = grow_block(&arena, blocks[CHURN_BLOCKS - 1], sizes[CHURN_BLOCKS - 1],
+        sizes[CHURN_BLOCKS - 1] + extra, seed + CHURN_BLOCKS - 1);
+    sizes[CHURN_BLOCKS - 1] += extra;
+    for (uint32_t i = 0; i < CHURN_BLOCKS; i++) {
+        damaged += holds_pattern(blocks[i], sizes[i], seed + i) ? 0u : 1u;
+    }
+
+    rc_arena_release(&arena);
+    return damaged;
+}
+
+
+// Make, fill and release arenas over and over, while one more arena of this worker's keeps growing
+// a block, as other workers' chunks come and go around its own.
+static void churn_arenas(void *context)
+{
+    arena_churn *churn = context;
+    uint32_t seed = churn->seed << 16;
+    rc_random random = rc_random_make(churn->seed);
+    rc_arena kept = rc_arena_make(ARENA_PAGE);
+    uint32_t kept_size = 1024;
+    uint8_t *kept_block = rc_arena_alloc(&kept, kept_size);
+
+    fill_pattern(kept_block, 0, kept_size, seed);
+    for (uint32_t round = 0; round < CHURN_ROUNDS; round++) {
+        churn->damaged += churn_once(&random, seed + 1 + round * CHURN_BLOCKS);
+        kept_block = grow_block(&kept, kept_block, kept_size, kept_size + 1024, seed);
+        kept_size += 1024;
+    }
+
+    churn->damaged += holds_pattern(kept_block, kept_size, seed) ? 0u : 1u;
+    rc_arena_release(&kept);
+}
+
+
+RC_TEST_THREADS(thread, arenas_on_many_threads_keep_apart)
+{
+    // Every block keeps its pattern, and once every arena is released, every page is back at the
+    // top of the heap
+    arena_churn churns[WORKERS] = {{.seed = 1}, {.seed = 2}, {.seed = 3}, {.seed = 4}};
+    uint32_t top = top_of_heap();
+
+    RC_CHECK_TRUE(run_workers(churn_arenas, churns, sizeof(churns[0])));
+    for (uint32_t i = 0; i < WORKERS; i++) {
+        RC_CHECK(churns[i].damaged, ==, 0);
+    }
+
+    RC_CHECK(top_of_heap(), ==, top);
+}
+
+
+// An arena a worker made, and a block it filled in it.
+typedef struct first_arena {
+    rc_arena arena;
+    uint8_t *block;
+} first_arena;
+
+
+// Make an arena, perhaps the first since the page heap was torn down, and fill a block in it.
+static void make_first_arena(void *context)
+{
+    first_arena *first = context;
+
+    first->arena = rc_arena_make(ARENA_PAGE);
+    first->block = rc_arena_alloc(&first->arena, 1000);
+    fill_pattern(first->block, 0, 1000, first->arena.first);
+}
+
+
+RC_TEST_THREADS(thread, arenas_made_at_once_set_the_heap_up_once)
+{
+    // Had two threads each set a heap up, their arenas would start on the same page
+    first_arena firsts[WORKERS] = {0};
+
+    rc_arena_deinit();
+    RC_CHECK_TRUE(run_workers(make_first_arena, firsts, sizeof(firsts[0])));
+    for (uint32_t i = 0; i < WORKERS; i++) {
+        RC_CHECK_TRUE(holds_pattern(firsts[i].block, 1000, firsts[i].arena.first));
+        for (uint32_t j = 0; j < i; j++) {
+            RC_CHECK(firsts[i].arena.first, !=, firsts[j].arena.first);
+        }
+    }
+
+    for (uint32_t i = 0; i < WORKERS; i++) {
+        rc_arena_release(&firsts[i].arena);
+    }
+}
+
+// ---- shared arena ----
+
+// A block a worker took from the shared arena, and the pattern it filled it with.
+typedef struct shared_block {
+    uint8_t *p;
+    uint32_t size;
+    uint32_t seed;
+} shared_block;
+
+// What one worker sharing the arena took and saw.
+typedef struct arena_share {
+    uint32_t num;
+    uint32_t bad;   // zeroed blocks that were not, and misaligned ones
+    shared_block blocks[SHARED_STEPS * 3];
+} arena_share;
+
+static rc_arena_ts shared_arena;
+static arena_share shares[WORKERS];
+
+
+// The first seed of the patterns of the worker that share is for.
+static uint32_t share_seed(const arena_share *share)
+{
+    return (uint32_t)(share - shares + 1) << 24;
+}
+
+
+// Fill a block the worker took with the next pattern, and record it.
+static void share_record(arena_share *share, uint8_t *p, uint32_t size)
+{
+    uint32_t seed = share_seed(share) + share->num;
+
+    fill_pattern(p, 0, size, seed);
+    share->blocks[share->num] = (shared_block) {.p = p, .size = size, .seed = seed};
+    share->num++;
+}
+
+
+// Take a zeroed block.
+static void share_zeroed(arena_share *share, uint32_t size)
+{
+    uint8_t *p = rc_arena_ts_alloc_zero(&shared_arena, size);
+
+    share->bad += is_zeroed(p, size) ? 0u : 1u;
+    share_record(share, p, size);
+}
+
+
+// Take a block aligned to align.
+static void share_aligned(arena_share *share, uint32_t size, uint32_t align)
+{
+    uint8_t *p = rc_arena_ts_alloc_aligned(&shared_arena, size, align);
+
+    share->bad += (uintptr_t)p % align == 0 ? 0u : 1u;
+    share_record(share, p, size);
+}
+
+
+// Grow the worker's last block by extra zeroed bytes. Other workers' blocks have usually followed
+// it, so it usually moves.
+static void share_grow(arena_share *share, uint32_t extra)
+{
+    shared_block *last = &share->blocks[share->num - 1];
+    uint32_t size = last->size + extra;
+
+    last->p = rc_arena_ts_realloc_zero(&shared_arena, last->p, last->size, size);
+    share->bad += is_zeroed(last->p + last->size, extra) ? 0u : 1u;
+    fill_pattern(last->p, last->size, size, last->seed);
+    last->size = size;
+}
+
+
+// Take three blocks under one lock, through the arena it gives.
+static void share_locked(arena_share *share, uint32_t size)
+{
+    rc_arena *arena = rc_arena_ts_lock(&shared_arena);
+    uint8_t *first = rc_arena_alloc(arena, size);
+    uint8_t *second = rc_arena_alloc(arena, size);
+    uint8_t *third = rc_arena_alloc(arena, size);
+
+    rc_arena_ts_unlock(&shared_arena);
+    share_record(share, first, size);
+    share_record(share, second, size);
+    share_record(share, third, size);
+}
+
+
+// Take a block and give it straight back, which works unless another worker took one between.
+static void share_freed(uint32_t size)
+{
+    uint8_t *p = rc_arena_ts_alloc(&shared_arena, size);
+
+    fill_pattern(p, 0, size, 0);
+    (void)rc_arena_ts_free(&shared_arena, p, size);
+}
+
+
+// One random step with the shared arena.
+static void share_step(arena_share *share, rc_random *random)
+{
+    uint32_t size = random_block_size(random);
+    uint32_t action = share->num == 0 ? 0 : rc_random_next(random) % 6;
+
+    switch (action) {
+    case 0:
+        share_record(share, rc_arena_ts_alloc(&shared_arena, size), size);
+        break;
+    case 1:
+        share_zeroed(share, size);
+        break;
+    case 2:
+        share_aligned(share, size, 256u << (rc_random_next(random) % 5));
+        break;
+    case 3:
+        share_grow(share, size);
+        break;
+    case 4:
+        share_locked(share, size);
+        break;
+    default:
+        share_freed(size);
+        break;
+    }
+}
+
+
+// Take blocks from the shared arena every way there is.
+static void share_arena(void *context)
+{
+    arena_share *share = context;
+    rc_random random = rc_random_make(share_seed(share));
+
+    for (uint32_t step = 0; step < SHARED_STEPS; step++) {
+        share_step(share, &random);
+    }
+}
+
+
+// The blocks the workers took that no longer hold their patterns.
+static uint32_t damaged_shares(void)
+{
+    uint32_t damaged = 0;
+
+    for (uint32_t i = 0; i < WORKERS; i++) {
+        for (uint32_t j = 0; j < shares[i].num; j++) {
+            damaged += holds_pattern(shares[i].blocks[j].p, shares[i].blocks[j].size, shares[i].blocks[j].seed) ? 0u : 1u;
+        }
+    }
+    return damaged;
+}
+
+
+RC_TEST_THREADS(thread, shared_arena_hands_out_separate_blocks)
+{
+    // A small chunk size has the workers adding chunks to it often
+    uint32_t top = top_of_heap();
+
+    shared_arena = rc_arena_ts_make(ARENA_PAGE);
+    rc_memset(shares, 0, sizeof(shares));
+    RC_CHECK_TRUE(run_workers(share_arena, shares, sizeof(shares[0])));
+    for (uint32_t i = 0; i < WORKERS; i++) {
+        RC_CHECK(shares[i].bad, ==, 0);
+    }
+
+    RC_CHECK(damaged_shares(), ==, 0);
+    rc_arena_ts_release(&shared_arena);
+    RC_CHECK(top_of_heap(), ==, top);
 }

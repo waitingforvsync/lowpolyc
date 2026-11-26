@@ -3,6 +3,7 @@
 add_executable(richc_core_test
     main.c
     test_arena.c
+    test_arena_ts.c
     test_array.c
     test_array_headers.c
     test_atomic.c

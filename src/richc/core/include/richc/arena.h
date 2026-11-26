@@ -14,9 +14,15 @@
 // it returns, and any chunk it had to add stays in the chain for the caller to reuse later. Only
 // the owner may release an arena.
 //
-// The page heap and pool are global and not thread-safe.
-// rc_arena_init sets them up (rc_arena_make calls it, so that is optional), and rc_arena_deinit
-// tears them down, invalidating every arena at once.
+// An arena, with its scratch copies, belongs to one thread at a time; it can move to another
+// along with anything else handed over, through a lock or a join. Arenas on different threads can
+// be used at once, as the page heap and pool they share have a lock of their own, which only
+// making, releasing and finding a chunk more room take. For one arena that threads share, see
+// rc_arena_ts in richc/arena_ts.h.
+//
+// rc_arena_init sets the page heap up (rc_arena_make calls it, so that is optional), and
+// rc_arena_deinit tears it down, invalidating every arena at once, so no other thread may be using
+// one then.
 
 #ifndef RC_ARENA_H_
 #define RC_ARENA_H_
@@ -53,7 +59,8 @@ typedef void rc_arena_oom_fn(uint32_t size);
 bool rc_arena_init(void);
 
 // Tear the page heap down, invalidating every arena and pooled chunk. Natively the memory goes back
-// to the OS; on wasm, where linear memory cannot shrink, the next rc_arena_init reuses it.
+// to the OS; on wasm, where linear memory cannot shrink, the next rc_arena_init reuses it. No other
+// thread may be using an arena.
 void rc_arena_deinit(void);
 
 // Make an arena whose chunks are at least chunk_size bytes (0: the default), or as near as a chunk
@@ -93,7 +100,8 @@ rc_arena_mark rc_arena_save(const rc_arena *a);
 // Free everything allocated since mark was saved.
 void rc_arena_restore(rc_arena *a, rc_arena_mark mark);
 
-// Install the out-of-memory handler for all arenas (NULL: just panic).
+// Install the out-of-memory handler for all arenas on every thread (NULL: just panic). It runs on
+// the thread that ran out.
 void rc_arena_set_oom_handler(rc_arena_oom_fn *fn);
 
 // Make an arena with the default chunk size.

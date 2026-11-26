@@ -1,6 +1,11 @@
 // arena.c
 //
 // Chunked arenas over the global page heap, plus the pool of free pages that release gives back.
+//
+// An arena belongs to one thread at a time, but the page heap and pool are shared by every arena
+// on every thread, so one lock guards them. Only the slow paths take it: making and releasing an
+// arena, and finding a chunk more room. The functions below that work on the page heap all expect
+// it held, up to those under "the lock", which take it.
 
 #include "richc/arena.h"
 
@@ -8,6 +13,7 @@
 
 #include "platform/heap.h"
 #include "richc/mem.h"
+#include "richc/thread/mutex.h"
 
 enum {
     RC_PAGE = RC_HEAP_PAGE_SIZE,
@@ -65,6 +71,9 @@ typedef struct rc_page_state {
 static rc_page_state rc_mem;
 static rc_arena_oom_fn *rc_oom_handler;
 
+// Guards rc_mem, rc_oom_handler and the headers of the free runs.
+static rc_mutex rc_mem_lock;
+
 // ---- pages and chunks ----
 
 // The address of a page.
@@ -103,17 +112,6 @@ static uint32_t rc_align_up(uint32_t n, uint32_t align)
 static uint32_t rc_pages_for(uint32_t bytes)
 {
     return (uint32_t)(((uint64_t)bytes + RC_PAGE - 1) / RC_PAGE);
-}
-
-
-// Give the handler its say about a failed request of size bytes, then stop.
-RC_NORETURN static void rc_arena_out_of_memory(uint32_t size)
-{
-    if (rc_oom_handler) {
-        rc_oom_handler(size);
-    }
-
-    RC_PANIC(false);
 }
 
 
@@ -529,6 +527,172 @@ static uint32_t rc_chunk_acquire_at_least(uint32_t needed, uint32_t wanted)
     return rc_chunk_acquire(needed);
 }
 
+
+// Pages committed at the top of the heap: wanted of them, or failing that needed. Returns how many;
+// 0 when out of memory.
+static uint32_t rc_pages_at_top(uint32_t needed, uint32_t wanted)
+{
+    if (rc_pages_grow(wanted)) {
+        return wanted;
+    }
+    return rc_pages_grow(needed) ? needed : 0;
+}
+
+
+// Pages to grow a chunk ending at end by, wanted of them if there is room, else fewer but never
+// under needed: committed at the top of the heap if the chunk ends there, or else cut from the free
+// run starting at end. Returns how many; 0 if there is no room after the chunk.
+static uint32_t rc_pages_after(uint32_t end, uint32_t needed, uint32_t wanted)
+{
+    if (end == rc_mem.used_pages) {
+        return rc_pages_at_top(needed, wanted);
+    }
+    return rc_pool_take_at(end, needed, wanted);
+}
+
+// ---- setting up ----
+
+// Take on a fresh reservation as the page heap; false if the reserve failed.
+static bool rc_arena_adopt_heap(rc_heap heap)
+{
+    if (!heap.limit) {
+        return false;
+    }
+
+    rc_mem = (rc_page_state) {
+        .base = heap.base,
+        .used_pages = heap.first,
+        .reserved_pages = heap.limit,
+        .pool = 0,
+        .spare_pages = 0,
+        .retained_pages = 0
+    };
+    return true;
+}
+
+
+// Set the page heap up, if it is not already; false if its address space cannot be reserved.
+static bool rc_heap_ready(void)
+{
+    if (rc_mem.reserved_pages) {
+        return true;
+    }
+
+    return rc_arena_adopt_heap(rc_heap_reserve());
+}
+
+// ---- the lock ----
+//
+// Each rc_locked_ function takes the page heap's lock for the work it names, and releases it as it
+// returns, through an unlock that passes the result on.
+
+// Release the page heap's lock, passing value on.
+static uint32_t rc_mem_unlock_u32(uint32_t value)
+{
+    rc_mutex_unlock(&rc_mem_lock);
+    return value;
+}
+
+
+// Release the page heap's lock, passing value on.
+static bool rc_mem_unlock_bool(bool value)
+{
+    rc_mutex_unlock(&rc_mem_lock);
+    return value;
+}
+
+
+// Release the page heap's lock, passing handler on.
+static rc_arena_oom_fn *rc_mem_unlock_handler(rc_arena_oom_fn *handler)
+{
+    rc_mutex_unlock(&rc_mem_lock);
+    return handler;
+}
+
+
+// Set the page heap up if need be, returning false if it cannot be.
+static bool rc_locked_heap_ready(void)
+{
+    rc_mutex_lock(&rc_mem_lock);
+    return rc_mem_unlock_bool(rc_heap_ready());
+}
+
+
+// A first chunk of pages pages for a new arena, setting the page heap up if need be. 0 when out of
+// memory.
+static uint32_t rc_locked_first_chunk(uint32_t pages)
+{
+    rc_mutex_lock(&rc_mem_lock);
+    return rc_mem_unlock_u32(rc_heap_ready() ? rc_chunk_acquire(pages) : 0);
+}
+
+
+// rc_chunk_acquire_at_least, with the lock.
+static uint32_t rc_locked_chunk(uint32_t needed, uint32_t wanted)
+{
+    rc_mutex_lock(&rc_mem_lock);
+    return rc_mem_unlock_u32(rc_chunk_acquire_at_least(needed, wanted));
+}
+
+
+// rc_pages_after, with the lock.
+static uint32_t rc_locked_pages_after(uint32_t end, uint32_t needed, uint32_t wanted)
+{
+    rc_mutex_lock(&rc_mem_lock);
+    return rc_mem_unlock_u32(rc_pages_after(end, needed, wanted));
+}
+
+
+// rc_pool_release_chain, with the lock.
+static void rc_locked_release_chain(uint32_t page)
+{
+    rc_mutex_lock(&rc_mem_lock);
+    rc_pool_release_chain(page);
+    rc_mutex_unlock(&rc_mem_lock);
+}
+
+
+// The out-of-memory handler, or NULL.
+static rc_arena_oom_fn *rc_locked_oom_handler(void)
+{
+    rc_mutex_lock(&rc_mem_lock);
+    return rc_mem_unlock_handler(rc_oom_handler);
+}
+
+
+// Give the handler its say about a failed request of size bytes, then stop. The lock is not held,
+// so a handler that leaves by a jump leaves the page heap usable.
+RC_NORETURN static void rc_arena_out_of_memory(uint32_t size)
+{
+    rc_arena_oom_fn *handler = rc_locked_oom_handler();
+
+    if (handler) {
+        handler(size);
+    }
+
+    RC_PANIC(false);
+}
+
+
+// An arena on a first chunk of pages pages, which also sets the size it grows by, setting the page
+// heap up if need be.
+static rc_arena rc_arena_make_pages(uint32_t pages, uint32_t chunk_size)
+{
+    uint32_t first = rc_locked_first_chunk(pages);
+
+    if (!first) {
+        rc_arena_out_of_memory(chunk_size);
+    }
+
+    rc_chunk(first)->min_pages = pages;
+    return (rc_arena) {
+        .first = first,
+        .chunk = first,
+        .top = RC_HEADER,
+        .end = rc_chunk_bytes(first)
+    };
+}
+
 // ---- making room ----
 
 // Make page the arena's current chunk, empty.
@@ -556,29 +720,6 @@ static uint32_t rc_chunk_growth(uint32_t have, uint32_t extra, uint32_t min_page
 }
 
 
-// Pages committed at the top of the heap: wanted of them, or failing that needed. Returns how many;
-// 0 when out of memory.
-static uint32_t rc_pages_at_top(uint32_t needed, uint32_t wanted)
-{
-    if (rc_pages_grow(wanted)) {
-        return wanted;
-    }
-    return rc_pages_grow(needed) ? needed : 0;
-}
-
-
-// Pages to grow a chunk ending at end by, wanted of them if there is room, else fewer but never
-// under needed: committed at the top of the heap if the chunk ends there, or else cut from the free
-// run starting at end. Returns how many; 0 if there is no room after the chunk.
-static uint32_t rc_pages_after(uint32_t end, uint32_t needed, uint32_t wanted)
-{
-    if (end == rc_mem.used_pages) {
-        return rc_pages_at_top(needed, wanted);
-    }
-    return rc_pool_take_at(end, needed, wanted);
-}
-
-
 // Grow the current chunk in place to at least pages pages, from the pages straight after it.
 // False if they are in use.
 static bool rc_arena_grow_chunk(rc_arena *a, uint32_t pages)
@@ -586,7 +727,7 @@ static bool rc_arena_grow_chunk(rc_arena *a, uint32_t pages)
     rc_chunk_header *h = rc_chunk(a->chunk);
     uint32_t needed = pages - h->pages;
     uint32_t wanted = rc_chunk_growth(h->pages, needed, rc_chunk(a->first)->min_pages);
-    uint32_t taken = rc_pages_after(a->chunk + h->pages, needed, wanted);
+    uint32_t taken = rc_locked_pages_after(a->chunk + h->pages, needed, wanted);
 
     if (taken == 0) {
         return false;
@@ -616,7 +757,7 @@ static void rc_arena_add_chunk(rc_arena *a, uint32_t need)
 {
     uint32_t pages = rc_pages_for(need + RC_HEADER);
     uint32_t min_pages = rc_chunk(a->first)->min_pages;
-    uint32_t page = rc_chunk_acquire_at_least(pages, pages > min_pages ? pages : min_pages);
+    uint32_t page = rc_locked_chunk(pages, pages > min_pages ? pages : min_pages);
 
     if (!page) {
         rc_arena_out_of_memory(need);
@@ -816,64 +957,23 @@ static void *rc_arena_realloc_impl(rc_arena *a, void *ptr, uint32_t old_size, ui
     return rc_arena_resize(a, ptr, old_size, new_size);
 }
 
-// ---- setting up ----
-
-// Take on a fresh reservation as the page heap; false if the reserve failed.
-static bool rc_arena_adopt_heap(rc_heap heap)
-{
-    if (!heap.limit) {
-        return false;
-    }
-
-    rc_mem = (rc_page_state) {
-        .base = heap.base,
-        .used_pages = heap.first,
-        .reserved_pages = heap.limit,
-        .pool = 0,
-        .spare_pages = 0,
-        .retained_pages = 0
-    };
-    return true;
-}
-
-
-// An arena on a first chunk of pages pages, which also sets the size it grows by.
-static rc_arena rc_arena_make_pages(uint32_t pages, uint32_t chunk_size)
-{
-    uint32_t first = rc_chunk_acquire(pages);
-
-    if (!first) {
-        rc_arena_out_of_memory(chunk_size);
-    }
-
-    rc_chunk(first)->min_pages = pages;
-    return (rc_arena) {
-        .first = first,
-        .chunk = first,
-        .top = RC_HEADER,
-        .end = rc_chunk_bytes(first)
-    };
-}
-
 // ---- public API ----
 
 bool rc_arena_init(void)
 {
-    if (rc_mem.reserved_pages) {
-        return true;
-    }
-
-    return rc_arena_adopt_heap(rc_heap_reserve());
+    return rc_locked_heap_ready();
 }
 
 
 void rc_arena_deinit(void)
 {
+    rc_mutex_lock(&rc_mem_lock);
     if (rc_mem.reserved_pages) {
         rc_heap_release(rc_mem.base);
     }
 
     rc_mem = (rc_page_state) {0};
+    rc_mutex_unlock(&rc_mem_lock);
 }
 
 
@@ -881,11 +981,6 @@ rc_arena rc_arena_make(uint32_t chunk_size)
 {
     uint32_t size = chunk_size ? chunk_size : RC_ARENA_DEFAULT_CHUNK;
     uint32_t pages = rc_pages_for(size);
-
-    // The page heap sets itself up on first use
-    if (!rc_arena_init()) {
-        rc_arena_out_of_memory(size);
-    }
 
     // Within a few KiB of 4 GiB, the largest chunk there can be is the closest
     return rc_arena_make_pages(pages < RC_MAX_CHUNK_PAGES ? pages : RC_MAX_CHUNK_PAGES, size);
@@ -896,7 +991,7 @@ void rc_arena_release(rc_arena *a)
 {
     RC_ASSERT(a);
 
-    rc_pool_release_chain(a->first);
+    rc_locked_release_chain(a->first);
     *a = (rc_arena) {0};
 }
 
@@ -1020,5 +1115,7 @@ void rc_arena_restore(rc_arena *a, rc_arena_mark mark)
 
 void rc_arena_set_oom_handler(rc_arena_oom_fn *fn)
 {
+    rc_mutex_lock(&rc_mem_lock);
     rc_oom_handler = fn;
+    rc_mutex_unlock(&rc_mem_lock);
 }

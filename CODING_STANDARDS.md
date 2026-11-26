@@ -474,6 +474,11 @@ the data, but the space it leaves stays allocated until the arena is reset.
 - **`rc_arena_save` and `rc_arena_restore` handle nested temporary work in one
   arena, and errors.** Restoring gives back everything since the mark, including
   space a growing array moved out of.
+- **Each thread works in arenas of its own.** They need no lock, as only
+  making, releasing and finding a chunk more room touch the shared page heap.
+  Share an `rc_arena_ts` only where allocations made on many threads must live
+  together; every call on it takes its lock. For a run of allocations, or for
+  code that takes an `rc_arena`, lock it once with `rc_arena_ts_lock`.
 
 ## Naming
 

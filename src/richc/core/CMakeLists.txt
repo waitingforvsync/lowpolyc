@@ -2,6 +2,7 @@
 
 add_library(richc STATIC
     src/arena.c
+    src/arena_ts.c
     src/bitset.c
     src/file.c
     src/hash.c
@@ -62,6 +63,7 @@ add_library(richc STATIC
     src/thread/thread.c
     src/thread/tls.c
     include/richc/arena.h
+    include/richc/arena_ts.h
     include/richc/array.template.h
     include/richc/bitset.h
     include/richc/bytes.h
