@@ -143,6 +143,58 @@ rc_str_pair rc_str_first_split(rc_str s, rc_str split_by);
 // Split around the last split_by. With no match, first is all of s and second is invalid.
 rc_str_pair rc_str_last_split(rc_str s, rc_str split_by);
 
+// ---- UTF-8 ----
+//
+// The text is UTF-8, walked a codepoint at a time by a cursor: a byte index, from 0 to the length.
+// Stepping either way gives the codepoint stepped over and where the cursor lands. Stepping
+// forward reads only the text after the cursor, and stepping back only the text before it, each as
+// if the string ended there, so a cursor in the middle of a character is never mended: the bytes
+// either side of it are just malformed. rc_str_utf8_floor and _ceil move a cursor to a character
+// boundary, for one that comes from elsewhere, such as a search.
+//
+// Malformed text never traps. Each maximal subpart of an ill-formed sequence (the longest start of
+// a well-formed one, or else a single byte) is one step, giving RC_CODEPOINT_NONE, as the Unicode
+// Standard recommends, so any text decodes to what browsers and Python give, once each
+// RC_CODEPOINT_NONE is U+FFFD. Overlong forms, surrogates and anything past U+10FFFF are malformed.
+
+// Where there is no codepoint: malformed text, or the end of the string.
+#define RC_CODEPOINT_NONE 0xFFFFFFFFu
+
+// U+FFFD, the codepoint that stands in for malformed text when it is shown.
+#define RC_CODEPOINT_REPLACEMENT 0xFFFDu
+
+// One step of a cursor through UTF-8.
+typedef struct rc_str_utf8_char {
+    uint32_t codepoint;  // the codepoint stepped over, or RC_CODEPOINT_NONE
+    uint32_t cursor;     // where the cursor lands
+} rc_str_utf8_char;
+
+// Step forward from cursor: the codepoint that starts there, and the index after it. At or past
+// the end: {RC_CODEPOINT_NONE, s.len}. Anywhere else, the cursor moves on by at least one byte.
+rc_str_utf8_char rc_str_utf8_next(rc_str s, uint32_t cursor);
+
+// Step back from cursor (clamped to the string): the codepoint that ends there, and the index it
+// starts at. At the start: {RC_CODEPOINT_NONE, 0}. Anywhere else, the cursor moves back by at
+// least one byte.
+rc_str_utf8_char rc_str_utf8_prev(rc_str s, uint32_t cursor);
+
+// The character boundary at or before index: the start of the character index falls in, or the
+// length if it is at or past the end.
+uint32_t rc_str_utf8_floor(rc_str s, uint32_t index);
+
+// The character boundary at or after index: the end of the character index falls in, if it is not
+// at its start, or the length if it is at or past the end.
+uint32_t rc_str_utf8_ceil(rc_str s, uint32_t index);
+
+// True if index is a character boundary, which the end of the string is, and past it is not.
+bool rc_str_utf8_is_boundary(rc_str s, uint32_t index);
+
+// True if all of s is well-formed UTF-8.
+bool rc_str_utf8_is_valid(rc_str s);
+
+// How many steps it takes to walk s: its codepoints, with each malformed part as one.
+uint32_t rc_str_utf8_count(rc_str s);
+
 // ---- conversion ----
 
 // s as a C string. If a null already follows the text, we hand back s.data itself; otherwise we

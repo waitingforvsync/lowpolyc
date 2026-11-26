@@ -142,6 +142,53 @@ void rc_mstr_append_char(rc_mstr *s, char c, rc_arena *arena)
 }
 
 
+// True if codepoint is one UTF-8 can hold: up to U+10FFFF, and no surrogate.
+static bool rc_mstr_is_scalar(uint32_t codepoint)
+{
+    if (codepoint > 0x10FFFF) {
+        return false;
+    }
+    return codepoint < 0xD800 || codepoint > 0xDFFF;
+}
+
+
+// How many bytes UTF-8 takes for c, a scalar.
+static uint32_t rc_mstr_utf8_len(uint32_t c)
+{
+    if (c < 0x80) {
+        return 1;
+    }
+
+    if (c < 0x800) {
+        return 2;
+    }
+    return c < 0x10000 ? 3 : 4;
+}
+
+
+void rc_mstr_append_utf8(rc_mstr *s, uint32_t codepoint, rc_arena *arena)
+{
+    uint32_t c = rc_mstr_is_scalar(codepoint) ? codepoint : RC_CODEPOINT_REPLACEMENT;
+    uint32_t len = rc_mstr_utf8_len(c);
+    char bytes[4] = {0};
+
+    if (len == 1) {
+        rc_mstr_append_char(s, (char)c, arena);
+        return;
+    }
+
+    // The lead byte has len high bits set, then the top bits of c; each continuation byte has 10
+    // and then six bits more
+    for (uint32_t i = len - 1; i > 0; i--) {
+        bytes[i] = (char)(0x80u | (c & 0x3Fu));
+        c >>= 6;
+    }
+
+    bytes[0] = (char)((0xFF00u >> len & 0xFFu) | c);
+    rc_mstr_append(s, rc_str_from_ptr(bytes, len), arena);
+}
+
+
 void rc_mstr_append_n(rc_mstr *s, char c, uint32_t n, rc_arena *arena)
 {
     RC_ASSERT(s);

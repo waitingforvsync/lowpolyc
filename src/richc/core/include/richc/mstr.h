@@ -79,6 +79,10 @@ void rc_mstr_append_char(rc_mstr *s, char c, rc_arena *arena);
 // Append n copies of c, for padding and rules.
 void rc_mstr_append_n(rc_mstr *s, char c, uint32_t n, rc_arena *arena);
 
+// Append codepoint in UTF-8, or U+FFFD in place of one there is none for: a surrogate, anything
+// past U+10FFFF, or RC_CODEPOINT_NONE.
+void rc_mstr_append_utf8(rc_mstr *s, uint32_t codepoint, rc_arena *arena);
+
 // Append a number in decimal.
 void rc_mstr_append_i32(rc_mstr *s, int32_t value, rc_arena *arena);
 void rc_mstr_append_i64(rc_mstr *s, int64_t value, rc_arena *arena);

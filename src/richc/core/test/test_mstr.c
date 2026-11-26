@@ -382,6 +382,67 @@ RC_TEST_STEP(mstr, append_char_growth, fix)
 }
 
 
+// The UTF-8 rc_mstr_append_utf8 writes for codepoint, in s, which is emptied first.
+static rc_str utf8_of(rc_mstr *s, uint32_t codepoint, rc_arena *arena)
+{
+    rc_mstr_reset(s);
+    rc_mstr_append_utf8(s, codepoint, arena);
+    return s->view;
+}
+
+
+RC_TEST_STEP(mstr, append_utf8, fix)
+{
+    // The first and last codepoints of each length, and either side of the surrogates
+    rc_mstr s = rc_mstr_make(0, &fix->a);
+
+    RC_CHECK(utf8_of(&s, 0x24, &fix->a), ==, RC_STR("$"));
+    RC_CHECK(utf8_of(&s, 0x7F, &fix->a), ==, RC_STR("\x7F"));
+    RC_CHECK(utf8_of(&s, 0x80, &fix->a), ==, RC_STR("\xC2\x80"));
+    RC_CHECK(utf8_of(&s, 0x7FF, &fix->a), ==, RC_STR("\xDF\xBF"));
+    RC_CHECK(utf8_of(&s, 0x800, &fix->a), ==, RC_STR("\xE0\xA0\x80"));
+    RC_CHECK(utf8_of(&s, 0xD7FF, &fix->a), ==, RC_STR("\xED\x9F\xBF"));
+    RC_CHECK(utf8_of(&s, 0xE000, &fix->a), ==, RC_STR("\xEE\x80\x80"));
+    RC_CHECK(utf8_of(&s, 0x20AC, &fix->a), ==, RC_STR("\xE2\x82\xAC"));
+    RC_CHECK(utf8_of(&s, 0xFFFF, &fix->a), ==, RC_STR("\xEF\xBF\xBF"));
+    RC_CHECK(utf8_of(&s, 0x10000, &fix->a), ==, RC_STR("\xF0\x90\x80\x80"));
+    RC_CHECK(utf8_of(&s, 0x10FFFF, &fix->a), ==, RC_STR("\xF4\x8F\xBF\xBF"));
+    RC_CHECK_TRUE(is_terminated(&s));
+}
+
+
+RC_TEST_STEP(mstr, append_utf8_zero, fix)
+{
+    rc_mstr s = rc_mstr_make(0, &fix->a);
+
+    rc_mstr_append_utf8(&s, 0, &fix->a);
+    RC_CHECK(s.len, ==, 1u);
+    RC_CHECK((uint32_t)s.data[0], ==, 0u);
+}
+
+
+RC_TEST_STEP(mstr, append_utf8_replaces_what_has_no_utf8, fix)
+{
+    rc_mstr s = rc_mstr_make(0, &fix->a);
+
+    RC_CHECK(utf8_of(&s, 0xD800, &fix->a), ==, RC_STR("\xEF\xBF\xBD"));
+    RC_CHECK(utf8_of(&s, 0xDFFF, &fix->a), ==, RC_STR("\xEF\xBF\xBD"));
+    RC_CHECK(utf8_of(&s, 0x110000, &fix->a), ==, RC_STR("\xEF\xBF\xBD"));
+    RC_CHECK(utf8_of(&s, RC_CODEPOINT_NONE, &fix->a), ==, RC_STR("\xEF\xBF\xBD"));
+}
+
+
+RC_TEST_STEP(mstr, append_utf8_appends, fix)
+{
+    rc_mstr s = rc_mstr_from_cstr("a", 0, &fix->a);
+
+    rc_mstr_append_utf8(&s, 0xA2, &fix->a);
+    rc_mstr_append_utf8(&s, 'b', &fix->a);
+    RC_CHECK(s.view, ==, RC_STR("a\xC2\xA2" "b"));
+    RC_CHECK_TRUE(is_terminated(&s));
+}
+
+
 RC_TEST_STEP(mstr, append_n, fix)
 {
     rc_mstr s = {0};

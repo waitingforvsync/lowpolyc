@@ -43,6 +43,7 @@ add_executable(richc_core_test
     test_str.c
     test_str_parse.c
     test_str_parse_float.c
+    test_str_utf8.c
     test_time.c
     test_upper_bound.c
     test_vec2f.c

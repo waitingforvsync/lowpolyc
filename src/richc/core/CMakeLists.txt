@@ -12,6 +12,7 @@ add_library(richc STATIC
     src/str.c
     src/str_parse.c
     src/str_parse_float.c
+    src/str_utf8.c
     src/zip/inflate.c
     src/math/acos_f32.c
     src/math/acos_f64.c

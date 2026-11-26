@@ -237,6 +237,13 @@ even between different arenas.
     and `ERANGE`. Underflow to zero or a subnormal is no error.
   - Floats are correctly rounded, as glibc's are, so the same text gives the
     same bits everywhere. Hex floats are base 16, or base 0 behind `0x`.
+- **New: UTF-8**, a codepoint at a time, by byte index.
+  `rc_str_utf8_next(s, cursor)` and `rc_str_utf8_prev(s, cursor)` return an
+  `rc_str_utf8_char`: the codepoint stepped over and where the cursor lands.
+  `rc_str_utf8_floor`, `_ceil` and `_is_boundary` move a cursor onto a
+  character boundary, and `rc_str_utf8_is_valid` and `_count` take the whole
+  string. Malformed text never traps: each maximal subpart is one step, as
+  `RC_CODEPOINT_NONE`, so a cursor in the middle of a character is never mended.
 - **Unchanged:** everything else, including the `find`, `split`, prefix and
   suffix functions and `rc_str_as_cstr`.
 
@@ -247,6 +254,8 @@ even between different arenas.
   `rc_mstr_append_f64` and `rc_float_format`. The text is what `snprintf`
   gives with `%.*g` or `%.*f`, except that NaN is always `nan`, never `-nan`.
 - **Lengths that would overflow `uint32_t` panic**, where they used to wrap.
+- **New:** `rc_mstr_append_utf8(s, codepoint, arena)`, which writes U+FFFD for
+  a surrogate, anything past U+10FFFF, or `RC_CODEPOINT_NONE`.
 - **Unchanged:** the other appends (integers, hex, chars), `make`, `from_str`,
   `from_cstr`, `reset`, `reserve` and `replace`.
 
