@@ -14,31 +14,15 @@ enum {
     RC_PRINT_PIECE = 1024
 };
 
-// How many leading bytes of text, at most max, end on a whole UTF-8 character.
-static uint32_t rc_print_whole_characters(rc_str text, uint32_t max)
-{
-    uint32_t len = text.len < max ? text.len : max;
-
-    // Back up over continuation bytes (10xxxxxx) to the start of the character the cut falls in
-    if (len < text.len) {
-        while (len > 0 && ((uint8_t)text.data[len] & 0xc0u) == 0x80u) {
-            len--;
-        }
-    }
-
-    return len;
-}
-
-
 // Write text to the console behind handle.
 static void rc_print_to_console(HANDLE handle, rc_str text)
 {
     wchar_t wide[RC_PRINT_PIECE] = {0};
 
     while (text.len > 0) {
-        // A malformed character would leave nothing whole to write, so take it alone
-        uint32_t whole = rc_print_whole_characters(text, RC_PRINT_PIECE);
-        uint32_t len = whole > 0 ? whole : 1;
+        // The piece ends where the character the cut falls in starts, which is never at 0, as a
+        // character is at most four bytes
+        uint32_t len = rc_str_utf8_floor(text, RC_PRINT_PIECE);
         int num = MultiByteToWideChar(CP_UTF8, 0, text.data, (int)len, wide, RC_PRINT_PIECE);
         DWORD written = 0;
 
