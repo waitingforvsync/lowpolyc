@@ -171,8 +171,15 @@ typedef struct rc_test {
 #define RC_CHECK_FALSE(a)   RC_CHECK_IMPL_(!(a), ==, true, __FILE__, __LINE__)
 
 // The fixed-width entries also cover plain int / unsigned literals. No long or char entries: on
-// LP64 int64_t is long, which would make _Generic ambiguous. Anything else integer, such as an
-// enum, which MSVC matches to no integer type, falls to the default and is checked as an int64_t.
+// LP64 int64_t is long, which would make _Generic ambiguous. An enum matches the integer type it
+// is compatible with, except on MSVC, which matches it to none, so there alone a default checks
+// it as an int64_t. Elsewhere any other type fails to compile.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define RC_CHECK_ENUM_ default: rc_test_check_int,
+#else
+#define RC_CHECK_ENUM_
+#endif
+
 #define RC_CHECK_IMPL_(a, op, b, file, line) \
     _Generic((a), \
         bool: rc_test_check_bool, \
@@ -192,8 +199,8 @@ typedef struct rc_test {
         rc_vec2f: rc_test_check_vec2f, \
         rc_vec3f: rc_test_check_vec3f, \
         rc_vec4f: rc_test_check_vec4f, \
-        rc_rational: rc_test_check_rational, \
-        default: rc_test_check_int \
+        RC_CHECK_ENUM_ \
+        rc_rational: rc_test_check_rational \
     )(a, #op, b, #a " " #op " " #b, file, line)
 
 // Check functions behind RC_CHECK, one per operand type.

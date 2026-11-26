@@ -48,8 +48,14 @@ if(MSVC)
     add_compile_options(/Zc:preprocessor /fp:precise /W4 /Gy /Gw)
     add_link_options($<$<NOT:$<CONFIG:Debug>>:/OPT:REF>)
 
-    # clang-cl takes richc's clang paths, whose floor, ceil, trunc and round-even builtins need
-    # SSE4.1 to be single instructions; without it they call functions MSVC's runtime lacks
+    # clang-cl takes richc's clang paths, so it needs clang's floating-point flags too, which it
+    # takes only through /clang:. Without them it fuses multiply-adds on ARM64.
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        add_compile_options(/clang:-ffp-contract=off /clang:-fno-math-errno)
+    endif()
+
+    # clang's floor, ceil, trunc and round-even builtins need SSE4.1 to be single instructions;
+    # without it they call functions MSVC's runtime lacks
     if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
         add_compile_options(-march=x86-64-v2)
     endif()

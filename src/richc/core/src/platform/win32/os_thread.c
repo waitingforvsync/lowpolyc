@@ -7,7 +7,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include "richc/macros.h"
 #include "richc/time.h"
 
 
@@ -49,7 +48,8 @@ void rc_os_thread_sleep_ns(uint64_t ns)
     // Sleep counts milliseconds, rounded up here, but follows the clock tick, so it can still end
     // a little early by the monotonic clock; sleep again for whatever is left
     for (uint64_t elapsed = 0; elapsed < ns; elapsed = rc_time_now_ns() - start) {
-        uint64_t ms = (ns - elapsed + 999999u) / 1000000u;
+        uint64_t left = ns - elapsed;
+        uint64_t ms = left / 1000000u + (left % 1000000u != 0 ? 1u : 0u);
 
         Sleep(ms < INFINITE ? (DWORD)ms : INFINITE - 1);
     }

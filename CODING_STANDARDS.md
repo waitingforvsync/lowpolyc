@@ -324,8 +324,10 @@ core. Nothing outside the platform backends knows which target it is running on.
   nothing starts a thread, as that gives the main thread its thread-local
   storage.
 - Floating point, every gcc/clang build including wasm: `-ffp-contract=off
-  -fno-math-errno`. Native x86-64 also uses `-march=x86-64-v2` (for SSE4.1).
-  MSVC: `/fp:precise`. See [Scalar math](#scalar-math) and
+  -fno-math-errno`, which clang-cl takes as `/clang:-ffp-contract=off
+  /clang:-fno-math-errno`, as it ignores them otherwise. Native x86-64 also
+  uses `-march=x86-64-v2` (for SSE4.1), clang-cl included. MSVC:
+  `/fp:precise`. See [Scalar math](#scalar-math) and
   [Floating point](#floating-point).
 - MSVC also needs `/Zc:preprocessor` (CMake adds `/std:c17`).
 - The wasm build gathers the web page in `<build>/site`: `lowpoly.wasm` plus
@@ -341,6 +343,10 @@ core. Nothing outside the platform backends knows which target it is running on.
   It deploys both wasm builds' sites, laid together, to GitHub Pages, which
   cannot send the isolating headers, so there the page always runs the build
   without threads.
+- Every push to any branch runs `.github/workflows/ci.yml`, which builds core
+  and shader and runs their tests on macOS (Apple Silicon), Windows with MSVC
+  (debug and release) and clang-cl, Linux ARM64 with clang (release), Linux
+  x64 with gcc (release), and Linux x64 under ThreadSanitizer.
 - Dead-code stripping: gcc/clang native use `-ffunction-sections
   -fdata-sections` with `--gc-sections` (Linux) or `-dead_strip` (macOS);
   MSVC `/Gy /Gw` with `/OPT:REF`. wasm-ld strips unused functions by default.
@@ -348,7 +354,12 @@ core. Nothing outside the platform backends knows which target it is running on.
   called, whatever the linker.
 - Warnings: clang/gcc `-Wall -Wextra -Wpedantic`, plus `-Wconversion`,
   `-Wshadow` and `-Wdouble-promotion`; MSVC `/W4`. The tree builds
-  warning-free on all three compilers.
+  warning-free on all three compilers. CI makes warnings errors
+  (`CMAKE_COMPILE_WARNING_AS_ERROR`); local builds leave them as warnings, so
+  work in progress still builds.
+- One warning is off: MSVC's C4189, for anything that links `richc_test`.
+  `RC_CHECK`'s `_Generic` never evaluates its operand, but MSVC still makes any
+  compound literal in it (every `RC_STR`) and warns that it goes unused.
 
 ## Ground rules
 
@@ -748,11 +759,6 @@ callback is handed the container.
 2. **Geometry precision.** The TypeScript editor uses doubles throughout. richc
    math is `float` only. Does the lowpoly document store `f32` or `f64`
    positions? Does core need `vec3d`-style types?
-3. **`-Werror`.** On for all builds, or CI only?
-4. **Windows on ARM.** The MSVC path of the instruction-backed math uses SSE
+3. **Windows on ARM.** The MSVC path of the instruction-backed math uses SSE
    intrinsics, which are x64 only. ARM64 Windows would need a NEON path. In
    scope?
-5. **MSVC verification.** There is no MSVC on this machine. The C17
-   shims above (`_Noreturn`, `_Static_assert`) and the MSVC math
-   path and flags are written from documentation, not tested. A Windows CI
-   build from the first commit would confirm both.

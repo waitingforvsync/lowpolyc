@@ -16,8 +16,8 @@
 static const uint64_t rc_futex_longest_ns = (uint64_t)(INFINITE - 1) * 1000000u;
 
 
-// Wait once for timeout_ns, which is not over rc_futex_longest_ns, returning false if Windows says
-// it ran out.
+// Wait once for timeout_ns, which is RC_FUTEX_FOREVER or not over rc_futex_longest_ns, returning
+// false if Windows says it ran out.
 static bool rc_futex_wait_os(rc_atomic_u32 *word, uint32_t expected, uint64_t timeout_ns)
 {
     // Rounding up keeps a short timeout from becoming 0

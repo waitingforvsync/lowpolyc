@@ -30,25 +30,33 @@ enum {
 };
 
 
+// How many workers run_workers started, once it has started them all, and UINT32_MAX until then.
+static rc_atomic_u32 workers_started;
+
+
 // Start WORKERS threads running fn, each with its own context, from contexts spaced size bytes
 // apart, and join them all. Returns false if any would not start.
 static bool run_workers(void (*fn)(void *), void *contexts, uint32_t size)
 {
     rc_thread threads[WORKERS] = {0};
-    bool started = true;
+    uint32_t started = 0;
 
+    rc_atomic_u32_store(&workers_started, UINT32_MAX, RC_MEMORY_ORDER_RELAXED);
     for (uint32_t i = 0; i < WORKERS; i++) {
         threads[i] = rc_thread_make(fn, (uint8_t *)contexts + i * size);
-        started = started && rc_thread_is_valid(threads[i]);
+        if (rc_thread_is_valid(threads[i])) {
+            started++;
+        }
     }
 
+    rc_atomic_u32_store(&workers_started, started, RC_MEMORY_ORDER_RELAXED);
     for (uint32_t i = 0; i < WORKERS; i++) {
         if (rc_thread_is_valid(threads[i])) {
             rc_thread_join(&threads[i]);
         }
     }
 
-    return started;
+    return started == WORKERS;
 }
 
 
@@ -69,8 +77,8 @@ static rc_atomic_u32 recorded;
 
 
 // Record that this worker ran, its id, and that its thread-local counter starts from zero, then
-// wait for every worker to do the same. An id is only different from those of threads running at
-// the same time, and a thread that had finished could pass its own on.
+// wait for every worker that started to do the same. An id is only different from those of
+// threads running at the same time, and a thread that had finished could pass its own on.
 static void record_self(void *context)
 {
     worker_record *record = context;
@@ -83,7 +91,7 @@ static void record_self(void *context)
     record->id = rc_thread_current_id();
     record->local_count = local_count;
     (void)rc_atomic_u32_fetch_add(&recorded, 1, RC_MEMORY_ORDER_RELAXED);
-    while (rc_atomic_u32_load(&recorded, RC_MEMORY_ORDER_RELAXED) < WORKERS) {
+    while (rc_atomic_u32_load(&recorded, RC_MEMORY_ORDER_RELAXED) < rc_atomic_u32_load(&workers_started, RC_MEMORY_ORDER_RELAXED)) {
         rc_thread_yield();
     }
 }

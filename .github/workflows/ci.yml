@@ -1,8 +1,9 @@
-# Builds richc's core and shader libraries and runs their tests on the targets deploy.yml does not
-# cover: macOS on Apple Silicon, Windows with MSVC and clang-cl, Linux on ARM64, and Linux x64
-# under ThreadSanitizer. The app layer and lowpoly are left out (RICHC_BUILD_APP=OFF), as their
-# macOS and Windows backends are not written yet. The tests run as part of each build, so a
-# failing test fails the job.
+# Builds richc's core and shader libraries and runs their tests on every push: macOS on Apple
+# Silicon, Windows with MSVC and clang-cl, Linux ARM64 with clang, Linux x64 with gcc, and Linux
+# x64 under ThreadSanitizer. deploy.yml covers wasm and Linux x64 with clang, on main alone. The
+# app layer and lowpoly are left out (RICHC_BUILD_APP=OFF), as their macOS and Windows backends
+# are not written yet. The tests run as part of each build, so a failing test fails the job, and
+# here a warning does too.
 name: CI
 
 on:
@@ -11,10 +12,24 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes a run still going
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_VERSION: 21
+
 jobs:
   macos:
     name: macOS (deployment target ${{ matrix.deployment }})
+    # A pull request from this repository has run already, on its push
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: macos-15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -26,18 +41,26 @@ jobs:
 
       - name: Build and test
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRICHC_BUILD_APP=OFF \
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRICHC_BUILD_APP=OFF -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ matrix.deployment }}
           cmake --build build
 
   windows:
-    name: Windows (${{ matrix.toolset }})
+    name: Windows (${{ matrix.toolset }}, ${{ matrix.config }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: windows-2025
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         # MSVC's own compiler takes richc's MSVC paths; clang-cl takes the clang ones
-        toolset: [MSVC, ClangCL]
+        include:
+          - toolset: MSVC
+            config: Debug
+          - toolset: MSVC
+            config: Release
+          - toolset: ClangCL
+            config: Debug
     steps:
       - uses: actions/checkout@v5
 
@@ -48,30 +71,35 @@ jobs:
           if [ "${{ matrix.toolset }}" = ClangCL ]; then
             toolset=(-T ClangCL)
           fi
-          # No -G: CMake picks the newest Visual Studio the runner has
-          cmake -S . -B build -A x64 "${toolset[@]}" -DRICHC_BUILD_APP=OFF
-          cmake --build build --config Debug
+          cmake -S . -B build -A x64 "${toolset[@]}" -DRICHC_BUILD_APP=OFF -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+          cmake --build build --config ${{ matrix.config }}
 
-  linux:
+  linux-clang:
     name: Linux (${{ matrix.name }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: ARM64, gcc
+          - name: ARM64, clang, Release
             runner: ubuntu-24.04-arm
-            compiler: gcc
+            config: Release
             flags: ''
           - name: x64, ThreadSanitizer
             runner: ubuntu-24.04
-            compiler: clang
+            config: Debug
             flags: -fsanitize=thread -O1
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Ninja
-        run: sudo apt-get install -y ninja-build
+      # clang from apt.llvm.org, as the runner's own is older; its runtimes include ThreadSanitizer's
+      - name: Install LLVM and Ninja
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh "$LLVM_VERSION"
+          sudo apt-get install -y "libclang-rt-$LLVM_VERSION-dev" ninja-build
 
       # ThreadSanitizer cannot map its shadow memory with the kernel's full address randomisation
       - name: Narrow address randomisation for ThreadSanitizer
@@ -80,6 +108,29 @@ jobs:
 
       - name: Build and test
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.compiler }} -DCMAKE_BUILD_TYPE=Debug \
-            -DRICHC_BUILD_APP=OFF -DCMAKE_C_FLAGS="${{ matrix.flags }}" -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER="clang-$LLVM_VERSION" -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DRICHC_BUILD_APP=OFF -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_C_FLAGS="${{ matrix.flags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+          cmake --build build
+
+  linux-gcc:
+    name: Linux (x64, gcc, Release)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Ubuntu 24.04's gcc stops at 14, short of the 15 richc needs
+    container: ubuntu:26.04
+    steps:
+      - name: Install gcc, CMake and Ninja
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc cmake ninja-build git
+          gcc --version
+
+      - uses: actions/checkout@v5
+
+      - name: Build and test
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Release -DRICHC_BUILD_APP=OFF \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
           cmake --build build
