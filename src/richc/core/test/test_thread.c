@@ -64,8 +64,13 @@ typedef struct worker_record {
 
 static RC_THREAD_LOCAL uint32_t local_count;
 
+// Workers that have recorded themselves, so each can wait for the rest.
+static rc_atomic_u32 recorded;
 
-// Record that this worker ran, its id, and that its thread-local counter starts from zero.
+
+// Record that this worker ran, its id, and that its thread-local counter starts from zero, then
+// wait for every worker to do the same. An id is only different from those of threads running at
+// the same time, and a thread that had finished could pass its own on.
 static void record_self(void *context)
 {
     worker_record *record = context;
@@ -77,6 +82,10 @@ static void record_self(void *context)
     record->ran = 1;
     record->id = rc_thread_current_id();
     record->local_count = local_count;
+    (void)rc_atomic_u32_fetch_add(&recorded, 1, RC_MEMORY_ORDER_RELAXED);
+    while (rc_atomic_u32_load(&recorded, RC_MEMORY_ORDER_RELAXED) < WORKERS) {
+        rc_thread_yield();
+    }
 }
 
 
@@ -84,6 +93,7 @@ RC_TEST_THREADS(thread, every_worker_runs_with_its_own_locals)
 {
     worker_record records[WORKERS] = {0};
 
+    rc_atomic_u32_store(&recorded, 0, RC_MEMORY_ORDER_RELAXED);
     local_count = 7;
     RC_CHECK_TRUE(run_workers(record_self, records, sizeof(records[0])));
     for (uint32_t i = 0; i < WORKERS; i++) {
