@@ -1,0 +1,84 @@
+# Builds richc's core and shader libraries and runs their tests on the targets deploy.yml does not
+# cover: macOS on Apple Silicon, Windows with MSVC and clang-cl, Linux on ARM64, and Linux x64
+# under ThreadSanitizer. The app layer and lowpoly are left out (RICHC_BUILD_APP=OFF), as their
+# macOS and Windows backends are not written yet. The tests run as part of each build, so a
+# failing test fails the job.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS (deployment target ${{ matrix.deployment }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 15.0 uses os_sync alone; 13.0 also compiles in the __ulock fallback, though os_sync is
+        # what runs on this runner
+        deployment: ['15.0', '13.0']
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRICHC_BUILD_APP=OFF \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ matrix.deployment }}
+          cmake --build build
+
+  windows:
+    name: Windows (${{ matrix.toolset }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        # MSVC's own compiler takes richc's MSVC paths; clang-cl takes the clang ones
+        toolset: [MSVC, ClangCL]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test
+        shell: bash
+        run: |
+          toolset=()
+          if [ "${{ matrix.toolset }}" = ClangCL ]; then
+            toolset=(-T ClangCL)
+          fi
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "${toolset[@]}" -DRICHC_BUILD_APP=OFF
+          cmake --build build --config Debug
+
+  linux:
+    name: Linux (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ARM64, gcc
+            runner: ubuntu-24.04-arm
+            compiler: gcc
+            flags: ''
+          - name: x64, ThreadSanitizer
+            runner: ubuntu-24.04
+            compiler: clang
+            flags: -fsanitize=thread -O1
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Ninja
+        run: sudo apt-get install -y ninja-build
+
+      # ThreadSanitizer cannot map its shadow memory with the kernel's full address randomisation
+      - name: Narrow address randomisation for ThreadSanitizer
+        if: contains(matrix.flags, 'thread')
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Build and test
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.compiler }} -DCMAKE_BUILD_TYPE=Debug \
+            -DRICHC_BUILD_APP=OFF -DCMAKE_C_FLAGS="${{ matrix.flags }}" -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+          cmake --build build
