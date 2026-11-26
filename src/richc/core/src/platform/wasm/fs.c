@@ -4,7 +4,7 @@
 // the store. The page fills it before the module reads and takes saved files from it, so no call
 // here ever waits.
 
-#include "fs.h"
+#include "platform/fs.h"
 
 // The handle of an opened file (above 0), or minus its rc_file_error.
 __attribute__((import_module("richc"), import_name("fs_open")))

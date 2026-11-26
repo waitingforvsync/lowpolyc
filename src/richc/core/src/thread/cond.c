@@ -7,7 +7,7 @@
 
 #include "richc/thread/cond.h"
 
-#include "futex.h"
+#include "platform/futex.h"
 
 
 // Wait for a signal or timeout_ns, returning false if the time ran out.

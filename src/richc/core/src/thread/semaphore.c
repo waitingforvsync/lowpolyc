@@ -7,7 +7,7 @@
 
 #include "richc/thread/semaphore.h"
 
-#include "futex.h"
+#include "platform/futex.h"
 #include "richc/thread/spinlock.h"
 #include "richc/time.h"
 

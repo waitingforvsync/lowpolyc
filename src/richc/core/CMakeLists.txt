@@ -148,15 +148,15 @@ add_library(richc STATIC
     include/richc/thread/private/atomic_msvc.template.h
     include/richc/zip/inflate.h
     src/float_big.h
-    src/fs.h
-    src/futex.h
-    src/heap.h
-    src/os_thread.h
     src/str_parse.h
     src/math/arc.h
     src/math/exp_log_f32.h
     src/math/exp_log_f64.h
     src/math/trig.h
+    src/platform/fs.h
+    src/platform/futex.h
+    src/platform/heap.h
+    src/platform/os_thread.h
 )
 
 target_include_directories(richc

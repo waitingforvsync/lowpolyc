@@ -3,7 +3,7 @@
 // Windows. The page heap is one large reservation of address space, committed a run of pages at a
 // time as it grows, and decommitted the same way.
 
-#include "heap.h"
+#include "platform/heap.h"
 
 #include "richc/macros.h"
 

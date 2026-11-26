@@ -1,4 +1,4 @@
-// gl_context.h
+// platform/gl_context.h
 //
 // Private to richc_app: an OpenGL ES 3.0 context and the app window it draws to, for the GL
 // backend. Each platform implements it: EGL on X11, and WebGL2 on wasm.
@@ -7,8 +7,8 @@
 // in. The fields are the platform's own handles, and {0} is none. Everything that can fail
 // reports why through rc_print_err.
 
-#ifndef RC_APP_GL_CONTEXT_H_
-#define RC_APP_GL_CONTEXT_H_
+#ifndef RC_APP_PLATFORM_GL_CONTEXT_H_
+#define RC_APP_PLATFORM_GL_CONTEXT_H_
 
 #include "richc/macros.h"
 
@@ -45,4 +45,4 @@ void rc_gl_window_release(rc_gl_window *window, const rc_gl_context *context);
 // Show what has been drawn, waiting for the display.
 void rc_gl_window_present(rc_gl_window window, const rc_gl_context *context);
 
-#endif // RC_APP_GL_CONTEXT_H_
+#endif // RC_APP_PLATFORM_GL_CONTEXT_H_

@@ -7,7 +7,7 @@
 // Without threads, nothing else can change the word or wake a sleeper, so a wait with a timeout
 // passes the time, and a wait without one would never end.
 
-#include "futex.h"
+#include "platform/futex.h"
 
 #include "richc/time.h"
 

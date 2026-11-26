@@ -5,8 +5,8 @@ add_library(richc_app STATIC
     include/richc/app/app.h
     include/richc/app/keys.h
     include/richc/gfx/gfx.h
-    src/gl_context.h
     src/keys.h
+    src/platform/gl_context.h
 )
 
 target_include_directories(richc_app

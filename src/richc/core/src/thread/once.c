@@ -6,7 +6,7 @@
 
 #include "richc/thread/once.h"
 
-#include "futex.h"
+#include "platform/futex.h"
 
 enum {
     RC_ONCE_NOT_RUN = 0,

@@ -2,7 +2,7 @@
 //
 // The GL context on X11, through EGL: an OpenGL ES 3.0 context, and a surface on the app window.
 
-#include "gl_context.h"
+#include "platform/gl_context.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>

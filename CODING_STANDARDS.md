@@ -235,18 +235,18 @@ All contact with the outside world goes through one small platform interface in
 core. Nothing outside the platform backends knows which target it is running on.
 
 - The interface is a set of private headers of plain functions, one per
-  capability, in core's `src/` (`heap.h` for page reservation and commit;
-  later monotonic time, debug output and so on). It should stay as small as
-  possible: one function per primitive capability, with richc building
-  everything else on top.
+  capability, in core's `src/platform/` (`platform/heap.h` for page
+  reservation and commit, `platform/fs.h` for files, and so on), included as
+  `"platform/heap.h"`. It should stay as small as possible: one function per
+  primitive capability, with richc building everything else on top.
 - Each header is implemented once per target, in a file of the same name under
-  `src/platform/<target>/`: `posix`, `win32`, `wasm` (so `heap.h` is
+  `src/platform/<target>/`: `posix`, `win32`, `wasm` (so `platform/heap.h` is
   implemented by `src/platform/posix/heap.c` and its siblings). The build
   compiles one target's directory. No vtables and no runtime dispatch, the
   same rule the gfx backends follow.
 - Where Linux and macOS differ, the header is implemented in `linux` and
-  `macos` instead of `posix`. So far that is only `futex.h`, the one call the
-  locks in `thread/` are built on.
+  `macos` instead of `posix`. So far that is only `platform/futex.h`, the one
+  call the locks in `thread/` are built on.
 - The app layer follows the same pattern, but names its targets by windowing
   system, since macOS is POSIX but not X11: `src/platform/x11/app.c` and
   `src/platform/wasm/app.c` both implement `rc_app_run` from `app.h`. The X11

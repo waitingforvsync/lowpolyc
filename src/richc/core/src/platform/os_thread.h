@@ -1,11 +1,11 @@
-// os_thread.h
+// platform/os_thread.h
 //
 // The OS's threads, under thread/thread.c, which keeps the table of them. Private to core, and
 // implemented once per target in platform/<target>/os_thread.c: pthreads on Linux and macOS,
 // CreateThread on Windows, and on wasm, with one thread, nothing to start.
 
-#ifndef RC_OS_THREAD_H_
-#define RC_OS_THREAD_H_
+#ifndef RC_PLATFORM_OS_THREAD_H_
+#define RC_PLATFORM_OS_THREAD_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -29,4 +29,4 @@ uint32_t rc_os_thread_core_count(void);
 // What every thread started by rc_os_thread_start runs, in thread/thread.c.
 void rc_thread_run_(void *slot);
 
-#endif // RC_OS_THREAD_H_
+#endif // RC_PLATFORM_OS_THREAD_H_

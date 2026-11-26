@@ -1,4 +1,4 @@
-// fs.h
+// platform/fs.h
 //
 // The platform's view of files: open one to read, write one whole, delete one, and ask whether one
 // exists. Private to core, and implemented once per target in platform/<target>/fs.c, chosen by the
@@ -7,8 +7,8 @@
 // Paths are UTF-8 with no terminator, and hold no null byte: file.c turns those away. A path too
 // long for the platform is RC_FILE_ERROR_BAD_NAME. Errors are rc_file_error values.
 
-#ifndef RC_FS_H_
-#define RC_FS_H_
+#ifndef RC_PLATFORM_FS_H_
+#define RC_PLATFORM_FS_H_
 
 #include "richc/file.h"
 
@@ -38,4 +38,4 @@ rc_file_error rc_fs_delete(rc_str path);
 // True if path names a file, not a directory.
 bool rc_fs_exists(rc_str path);
 
-#endif // RC_FS_H_
+#endif // RC_PLATFORM_FS_H_

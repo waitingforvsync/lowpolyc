@@ -12,7 +12,7 @@
 #ifndef RC_APP_GL_H_
 #define RC_APP_GL_H_
 
-#include "gl_context.h"
+#include "platform/gl_context.h"
 
 // ---- types ----
 

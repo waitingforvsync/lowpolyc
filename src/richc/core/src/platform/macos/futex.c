@@ -4,7 +4,7 @@
 // __ulock, which is private to libSystem but has been there since 10.12, and is what libc++'s
 // atomic wait uses.
 
-#include "futex.h"
+#include "platform/futex.h"
 
 #include <errno.h>
 

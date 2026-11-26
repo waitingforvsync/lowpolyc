@@ -4,7 +4,7 @@
 // module starts, and its GL functions are imports. So there is little to do here. The context and
 // the window are ids standing for gl.js's objects.
 
-#include "gl_context.h"
+#include "platform/gl_context.h"
 
 #include "richc/print.h"
 

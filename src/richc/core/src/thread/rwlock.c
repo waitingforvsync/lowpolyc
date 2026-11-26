@@ -10,7 +10,7 @@
 
 #include "richc/thread/rwlock.h"
 
-#include "futex.h"
+#include "platform/futex.h"
 #include "richc/thread/spinlock.h"
 
 #define RC_RWLOCK_READ_LOCKED 1u

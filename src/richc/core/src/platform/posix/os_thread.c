@@ -5,7 +5,7 @@
 // sysconf's _SC_NPROCESSORS_ONLN is not in POSIX
 #define _DEFAULT_SOURCE
 
-#include "os_thread.h"
+#include "platform/os_thread.h"
 
 #include <errno.h>
 #include <pthread.h>

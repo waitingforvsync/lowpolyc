@@ -7,7 +7,7 @@
 // the next reserve hands the same pages out again. richc must be the only thing that grows memory,
 // or the heap would not be contiguous.
 
-#include "heap.h"
+#include "platform/heap.h"
 
 #include <stddef.h>
 

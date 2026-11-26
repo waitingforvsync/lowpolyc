@@ -10,7 +10,7 @@
 // Without threads, no thread can start and there is nothing to yield to, and a sleep can only
 // pass the time.
 
-#include "os_thread.h"
+#include "platform/os_thread.h"
 
 #include "richc/macros.h"
 #include "richc/time.h"
@@ -20,7 +20,7 @@
 #include <stdalign.h>
 #include <stddef.h>
 
-#include "futex.h"
+#include "platform/futex.h"
 #include "richc/thread/thread.h"
 #include "wasm_thread.h"
 

@@ -2,7 +2,7 @@
 //
 // Windows, with WaitOnAddress from Windows 8 on, in Synchronization.lib.
 
-#include "futex.h"
+#include "platform/futex.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

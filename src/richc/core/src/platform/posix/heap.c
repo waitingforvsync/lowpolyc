@@ -6,7 +6,7 @@
 // MAP_ANONYMOUS is a glibc extension under a strict -std
 #define _DEFAULT_SOURCE
 
-#include "heap.h"
+#include "platform/heap.h"
 
 #include <stddef.h>
 #include <sys/mman.h>

@@ -4,7 +4,7 @@
 
 #include "richc/file.h"
 
-#include "fs.h"
+#include "platform/fs.h"
 
 // True if path holds no null byte, which would cut it short for the platform.
 static bool rc_file_is_name(rc_str path)

@@ -7,7 +7,7 @@
 
 #include "richc/thread/thread.h"
 
-#include "os_thread.h"
+#include "platform/os_thread.h"
 #include "richc/thread/mutex.h"
 
 // One thread's slot.

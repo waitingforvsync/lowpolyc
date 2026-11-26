@@ -6,7 +6,7 @@
 
 #include "richc/thread/mutex.h"
 
-#include "futex.h"
+#include "platform/futex.h"
 #include "richc/thread/spinlock.h"
 
 enum {

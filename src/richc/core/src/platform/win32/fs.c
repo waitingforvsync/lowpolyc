@@ -4,7 +4,7 @@
 // on the stack. Paths past MAX_PATH (260 characters) need the program to be marked long-path aware
 // in its manifest.
 
-#include "fs.h"
+#include "platform/fs.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

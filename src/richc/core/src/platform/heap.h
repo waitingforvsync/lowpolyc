@@ -1,11 +1,11 @@
-// heap.h
+// platform/heap.h
 //
 // The page heap's view of memory: reserve address space, commit pages and give them back, and give
 // it all back. Private to core, and implemented once per target in platform/<target>/heap.c, chosen
 // by the build.
 
-#ifndef RC_HEAP_H_
-#define RC_HEAP_H_
+#ifndef RC_PLATFORM_HEAP_H_
+#define RC_PLATFORM_HEAP_H_
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -38,4 +38,4 @@ void rc_heap_decommit(uintptr_t base, uint32_t page, uint32_t count);
 // Give the whole reservation back; every page in it becomes invalid.
 void rc_heap_release(uintptr_t base);
 
-#endif // RC_HEAP_H_
+#endif // RC_PLATFORM_HEAP_H_

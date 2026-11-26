@@ -6,7 +6,7 @@
 // syscall is not in POSIX
 #define _DEFAULT_SOURCE
 
-#include "futex.h"
+#include "platform/futex.h"
 
 #include <errno.h>
 #include <limits.h>

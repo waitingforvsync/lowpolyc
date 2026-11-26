@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "heap.h"
+#include "platform/heap.h"
 #include "richc/mem.h"
 
 enum {
