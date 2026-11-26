@@ -21,9 +21,11 @@ add_custom_command(
     VERBATIM
 )
 
-# The tests reach richc_shader's private headers, to check each stage on its own
+# The tests reach richc_shader's private headers, to check each stage on its own. rc_add_shaders
+# has linked richc_shader already, and a second copy on the link line draws a warning from Apple's
+# linker.
 target_include_directories(richc_shader_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
-target_link_libraries(richc_shader_test PRIVATE richc_shader richc_test)
+target_link_libraries(richc_shader_test PRIVATE richc_test)
 
 # ---- run tests as a post-build step ----
 
