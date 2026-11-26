@@ -327,8 +327,8 @@ core. Nothing outside the platform backends knows which target it is running on.
   -fno-math-errno`, which clang-cl takes as `/clang:-ffp-contract=off
   /clang:-fno-math-errno`, as it ignores them otherwise. Native x86-64 also
   uses `-march=x86-64-v2` (for SSE4.1), clang-cl included. MSVC:
-  `/fp:precise`. See [Scalar math](#scalar-math) and
-  [Floating point](#floating-point).
+  `/fp:precise`, but not clang-cl, where it would turn contraction back on.
+  See [Scalar math](#scalar-math) and [Floating point](#floating-point).
 - MSVC also needs `/Zc:preprocessor` (CMake adds `/std:c17`).
 - The wasm build gathers the web page in `<build>/site`: `lowpoly.wasm` plus
   `src/lowpoly/web/`. A build with threads makes `lowpoly-threads.wasm`

@@ -124,7 +124,7 @@ jobs:
       - name: Install gcc, CMake and Ninja
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc cmake ninja-build git
+          DEBIAN_FRONTEND=noninteractive apt-get install -y gcc libc6-dev cmake ninja-build git
           gcc --version
 
       - uses: actions/checkout@v5

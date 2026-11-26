@@ -45,13 +45,16 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 if(MSVC)
-    add_compile_options(/Zc:preprocessor /fp:precise /W4 /Gy /Gw)
+    add_compile_options(/Zc:preprocessor /W4 /Gy /Gw)
     add_link_options($<$<NOT:$<CONFIG:Debug>>:/OPT:REF>)
 
-    # clang-cl takes richc's clang paths, so it needs clang's floating-point flags too, which it
-    # takes only through /clang:. Without them it fuses multiply-adds on ARM64.
+    # clang-cl takes richc's clang paths, so it needs clang's floating-point flags, which it takes
+    # only through /clang:; without them it fuses multiply-adds on ARM64. Its /fp:precise would
+    # turn contraction back on, and its model is precise already.
     if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
         add_compile_options(/clang:-ffp-contract=off /clang:-fno-math-errno)
+    else()
+        add_compile_options(/fp:precise)
     endif()
 
     # clang's floor, ceil, trunc and round-even builtins need SSE4.1 to be single instructions;
