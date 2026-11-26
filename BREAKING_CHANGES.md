@@ -185,8 +185,11 @@ even between different arenas.
 ## macros.h, ops.h and mem.h
 
 - **macros.h:**
-  - `RC_CONCAT`, `RC_STRINGIFY`, `RC_INDEX_NONE`, `RC_ASSERT`, `RC_PANIC` and
+  - `RC_CONCAT`, `RC_STRINGIFY`, `RC_INDEX_NONE`, `RC_PANIC` and
     `RC_UNREACHABLE` are unchanged.
+  - `RC_ASSERT`'s condition is no longer evaluated in release builds, so it
+    costs nothing there. A condition that does work, such as
+    `RC_ASSERT(rc_heap_commit(...))`, must move out of the assert.
   - `RC_PANIC` on MSVC uses `__fastfail` rather than `__debugbreak`, so it
     cannot be continued past. clang-cl now takes the clang path.
   - New: `RC_STATIC_ASSERT` and `RC_NORETURN`. It now includes `<float.h>`,
@@ -576,7 +579,7 @@ unchanged, apart from compare-exchange.
 | Old | New | Notes |
 |---|---|---|
 | `rc_atomic_t_compare_exchange_strong(a, &expected, desired, success, failure)`, returning `bool` | `rc_atomic_t_compare_exchange(a, expected, desired, order)`, returning the value it held | the swap happened if that equals `expected`; a failed swap is ordered as `order` allows a load (acquire for `ACQ_REL`, relaxed for `RELEASE`) |
-| `rc_atomic_t_compare_exchange_weak` | `rc_atomic_t_compare_exchange` | wasm, x64 and ARM64 with LSE have only a strong compare-exchange, so a weak one saved nothing |
+| `rc_atomic_t_compare_exchange_weak` | `rc_atomic_t_compare_exchange` | wasm, x64 and ARM64 with LSE have only a strong compare-exchange; ARM without LSE pays an inner retry loop, which a retry loop of its own hardly notices |
 | `rc_atomic_flag`, `_test_and_set`, `_clear` | `rc_atomic_bool`, `_exchange(f, true, order)`, `_store(f, false, order)` | |
 | none | `rc_atomic_t_make(value)` | for initialising an atomic to something other than zero |
 | `rc_spinlock_trylock` | `rc_spinlock_try_lock` | |
@@ -617,6 +620,13 @@ OS object behind them. A zeroed one is ready to use, and nothing needs freeing.
   waits, so a thread must not take a read lock it already holds, which could
   wait forever behind a writer that waits on it. The old lock was the OS's
   own, and glibc's puts readers first.
+- **Freeing a lock:** a semaphore may be freed as soon as a wait on it
+  returns, and a mutex as soon as it is unlocked for the last time. An
+  `rc_rwlock` may be freed only once every thread that used it has finished
+  unlocking it, as an unlock goes on touching it briefly to wake waiters.
+- **Change what an `rc_cond`'s waiters wait for with the mutex held,** as
+  with pthreads, or a signal can miss a waiter that had not yet begun to
+  wait. A signal or broadcast with nobody waiting makes no syscall.
 - **On single-threaded wasm, a wait with no timeout that nothing could end
   panics,** and a wait with a timeout passes the time. The old locks did not
   build for wasm.
@@ -640,8 +650,9 @@ key is likewise a slot in a thread-local array, with no OS key behind it.
 | `rc_tls_create()` | `rc_tls_make()` | |
 | `rc_tls_destroy(&key)` | `rc_tls_release(&key)` | also zeroes `key` |
 
-- **Every thread gets a 256 KiB stack** (`RC_THREAD_STACK_SIZE`) on every
-  target, where the OS defaults ranged from 512 KiB to 8 MiB.
+- **Every thread asks for a 256 KiB stack** (`RC_THREAD_STACK_SIZE`) on
+  every target, where the OS defaults ranged from 512 KiB to 8 MiB. Linux and
+  Windows take a guard page, and glibc its thread-local storage, out of it.
 - **At most `RC_THREAD_MAX` (256) threads** can be started and not yet joined,
   and **at most `RC_TLS_MAX` (64) TLS keys** can exist at once; making one
   more key traps.
@@ -652,7 +663,10 @@ key is likewise a slot in a thread-local array, with no OS key behind it.
 - **`rc_thread_current_id` is the address of a thread-local,** not the OS's
   thread id, so it means nothing outside the process.
 - **On wasm without threads, `rc_thread_make` always fails,** and
-  `rc_thread_hardware_concurrency` is 1.
+  `rc_thread_hardware_concurrency` is 1. With threads, at most 16 threads run
+  at once, on a pool of workers, and each has 4 KiB of thread-local storage.
+- **The arena's page heap is not thread-safe yet,** so only one thread at a
+  time may make, grow or release arenas.
 - **Unchanged:** `rc_thread_yield`, `rc_thread_sleep_ns`,
   `rc_thread_hardware_concurrency`, `rc_tls_get` and `rc_tls_set`.
 

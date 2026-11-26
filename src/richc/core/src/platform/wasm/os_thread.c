@@ -4,15 +4,14 @@
 // (threads.js) starts before the module runs, as a browser starts a worker only once the page's
 // main thread has returned to it. Each worker instantiates the module on the same shared memory,
 // sets its stack pointer, and calls rc_wasm_thread_worker, which never returns: it sleeps until a
-// thread is handed to it, runs it, and waits for the next. Stacks and thread-local storage are
-// static, so a worker costs the heap nothing.
+// thread is handed to it, runs it on fresh thread-local storage, and waits for the next. Stacks
+// and thread-local storage are static, so a worker costs the heap nothing.
 //
 // Without threads, no thread can start and there is nothing to yield to, and a sleep can only
 // pass the time.
 
 #include "platform/os_thread.h"
 
-#include "richc/macros.h"
 #include "richc/time.h"
 
 #if defined(__wasm_atomics__)
@@ -21,16 +20,17 @@
 #include <stddef.h>
 
 #include "platform/futex.h"
+#include "platform/wasm/wasm_thread.h"
+#include "richc/mem.h"
 #include "richc/thread/thread.h"
-#include "wasm_thread.h"
 
 enum {
     RC_WASM_THREADS = 16,   // workers in the pool
     RC_WASM_TLS_MAX = 4096  // bytes of thread-local storage each thread may have
 };
 
-// A worker's state, which its handle's starter and joiner, and the worker itself, move it on
-// through in this order. Only the joiner makes a finished worker idle again.
+// A worker's state, which its thread's starter and joiner, and the worker itself, move on through
+// in this order. Only the joiner makes a finished worker idle again.
 enum {
     RC_WASM_WORKER_IDLE = 0,
     RC_WASM_WORKER_CLAIMED = 1,    // a starter has it, and is handing it a thread
@@ -41,8 +41,11 @@ enum {
 // One worker of the pool.
 typedef struct rc_wasm_worker {
     rc_atomic_u32 state;
-    void *slot;   // what to pass rc_thread_run_, set while claimed
+    uint32_t thread_index;   // the slot of the thread to run, set while claimed
 } rc_wasm_worker;
+
+// Written at the bottom of each worker's stack, where only an overflow would change it.
+static const uint32_t rc_wasm_stack_canary = 0x5afe57acu;
 
 static rc_wasm_worker rc_wasm_workers[RC_WASM_THREADS];
 static uint32_t rc_wasm_core_count = 1;
@@ -65,11 +68,23 @@ __attribute__((noinline)) static bool rc_wasm_tls_fits(size_t size, size_t align
 }
 
 
-// Give the calling thread its thread-local storage, at memory.
-static void rc_wasm_init_tls(uint8_t *memory)
+// Give the calling thread fresh thread-local storage, at memory, each variable at its initialiser
+// or zero, and say whether it may block.
+static void rc_wasm_init_thread(uint8_t *memory, bool may_block)
 {
     RC_PANIC(rc_wasm_tls_fits(__builtin_wasm_tls_size(), __builtin_wasm_tls_align()));
     __wasm_init_tls(memory);
+    rc_wasm_may_block = may_block;
+}
+
+
+// Whether worker index's stack canary is still there.
+static bool rc_wasm_stack_is_intact(uint32_t index)
+{
+    uint32_t canary = 0;
+
+    rc_memcpy(&canary, rc_wasm_stacks[index], sizeof(canary));
+    return canary == rc_wasm_stack_canary;
 }
 
 
@@ -79,8 +94,7 @@ static void rc_wasm_init_tls(uint8_t *memory)
 __attribute__((export_name("rc_wasm_threads_init")))
 uint32_t rc_wasm_threads_init(uint32_t cores, bool may_block)
 {
-    rc_wasm_init_tls(rc_wasm_tls[0]);
-    rc_wasm_may_block = may_block;
+    rc_wasm_init_thread(rc_wasm_tls[0], may_block);
     rc_wasm_core_count = cores > 0 ? cores : 1;
     return RC_WASM_THREADS;
 }
@@ -95,27 +109,38 @@ uintptr_t rc_wasm_thread_stack_top(uint32_t index)
 }
 
 
+// Run the thread handed to worker index, on thread-local storage set up afresh, so nothing of the
+// last thread's carries over. A thread that ran off the bottom of its stack traps in debug builds.
+static void rc_wasm_run_thread(uint32_t index)
+{
+    rc_wasm_worker *worker = &rc_wasm_workers[index];
+
+    rc_wasm_init_thread(rc_wasm_tls[index + 1], true);
+    rc_thread_run_(worker->thread_index);
+    RC_ASSERT(rc_wasm_stack_is_intact(index));
+    rc_atomic_u32_store(&worker->state, RC_WASM_WORKER_FINISHED, RC_MEMORY_ORDER_RELEASE);
+    rc_futex_wake_all(&worker->state);
+}
+
+
 // Run worker index for ever, once the host has set its stack pointer.
 __attribute__((export_name("rc_wasm_thread_worker")))
 void rc_wasm_thread_worker(uint32_t index)
 {
-    rc_wasm_worker *worker = &rc_wasm_workers[index];
-
     RC_PANIC(index < RC_WASM_THREADS);
-    rc_wasm_init_tls(rc_wasm_tls[index + 1]);
-    rc_wasm_may_block = true;
+    rc_wasm_init_thread(rc_wasm_tls[index + 1], true);
+    rc_memcpy(rc_wasm_stacks[index], &rc_wasm_stack_canary, sizeof(rc_wasm_stack_canary));
 
     for (;;) {
-        uint32_t state = rc_atomic_u32_load(&worker->state, RC_MEMORY_ORDER_ACQUIRE);
+        rc_atomic_u32 *state = &rc_wasm_workers[index].state;
+        uint32_t seen = rc_atomic_u32_load(state, RC_MEMORY_ORDER_ACQUIRE);
 
-        if (state != RC_WASM_WORKER_ASSIGNED) {
-            (void)rc_futex_wait(&worker->state, state, RC_FUTEX_FOREVER);
+        if (seen == RC_WASM_WORKER_ASSIGNED) {
+            rc_wasm_run_thread(index);
             continue;
         }
 
-        rc_thread_run_(worker->slot);
-        rc_atomic_u32_store(&worker->state, RC_WASM_WORKER_FINISHED, RC_MEMORY_ORDER_RELEASE);
-        rc_futex_wake_all(&worker->state);
+        (void)rc_futex_wait(state, seen, RC_FUTEX_FOREVER);
     }
 }
 
@@ -126,20 +151,23 @@ bool rc_wasm_thread_may_block(void)
 }
 
 
-uintptr_t rc_os_thread_start(void *slot, uint32_t stack_size)
+uintptr_t rc_os_thread_start(uint32_t index, uint32_t stack_size)
 {
     RC_ASSERT(stack_size == RC_THREAD_STACK_SIZE);
 
     for (uint32_t i = 0; i < RC_WASM_THREADS; i++) {
         rc_wasm_worker *worker = &rc_wasm_workers[i];
+        uint32_t found = rc_atomic_u32_compare_exchange(&worker->state, RC_WASM_WORKER_IDLE, RC_WASM_WORKER_CLAIMED,
+            RC_MEMORY_ORDER_ACQUIRE);
 
-        if (rc_atomic_u32_compare_exchange(&worker->state, RC_WASM_WORKER_IDLE, RC_WASM_WORKER_CLAIMED, RC_MEMORY_ORDER_ACQUIRE)
-            == RC_WASM_WORKER_IDLE) {
-            worker->slot = slot;
-            rc_atomic_u32_store(&worker->state, RC_WASM_WORKER_ASSIGNED, RC_MEMORY_ORDER_RELEASE);
-            rc_futex_wake_all(&worker->state);
-            return i + 1;
+        if (found != RC_WASM_WORKER_IDLE) {
+            continue;
         }
+
+        worker->thread_index = index;
+        rc_atomic_u32_store(&worker->state, RC_WASM_WORKER_ASSIGNED, RC_MEMORY_ORDER_RELEASE);
+        rc_futex_wake_all(&worker->state);
+        return i + 1;
     }
 
     return 0;
@@ -148,19 +176,16 @@ uintptr_t rc_os_thread_start(void *slot, uint32_t stack_size)
 
 void rc_os_thread_join(uintptr_t handle)
 {
-    rc_wasm_worker *worker = &rc_wasm_workers[handle - 1];
+    rc_atomic_u32 *state = &rc_wasm_workers[handle - 1].state;
+    uint32_t seen = rc_atomic_u32_load(state, RC_MEMORY_ORDER_ACQUIRE);
 
-    for (;;) {
-        uint32_t state = rc_atomic_u32_load(&worker->state, RC_MEMORY_ORDER_ACQUIRE);
-
-        if (state == RC_WASM_WORKER_FINISHED) {
-            break;
-        }
-        (void)rc_futex_wait(&worker->state, state, RC_FUTEX_FOREVER);
+    while (seen != RC_WASM_WORKER_FINISHED) {
+        (void)rc_futex_wait(state, seen, RC_FUTEX_FOREVER);
+        seen = rc_atomic_u32_load(state, RC_MEMORY_ORDER_ACQUIRE);
     }
 
     // The worker is waiting for its next thread already, so it needs no wake
-    rc_atomic_u32_store(&worker->state, RC_WASM_WORKER_IDLE, RC_MEMORY_ORDER_RELEASE);
+    rc_atomic_u32_store(state, RC_WASM_WORKER_IDLE, RC_MEMORY_ORDER_RELEASE);
 }
 
 
@@ -173,12 +198,10 @@ void rc_os_thread_sleep_ns(uint64_t ns)
 {
     rc_atomic_u32 never = {0};
     uint64_t start = rc_time_now_ns();
-    uint64_t elapsed = 0;
 
     // Nothing changes never, so each wait runs to its timeout, or spins there on the main thread
-    while (elapsed < ns) {
+    for (uint64_t elapsed = 0; elapsed < ns; elapsed = rc_time_now_ns() - start) {
         (void)rc_futex_wait(&never, 0, ns - elapsed);
-        elapsed = rc_time_now_ns() - start;
     }
 }
 
@@ -191,9 +214,9 @@ uint32_t rc_os_thread_core_count(void)
 #else
 
 
-uintptr_t rc_os_thread_start(void *slot, uint32_t stack_size)
+uintptr_t rc_os_thread_start(uint32_t index, uint32_t stack_size)
 {
-    (void)slot;
+    (void)index;
     (void)stack_size;
     return 0;
 }

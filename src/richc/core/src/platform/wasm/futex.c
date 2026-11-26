@@ -13,8 +13,15 @@
 
 #if defined(__wasm_atomics__)
 
+#include "platform/wasm/wasm_thread.h"
 #include "richc/thread/spinlock.h"
-#include "wasm_thread.h"
+
+
+// Whether a wait for timeout_ns that started at start has run out.
+static bool rc_futex_has_run_out(uint64_t start, uint64_t timeout_ns)
+{
+    return timeout_ns != RC_FUTEX_FOREVER && rc_time_now_ns() - start >= timeout_ns;
+}
 
 
 // Wait by looking at the word until it changes or the time runs out.
@@ -23,9 +30,10 @@ static bool rc_futex_spin(rc_atomic_u32 *word, uint32_t expected, uint64_t timeo
     uint64_t start = rc_time_now_ns();
 
     while (rc_atomic_u32_load(word, RC_MEMORY_ORDER_RELAXED) == expected) {
-        if (timeout_ns != RC_FUTEX_FOREVER && rc_time_now_ns() - start >= timeout_ns) {
+        if (rc_futex_has_run_out(start, timeout_ns)) {
             return false;
         }
+
         rc_spin_pause();
     }
 
@@ -35,15 +43,11 @@ static bool rc_futex_spin(rc_atomic_u32 *word, uint32_t expected, uint64_t timeo
 
 bool rc_futex_wait(rc_atomic_u32 *word, uint32_t expected, uint64_t timeout_ns)
 {
-    int64_t timeout = -1;
+    // A negative timeout is forever, and one too long to fit nearly is
+    int64_t timeout = timeout_ns < (uint64_t)INT64_MAX ? (int64_t)timeout_ns : -1;
 
     if (!rc_wasm_thread_may_block()) {
         return rc_futex_spin(word, expected, timeout_ns);
-    }
-
-    // A negative timeout is forever, and one too long to fit nearly is
-    if (timeout_ns < (uint64_t)INT64_MAX) {
-        timeout = (int64_t)timeout_ns;
     }
 
     // 0 woken, 1 the word had changed already, 2 timed out

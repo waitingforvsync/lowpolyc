@@ -35,7 +35,8 @@
 // ---- memory orders ----
 
 // How an atomic operation orders the memory accesses around it, as in C11. There is no consume,
-// which compilers treat as acquire anyway; the numbers match the __atomic builtins' own.
+// which compilers treat as acquire anyway. The numbers match the __atomic builtins' own, so the
+// first is RELAXED rather than NONE, and gcc and clang need no translation.
 typedef enum rc_memory_order {
     RC_MEMORY_ORDER_RELAXED = 0,
     RC_MEMORY_ORDER_ACQUIRE = 2,

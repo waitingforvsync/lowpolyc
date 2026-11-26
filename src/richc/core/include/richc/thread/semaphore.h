@@ -2,15 +2,21 @@
 //
 // A count that threads take from one at a time, sleeping while it is 0, and add to. A zeroed
 // rc_semaphore holds 0, rc_semaphore_make starts one at any other count, and none needs a deinit.
+// A waiter may free the semaphore as soon as its wait returns, even while the post that woke it is
+// still returning.
 
 #ifndef RC_THREAD_SEMAPHORE_H_
 #define RC_THREAD_SEMAPHORE_H_
 
 #include "richc/thread/atomic.h"
 
+// One word holds the count and the sleepers, so a post adds to the count and finds the sleepers
+// in one step. Sleepers wait on the count, the low half, as every target is little-endian.
 typedef struct rc_semaphore {
-    rc_atomic_u32 count_;
-    rc_atomic_u32 sleepers_;   // threads asleep or about to be, so a post knows to wake them
+    union {
+        rc_atomic_u64 state_;   // the count in the low 32 bits, and the threads asleep in the high 32
+        rc_atomic_u32 count_;   // the low half alone, for the futex
+    };
 } rc_semaphore;
 
 // A semaphore holding count. It is not itself atomic, so make one before sharing it.

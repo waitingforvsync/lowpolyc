@@ -1,9 +1,11 @@
 // semaphore.c
 //
-// The semaphore, over a futex on its count, which a sleeper waits on while it is 0. A post makes
-// a syscall only when sleepers_ says somebody may be asleep. Each side writes its own word, then
-// a seq_cst fence, then reads the other's, so either the post sees the sleeper or the sleeper's
-// futex sees the post's count.
+// The semaphore, after glibc's: one 64-bit word holds the count and how many threads sleep, and
+// sleepers wait on the count's half of it. A sleeper counts itself and a post adds to the count
+// with an atomic add to the same word, so whichever is first, the other sees it: the post sees the
+// sleeper and wakes it, or the sleeper's futex sees the count and does not sleep. A post with no
+// sleepers makes no syscall, and after its add it uses only the semaphore's address, for the wake,
+// so a waiter may free the semaphore as soon as it has the count.
 
 #include "richc/thread/semaphore.h"
 
@@ -11,40 +13,44 @@
 #include "richc/thread/spinlock.h"
 #include "richc/time.h"
 
+// One sleeper, in the high half of the state.
+#define RC_SEMAPHORE_SLEEPER ((uint64_t)1 << 32)
+
+
+// Stop counting as a sleeper, passing on what the wait returned.
+static bool rc_semaphore_wake_up(rc_semaphore *semaphore, bool woken)
+{
+    (void)rc_atomic_u64_fetch_sub(&semaphore->state_, RC_SEMAPHORE_SLEEPER, RC_MEMORY_ORDER_RELAXED);
+    return woken;
+}
+
 
 // Sleep until the count may have risen or timeout_ns passes, returning false if the time ran out.
 static bool rc_semaphore_sleep(rc_semaphore *semaphore, uint64_t timeout_ns)
 {
-    bool woken = false;
-
-    (void)rc_atomic_u32_fetch_add(&semaphore->sleepers_, 1, RC_MEMORY_ORDER_RELAXED);
-    rc_atomic_thread_fence(RC_MEMORY_ORDER_SEQ_CST);
-    woken = rc_futex_wait(&semaphore->count_, 0, timeout_ns);
-    (void)rc_atomic_u32_fetch_sub(&semaphore->sleepers_, 1, RC_MEMORY_ORDER_RELAXED);
-    return woken;
+    (void)rc_atomic_u64_fetch_add(&semaphore->state_, RC_SEMAPHORE_SLEEPER, RC_MEMORY_ORDER_RELAXED);
+    return rc_semaphore_wake_up(semaphore, rc_futex_wait(&semaphore->count_, 0, timeout_ns));
 }
 
 
 rc_semaphore rc_semaphore_make(uint32_t count)
 {
-    rc_semaphore semaphore = {0};
-
-    semaphore.count_ = rc_atomic_u32_make(count);
-    return semaphore;
+    return (rc_semaphore) {.state_ = rc_atomic_u64_make(count)};
 }
 
 
 bool rc_semaphore_try_wait(rc_semaphore *semaphore)
 {
-    uint32_t count = rc_atomic_u32_load(&semaphore->count_, RC_MEMORY_ORDER_RELAXED);
+    uint64_t state = rc_atomic_u64_load(&semaphore->state_, RC_MEMORY_ORDER_RELAXED);
 
-    while (count != 0) {
-        uint32_t found = rc_atomic_u32_compare_exchange(&semaphore->count_, count, count - 1, RC_MEMORY_ORDER_ACQUIRE);
+    while ((uint32_t)state != 0) {
+        uint64_t found = rc_atomic_u64_compare_exchange(&semaphore->state_, state, state - 1, RC_MEMORY_ORDER_ACQUIRE);
 
-        if (found == count) {
+        if (found == state) {
             return true;
         }
-        count = found;
+
+        state = found;
     }
 
     return false;
@@ -58,6 +64,7 @@ void rc_semaphore_wait(rc_semaphore *semaphore)
         if (rc_semaphore_try_wait(semaphore)) {
             return;
         }
+
         rc_spin_pause();
     }
 
@@ -73,30 +80,31 @@ bool rc_semaphore_wait_for(rc_semaphore *semaphore, uint64_t timeout_ns)
 
     // Another thread can take the count between a wake and our try, so each sleep gets only what
     // is left of the time
-    for (;;) {
-        uint64_t elapsed = 0;
+    while (!rc_semaphore_try_wait(semaphore)) {
+        uint64_t elapsed = rc_time_now_ns() - start;
 
-        if (rc_semaphore_try_wait(semaphore)) {
-            return true;
-        }
-
-        elapsed = rc_time_now_ns() - start;
         if (elapsed >= timeout_ns) {
             return false;
         }
 
         (void)rc_semaphore_sleep(semaphore, timeout_ns - elapsed);
     }
+
+    return true;
 }
 
 
 void rc_semaphore_post(rc_semaphore *semaphore, uint32_t count)
 {
-    uint32_t before = rc_atomic_u32_fetch_add(&semaphore->count_, count, RC_MEMORY_ORDER_RELEASE);
+    uint64_t before = rc_atomic_u64_fetch_add(&semaphore->state_, count, RC_MEMORY_ORDER_RELEASE);
 
-    RC_ASSERT(before + count >= before);
-    rc_atomic_thread_fence(RC_MEMORY_ORDER_SEQ_CST);
-    if (rc_atomic_u32_load(&semaphore->sleepers_, RC_MEMORY_ORDER_RELAXED) == 0) {
+    // The count must not carry into the sleepers
+    RC_ASSERT((uint32_t)before + count >= (uint32_t)before);
+    if ((before >> 32) == 0) {
+        return;
+    }
+
+    if (count == 0) {
         return;
     }
 

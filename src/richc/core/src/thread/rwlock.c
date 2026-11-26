@@ -64,6 +64,7 @@ static uint32_t rc_rwlock_spin_read(rc_rwlock *lock)
         if (!rc_rwlock_is_write_locked(state) || (state & RC_RWLOCK_WAITING) != 0) {
             break;
         }
+
         rc_spin_pause();
         state = rc_atomic_u32_load(&lock->state_, RC_MEMORY_ORDER_RELAXED);
     }
@@ -82,6 +83,7 @@ static uint32_t rc_rwlock_spin_write(rc_rwlock *lock)
         if (rc_rwlock_is_unlocked(state) || rc_rwlock_has_writers_waiting(state)) {
             break;
         }
+
         rc_spin_pause();
         state = rc_atomic_u32_load(&lock->state_, RC_MEMORY_ORDER_RELAXED);
     }
@@ -145,13 +147,14 @@ static void rc_rwlock_read_contended(rc_rwlock *lock)
     uint32_t state = rc_rwlock_spin_read(lock);
 
     for (;;) {
-        uint32_t found = 0;
-
         if (rc_rwlock_is_read_lockable(state)) {
-            found = rc_atomic_u32_compare_exchange(&lock->state_, state, state + RC_RWLOCK_READ_LOCKED, RC_MEMORY_ORDER_ACQUIRE);
+            uint32_t found =
+                rc_atomic_u32_compare_exchange(&lock->state_, state, state + RC_RWLOCK_READ_LOCKED, RC_MEMORY_ORDER_ACQUIRE);
+
             if (found == state) {
                 return;
             }
+
             state = found;
             continue;
         }
@@ -160,7 +163,9 @@ static void rc_rwlock_read_contended(rc_rwlock *lock)
 
         // Flag ourselves before sleeping, so the unlock that frees the lock knows to wake us
         if (!rc_rwlock_has_readers_waiting(state)) {
-            found = rc_atomic_u32_compare_exchange(&lock->state_, state, state | RC_RWLOCK_READERS_WAITING, RC_MEMORY_ORDER_RELAXED);
+            uint32_t found =
+                rc_atomic_u32_compare_exchange(&lock->state_, state, state | RC_RWLOCK_READERS_WAITING, RC_MEMORY_ORDER_RELAXED);
+
             if (found != state) {
                 state = found;
                 continue;
@@ -173,6 +178,26 @@ static void rc_rwlock_read_contended(rc_rwlock *lock)
 }
 
 
+// Sleep as a waiting writer until woken, unless the lock has come free, or lost its writers
+// waiting flag to an unlock, since this writer set it. The wake counter is read before the lock,
+// so a wake that comes after the look changes the counter and the futex will not sleep through it.
+static void rc_rwlock_writer_sleep(rc_rwlock *lock)
+{
+    uint32_t wakes = rc_atomic_u32_load(&lock->writer_wakes_, RC_MEMORY_ORDER_ACQUIRE);
+    uint32_t state = rc_atomic_u32_load(&lock->state_, RC_MEMORY_ORDER_RELAXED);
+
+    if (rc_rwlock_is_unlocked(state)) {
+        return;
+    }
+
+    if (!rc_rwlock_has_writers_waiting(state)) {
+        return;
+    }
+
+    (void)rc_futex_wait(&lock->writer_wakes_, wakes, RC_FUTEX_FOREVER);
+}
+
+
 // Take the write lock once the quick attempt has failed.
 static void rc_rwlock_write_contended(rc_rwlock *lock)
 {
@@ -180,22 +205,23 @@ static void rc_rwlock_write_contended(rc_rwlock *lock)
     uint32_t other_writers_waiting = 0;
 
     for (;;) {
-        uint32_t found = 0;
-        uint32_t wakes = 0;
-
         // Once we have slept, other writers may be asleep too, so taking the lock keeps their flag
         if (rc_rwlock_is_unlocked(state)) {
-            found = rc_atomic_u32_compare_exchange(&lock->state_, state, state | RC_RWLOCK_WRITE_LOCKED | other_writers_waiting,
-                RC_MEMORY_ORDER_ACQUIRE);
+            uint32_t found = rc_atomic_u32_compare_exchange(&lock->state_, state,
+                state | RC_RWLOCK_WRITE_LOCKED | other_writers_waiting, RC_MEMORY_ORDER_ACQUIRE);
+
             if (found == state) {
                 return;
             }
+
             state = found;
             continue;
         }
 
         if (!rc_rwlock_has_writers_waiting(state)) {
-            found = rc_atomic_u32_compare_exchange(&lock->state_, state, state | RC_RWLOCK_WRITERS_WAITING, RC_MEMORY_ORDER_RELAXED);
+            uint32_t found =
+                rc_atomic_u32_compare_exchange(&lock->state_, state, state | RC_RWLOCK_WRITERS_WAITING, RC_MEMORY_ORDER_RELAXED);
+
             if (found != state) {
                 state = found;
                 continue;
@@ -203,16 +229,7 @@ static void rc_rwlock_write_contended(rc_rwlock *lock)
         }
 
         other_writers_waiting = RC_RWLOCK_WRITERS_WAITING;
-
-        // Read the wake counter before looking at the lock again, so a wake that comes after the
-        // look changes the counter and the futex will not sleep through it
-        wakes = rc_atomic_u32_load(&lock->writer_wakes_, RC_MEMORY_ORDER_ACQUIRE);
-        state = rc_atomic_u32_load(&lock->state_, RC_MEMORY_ORDER_RELAXED);
-        if (rc_rwlock_is_unlocked(state) || !rc_rwlock_has_writers_waiting(state)) {
-            continue;
-        }
-
-        (void)rc_futex_wait(&lock->writer_wakes_, wakes, RC_FUTEX_FOREVER);
+        rc_rwlock_writer_sleep(lock);
         state = rc_rwlock_spin_write(lock);
     }
 }
@@ -228,6 +245,7 @@ bool rc_rwlock_try_read_lock(rc_rwlock *lock)
         if (found == state) {
             return true;
         }
+
         state = found;
     }
 
@@ -275,6 +293,7 @@ bool rc_rwlock_try_write_lock(rc_rwlock *lock)
         if (found == state) {
             return true;
         }
+
         state = found;
     }
 

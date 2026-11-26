@@ -1,10 +1,10 @@
-// wasm_thread.h
+// platform/wasm/wasm_thread.h
 //
 // What the wasm futex needs to know from the wasm threads, in a build with them. Private to the
 // wasm backend.
 
-#ifndef RC_WASM_THREAD_H_
-#define RC_WASM_THREAD_H_
+#ifndef RC_PLATFORM_WASM_WASM_THREAD_H_
+#define RC_PLATFORM_WASM_WASM_THREAD_H_
 
 #include <stdbool.h>
 
@@ -12,4 +12,4 @@
 // thread may not (the wait would trap), so it spins instead; under node it may.
 bool rc_wasm_thread_may_block(void);
 
-#endif // RC_WASM_THREAD_H_
+#endif // RC_PLATFORM_WASM_WASM_THREAD_H_

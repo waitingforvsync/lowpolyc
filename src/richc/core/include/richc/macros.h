@@ -71,12 +71,14 @@ RC_STATIC_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 
 // ---- assertions ----
 
-// Internal precondition: traps in debug, evaluated and discarded in release. An expression, so it
-// can sit on the left of a comma: *(RC_ASSERT(i < n), p + i)
+// Internal precondition: traps in debug, and is not evaluated in release, so it costs nothing
+// there and cond must not do anything. Behind 0 && it never runs, but what it names still counts
+// as used, so a variable or static function only an assert needs draws no warning. An expression,
+// so it can sit on the left of a comma: *(RC_ASSERT(i < n), p + i)
 #ifndef NDEBUG
 #  define RC_ASSERT(cond) ((cond) ? (void)0 : (RC_DEBUG_BREAK_(), (void)0))
 #else
-#  define RC_ASSERT(cond) ((void)(cond))
+#  define RC_ASSERT(cond) ((void)(0 && (cond)))
 #endif
 
 // Unrecoverable failure: terminates in debug and release alike.

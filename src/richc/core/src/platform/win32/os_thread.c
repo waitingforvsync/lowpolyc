@@ -10,18 +10,19 @@
 #include "richc/macros.h"
 
 
-// The OS's entry point, which only changes signature.
-static DWORD WINAPI rc_os_thread_entry(LPVOID slot)
+// The OS's entry point, which only changes signature. The thread's slot index comes as the pointer.
+static DWORD WINAPI rc_os_thread_entry(LPVOID index)
 {
-    rc_thread_run_(slot);
+    rc_thread_run_((uint32_t)(uintptr_t)index);
     return 0;
 }
 
 
-uintptr_t rc_os_thread_start(void *slot, uint32_t stack_size)
+uintptr_t rc_os_thread_start(uint32_t index, uint32_t stack_size)
 {
     // Without the flag the size is only what is committed at first, and the reserve is the exe's
-    HANDLE thread = CreateThread(NULL, stack_size, rc_os_thread_entry, slot, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+    HANDLE thread = CreateThread(NULL, stack_size, rc_os_thread_entry, (LPVOID)(uintptr_t)index, STACK_SIZE_PARAM_IS_A_RESERVATION,
+        NULL);
 
     return (uintptr_t)thread;
 }

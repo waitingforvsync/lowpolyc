@@ -4,6 +4,11 @@
 // so a stream of readers cannot hold a writer off for ever, and a thread must not take a read lock
 // it already holds, as a writer may be queued between the two. A zeroed rc_rwlock is unlocked,
 // and needs no init or deinit.
+//
+// An unlock goes on using the lock for a moment after another thread can take it, to wake whoever
+// waits. So a thread may free a rwlock only once every thread that used it is done with it, not
+// merely once it holds the lock itself; joining them, or a mutex or semaphore they release after
+// unlocking, will do.
 
 #ifndef RC_THREAD_RWLOCK_H_
 #define RC_THREAD_RWLOCK_H_

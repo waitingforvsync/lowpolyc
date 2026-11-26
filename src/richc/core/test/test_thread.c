@@ -13,6 +13,7 @@
 #include "richc/thread/semaphore.h"
 #include "richc/thread/spinlock.h"
 #include "richc/thread/thread.h"
+#include "richc/thread/tls.h"
 #include "richc/time.h"
 
 #if defined(__wasm__) && !defined(__wasm_atomics__)
@@ -121,6 +122,62 @@ RC_TEST_THREADS(thread, a_joined_handle_is_stale)
     RC_CHECK_TRUE(rc_thread_is_valid(second));
     RC_CHECK_FALSE(rc_thread_is_valid(copy));
     rc_thread_join(&second);
+}
+
+
+// A thread-local with an initialiser, which each thread must find at it.
+static RC_THREAD_LOCAL uint32_t initialised_local = 5;
+
+// A key, and what one thread found of its thread-locals.
+typedef struct fresh_locals {
+    rc_tls key;
+    uint32_t local_seen;
+    void *key_seen;
+} fresh_locals;
+
+
+// Record this thread's thread-locals as it found them, then change them, so a thread that ran
+// after it on the same OS thread or worker would see the change.
+static void use_locals(void *context)
+{
+    fresh_locals *record = context;
+
+    record->local_seen = initialised_local;
+    record->key_seen = rc_tls_get(record->key);
+    initialised_local = 99;
+    rc_tls_set(record->key, record);
+}
+
+
+// Run fn(context) on a thread of its own, and wait for it. Returns false if it would not start.
+static bool run_one(void (*fn)(void *), void *context)
+{
+    rc_thread thread = rc_thread_make(fn, context);
+
+    if (!rc_thread_is_valid(thread)) {
+        return false;
+    }
+
+    rc_thread_join(&thread);
+    return true;
+}
+
+
+// One thread after another: on wasm the second runs on the same worker as the first.
+RC_TEST_THREADS(thread, each_thread_starts_with_fresh_locals)
+{
+    rc_tls key = rc_tls_make();
+    fresh_locals first = {.key = key};
+    fresh_locals second = {.key = key};
+
+    RC_CHECK_TRUE(run_one(use_locals, &first));
+    RC_CHECK_TRUE(run_one(use_locals, &second));
+    RC_CHECK(first.local_seen, ==, 5);
+    RC_CHECK_TRUE(first.key_seen == NULL);
+    RC_CHECK(second.local_seen, ==, 5);
+    RC_CHECK_TRUE(second.key_seen == NULL);
+    RC_CHECK(initialised_local, ==, 5);
+    rc_tls_release(&key);
 }
 
 

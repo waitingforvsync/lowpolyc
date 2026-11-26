@@ -375,7 +375,8 @@ core. Nothing outside the platform backends knows which target it is running on.
 - **Assert internal preconditions.** If a function relies on a precondition it
   does not handle and report (non-NULL pointer, non-zero size, in-range index),
   guard it with `RC_ASSERT`. It traps in debug builds and costs nothing in
-  release.
+  release, where its condition is not evaluated, so the condition must only
+  look, never do.
 - **`RC_PANIC` for unrecoverable failures** that must stop the program even in
   release, such as an arena running out of reservation.
 - **`RC_UNREACHABLE()` for paths that cannot occur** given preconditions already

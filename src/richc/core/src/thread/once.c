@@ -16,6 +16,17 @@ enum {
 };
 
 
+// Run fn(context) for once, which this thread has just marked running, then mark it done and wake
+// any thread that slept waiting for it.
+static void rc_once_run(rc_once *once, void (*fn)(void *), void *context)
+{
+    fn(context);
+    if (rc_atomic_u32_exchange(&once->state_, RC_ONCE_DONE, RC_MEMORY_ORDER_RELEASE) == RC_ONCE_SLEEPERS) {
+        rc_futex_wake_all(&once->state_);
+    }
+}
+
+
 void rc_once_call(rc_once *once, void (*fn)(void *), void *context)
 {
     // Acquire, so whatever fn wrote is visible once done is
@@ -24,15 +35,12 @@ void rc_once_call(rc_once *once, void (*fn)(void *), void *context)
     while (state != RC_ONCE_DONE) {
         if (state == RC_ONCE_NOT_RUN) {
             state = rc_atomic_u32_compare_exchange(&once->state_, RC_ONCE_NOT_RUN, RC_ONCE_RUNNING, RC_MEMORY_ORDER_ACQUIRE);
-            if (state != RC_ONCE_NOT_RUN) {
-                continue;
+            if (state == RC_ONCE_NOT_RUN) {
+                rc_once_run(once, fn, context);
+                return;
             }
 
-            fn(context);
-            if (rc_atomic_u32_exchange(&once->state_, RC_ONCE_DONE, RC_MEMORY_ORDER_RELEASE) == RC_ONCE_SLEEPERS) {
-                rc_futex_wake_all(&once->state_);
-            }
-            return;
+            continue;
         }
 
         if (state == RC_ONCE_RUNNING) {

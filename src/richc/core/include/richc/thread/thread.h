@@ -2,19 +2,23 @@
 //
 // Starting and joining threads, and a few things about the thread running now. A thread is a
 // small handle by value, naming a slot in a table richc keeps, so nothing the caller owns has to
-// stay put while it runs. Every thread gets the same stack, RC_THREAD_STACK_SIZE, on every target,
-// so code that fits on one fits on all.
+// stay put while it runs. Every thread asks for the same stack, RC_THREAD_STACK_SIZE, on every
+// target, so code that fits on one fits on all; some OSes take a guard page and their own
+// thread-local storage out of it.
 //
 // On wasm without threads (a page that is not cross-origin isolated), rc_thread_make always
-// fails, and code must carry on without.
+// fails, and code must carry on without. With threads, threads run on a pool of 16 workers, so at
+// most 16 run at once and rc_thread_make fails past that, and each thread has 4 KiB of
+// thread-local storage.
+//
+// The page heap behind every arena is not thread-safe yet, so only one thread at a time may make,
+// grow or release arenas.
 
 #ifndef RC_THREAD_THREAD_H_
 #define RC_THREAD_THREAD_H_
 
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "richc/macros.h"
 
 // A variable with one copy per thread, each starting zeroed or at its initialiser.
 #if defined(_MSC_VER) && !defined(__clang__)

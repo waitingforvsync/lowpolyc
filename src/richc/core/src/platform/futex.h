@@ -3,13 +3,11 @@
 // Sleeping until a 32-bit word changes, which every lock in thread/ is built on, so each lock is
 // written once for every target. Private to core, and implemented once per target in
 // platform/<target>/futex.c: the futex syscall on Linux, os_sync_wait_on_address or __ulock on
-// macOS, WaitOnAddress on Windows, and on wasm a wait no other thread can end.
+// macOS, WaitOnAddress on Windows, and memory.atomic.wait32 on wasm with threads, or without them
+// a wait no other thread can end.
 
 #ifndef RC_PLATFORM_FUTEX_H_
 #define RC_PLATFORM_FUTEX_H_
-
-#include <stdbool.h>
-#include <stdint.h>
 
 #include "richc/thread/atomic.h"
 

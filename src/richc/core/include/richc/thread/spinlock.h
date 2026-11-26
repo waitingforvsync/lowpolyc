@@ -14,17 +14,20 @@ typedef struct rc_spinlock {
 } rc_spinlock;
 
 
-// Tell the core this thread is spinning, which on x86 and ARM saves power and gives the core's
-// other hardware thread a turn. It does nothing on wasm.
+// Tell the core this thread is spinning, which saves power and gives the core's other hardware
+// thread a turn. On 64-bit ARM it is isb, which stalls for a useful moment where yield is often
+// nothing at all. It does nothing on wasm.
 static inline void rc_spin_pause(void)
 {
 #if defined(_MSC_VER) && !defined(__clang__) && defined(_M_X64)
     _mm_pause();
 #elif defined(_MSC_VER) && !defined(__clang__)
-    __yield();
+    __isb(_ARM64_BARRIER_SY);
 #elif defined(__x86_64__) || defined(__i386__)
     __builtin_ia32_pause();
-#elif defined(__aarch64__) || defined(__arm__)
+#elif defined(__aarch64__)
+    __asm__ __volatile__("isb" ::: "memory");
+#elif defined(__arm__)
     __asm__ __volatile__("yield");
 #endif
 }

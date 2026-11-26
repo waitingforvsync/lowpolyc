@@ -40,9 +40,7 @@ typedef struct RC_ATOMIC_ {
 // An atomic holding value, for initialising one; it is not itself atomic.
 static inline RC_ATOMIC_ RC_ATOMIC_MAKE_(RC_ATOMIC_TYPE value)
 {
-    RC_ATOMIC_ atomic = {(RC_ATOMIC_RAW_)value};
-
-    return atomic;
+    return (RC_ATOMIC_) {.raw_ = (RC_ATOMIC_RAW_)value};
 }
 
 

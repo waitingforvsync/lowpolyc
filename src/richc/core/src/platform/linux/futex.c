@@ -16,20 +16,23 @@
 #include <unistd.h>
 
 
+// timeout_ns as the kernel takes it.
+static struct timespec rc_futex_timespec(uint64_t timeout_ns)
+{
+    return (struct timespec) {
+        .tv_sec = (time_t)(timeout_ns / 1000000000u),
+        .tv_nsec = (long)(timeout_ns % 1000000000u)
+    };
+}
+
+
 bool rc_futex_wait(rc_atomic_u32 *word, uint32_t expected, uint64_t timeout_ns)
 {
-    struct timespec timeout = {0};
-    struct timespec *limit = NULL;
-    long result = 0;
-
-    if (timeout_ns != RC_FUTEX_FOREVER) {
-        timeout.tv_sec = (time_t)(timeout_ns / 1000000000u);
-        timeout.tv_nsec = (long)(timeout_ns % 1000000000u);
-        limit = &timeout;
-    }
+    struct timespec timeout = rc_futex_timespec(timeout_ns);
+    const struct timespec *limit = timeout_ns != RC_FUTEX_FOREVER ? &timeout : NULL;
+    int64_t result = syscall(SYS_futex, word, FUTEX_WAIT_PRIVATE, expected, limit, NULL, 0);
 
     // EAGAIN (the word had already changed) and EINTR (a signal) are early returns like any other
-    result = syscall(SYS_futex, word, FUTEX_WAIT_PRIVATE, expected, limit, NULL, 0);
     return result == 0 || errno != ETIMEDOUT;
 }
 

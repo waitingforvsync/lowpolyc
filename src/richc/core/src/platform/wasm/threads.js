@@ -99,6 +99,7 @@ async function startWorker() {
         return {
             post: (message) => worker.postMessage(message),
             onMessage: (handler) => worker.on('message', handler),
+            onError: (handler) => worker.on('error', (error) => handler(String(error))),
             terminate: () => worker.terminate(),
         };
     }
@@ -108,14 +109,19 @@ async function startWorker() {
     return {
         post: (message) => worker.postMessage(message),
         onMessage: (handler) => worker.addEventListener('message', (event) => handler(event.data)),
+        onError: (handler) => worker.addEventListener('error', (event) => handler(event.message ?? 'failed to load')),
         terminate: () => worker.terminate(),
     };
 }
 
 
 // Start the module's workers, once instance is up and before it runs anything else, resolving
-// when every one is ready. Does nothing for a module built without threads. Under node the main
-// thread may block, as a page's may not.
+// when every one is ready, and rejecting if one fails to start. Does nothing for a module built
+// without threads. Under node the main thread may block, as a page's may not.
+//
+// A thread that fails later is reported on the console. Under node that also ends the process, but
+// on a page nothing more can be done: a main thread waiting for the failed thread is spinning, and
+// will not see the report.
 export async function startThreads(instance, module, memory) {
     const exports = instance.exports;
     const underNode = typeof window === 'undefined' && typeof process !== 'undefined';
@@ -133,13 +139,25 @@ export async function startThreads(instance, module, memory) {
         const worker = await startWorker();
 
         ready.push(new Promise((resolve, reject) => {
+            let started = false;
+
+            const fail = (error) => {
+                if (started) {
+                    console.error(`richc thread on worker ${index}: ${error}`);
+                } else {
+                    reject(new Error(`worker ${index}: ${error}`));
+                }
+            };
+
             worker.onMessage((message) => {
                 if (message.ready) {
+                    started = true;
                     resolve();
                 } else if (message.error) {
-                    reject(new Error(`worker ${index}: ${message.error}`));
+                    fail(message.error);
                 }
             });
+            worker.onError(fail);
         }));
 
         worker.post({

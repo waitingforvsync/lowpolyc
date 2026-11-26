@@ -1,8 +1,9 @@
 // thread/cond.h
 //
 // A condition variable: threads sleep on it, with a mutex held, until another wakes them. A
-// waiter can also wake for no reason, so it waits in a loop until what it waits for is true. A
-// zeroed rc_cond is ready, and needs no init or deinit.
+// waiter can also wake for no reason, so it waits in a loop until what it waits for is true. Change
+// what waiters wait for only with the mutex held, or a signal sent after the change can miss a
+// waiter that had not yet begun to wait. A zeroed rc_cond is ready, and needs no init or deinit.
 
 #ifndef RC_THREAD_COND_H_
 #define RC_THREAD_COND_H_
@@ -10,7 +11,8 @@
 #include "richc/thread/mutex.h"
 
 typedef struct rc_cond {
-    rc_atomic_u32 seq_;   // bumped by every signal, so a waiter can tell it missed one
+    rc_atomic_u32 seq_;       // bumped by every signal, so a waiter can tell it missed one
+    rc_atomic_u32 waiters_;   // threads in a wait, counted under the mutex
 } rc_cond;
 
 // Release mutex, which this thread holds, and sleep until woken, then take mutex again.
