@@ -32,16 +32,15 @@ add_custom_command(
     TARGET richc_shader_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:richc_shader_test>/glsl_out
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:richc_shader_test>/glsl_out
-    COMMAND $<TARGET_FILE:richc_shader_test>
-    WORKING_DIRECTORY $<TARGET_FILE_DIR:richc_shader_test>
-    COMMENT "Running richc shader tests"
     VERBATIM
 )
+richc_run_tests(richc_shader_test "Running richc shader tests")
 
 # With glslang to hand, every program they wrote must compile. Without it, the check is skipped:
-# on Ubuntu it comes in glslang-tools.
+# on Ubuntu it comes in glslang-tools. On wasm the programs go to the runner's in-memory files, not
+# to glsl_out, so the native build checks them.
 find_program(RICHC_GLSLANG glslangValidator)
-if(RICHC_GLSLANG)
+if(RICHC_GLSLANG AND NOT RICHC_WASM)
     add_custom_command(
         TARGET richc_shader_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -DGLSLANG=${RICHC_GLSLANG}

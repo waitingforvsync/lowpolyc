@@ -56,6 +56,11 @@ add_executable(richc_core_test
 
 target_link_libraries(richc_core_test PRIVATE richc_test)
 
+# These compare against the C library, which wasm has none of
+if(NOT RICHC_WASM)
+    target_sources(richc_core_test PRIVATE test_mstr_printf.c)
+endif()
+
 # Bundled fixtures are staged next to the test binary, before the tests run
 add_custom_command(
     TARGET richc_core_test POST_BUILD
@@ -66,19 +71,13 @@ add_custom_command(
 
 # ---- run tests as a post-build step ----
 
-add_custom_command(
-    TARGET richc_core_test POST_BUILD
-    COMMAND $<TARGET_FILE:richc_core_test>
-    WORKING_DIRECTORY $<TARGET_FILE_DIR:richc_core_test>
-    COMMENT "Running richc core tests"
-    VERBATIM
-)
+richc_run_tests(richc_core_test "Running richc core tests")
 
 # ---- accuracy tools ----
 
 # Measures the transcendentals against libm, every f32 input included. It takes minutes, so it is
 # built but not run: run richc_math_accuracy by hand after changing one. POSIX only, for pthreads.
-if(NOT WIN32)
+if(NOT WIN32 AND NOT RICHC_WASM)
     find_package(Threads REQUIRED)
     add_executable(richc_math_accuracy math_accuracy.c)
     target_link_libraries(richc_math_accuracy PRIVATE richc m Threads::Threads)

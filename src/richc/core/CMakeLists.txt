@@ -172,21 +172,27 @@ else()
         src/platform/posix/time.c)
 endif()
 
-# ---- test framework (native only) ----
+# ---- test framework ----
 
-# Built whenever the target is native, so lowpoly's tests can use it even when
-# richc's own tests are off.
-if(NOT RICHC_WASM)
-    add_library(richc_test STATIC
-        src/test.c
-        include/richc/test.h
-    )
+# Built whenever there are tests to build, so lowpoly's tests can use it even when richc's own are
+# off. Leaving a test part-way through is setjmp natively, and a JavaScript throw on wasm.
+add_library(richc_test STATIC
+    src/test.c
+    src/test_guard.h
+    include/richc/test.h
+)
 
-    target_link_libraries(richc_test PUBLIC richc)
-    if(NOT WIN32)
-        # libm is part of the CRT on Windows; elsewhere it is a separate library
-        target_link_libraries(richc_test PRIVATE m)
-    endif()
+target_link_libraries(richc_test PUBLIC richc)
+target_include_directories(richc_test PRIVATE src)
+
+if(RICHC_WASM)
+    target_sources(richc_test PRIVATE src/platform/wasm/test.c)
+
+    # test.js puts the stack pointer back after a throw. With the stack first, below the static
+    # data, a test that overflows it traps instead of overwriting that data.
+    target_link_options(richc_test PUBLIC -Wl,--export=__stack_pointer -Wl,--stack-first)
+else()
+    target_sources(richc_test PRIVATE src/test_setjmp.c)
 endif()
 
 # ---- tests ----

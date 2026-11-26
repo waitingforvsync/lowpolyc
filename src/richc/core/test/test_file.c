@@ -7,6 +7,14 @@
 
 #include "richc/test.h"
 
+// On wasm the page's store holds files by name alone, with no directories and no limit on a name's
+// length, so the tests of those are skipped there.
+#if defined(__wasm__)
+#  define RC_TEST_STEP_NATIVE RC_TEST_STEP_SKIP
+#else
+#  define RC_TEST_STEP_NATIVE RC_TEST_STEP
+#endif
+
 // Most tests run against a fresh default arena.
 RC_TEST_GROUP_DATA(file) {
     rc_arena a;
@@ -186,7 +194,7 @@ RC_TEST_STEP(file, missing_files, fix)
 }
 
 
-RC_TEST_STEP(file, missing_directories, fix)
+RC_TEST_STEP_NATIVE(file, missing_directories, fix)
 {
     rc_str path = RC_STR("richc_test_file_no_such_dir/file.txt");
 
@@ -223,7 +231,7 @@ RC_TEST_STEP(file, a_null_byte_is_a_bad_name, fix)
 }
 
 
-RC_TEST_STEP(file, an_overlong_path_is_a_bad_name, fix)
+RC_TEST_STEP_NATIVE(file, an_overlong_path_is_a_bad_name, fix)
 {
     // Longer than any platform takes, rather than quietly cut short
     rc_mstr long_path = rc_mstr_make(8192, &fix->a);

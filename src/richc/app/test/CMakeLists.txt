@@ -12,10 +12,4 @@ target_link_libraries(richc_app_test PRIVATE richc_app richc_test)
 
 # ---- run tests as a post-build step ----
 
-add_custom_command(
-    TARGET richc_app_test POST_BUILD
-    COMMAND $<TARGET_FILE:richc_app_test>
-    WORKING_DIRECTORY $<TARGET_FILE_DIR:richc_app_test>
-    COMMENT "Running richc app tests"
-    VERBATIM
-)
+richc_run_tests(richc_app_test "Running richc app tests")

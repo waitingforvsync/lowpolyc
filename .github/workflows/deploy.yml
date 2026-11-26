@@ -40,7 +40,13 @@ jobs:
           cmake -S . -B build-native -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-native
 
-      - name: Build (wasm32)
+      # The wasm32 tests run under node, which must be new enough to load richc's page scripts,
+      # plain .js files written as ES modules
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build and test (wasm32)
         run: |
           cmake -S . -B build-wasm -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release
           cmake --build build-wasm

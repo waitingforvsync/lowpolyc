@@ -5,10 +5,9 @@
 
 #include "richc/shader/wgsl.h"
 
-#include <stdio.h>
-
 #include "richc/file.h"
 #include "richc/mstr.h"
+#include "richc/print.h"
 #include "richc/test.h"
 
 // Most tests run against a fresh default arena.
@@ -64,8 +63,17 @@ static uint32_t translate(const char *shader, rc_arena *arena, rc_arena *scratch
     RC_CHECK(file.error, ==, RC_FILE_ERROR_NONE);
     result = rc_wgsl_translate(file.text.view, RC_SHADER_TARGET_BIT(GLSL_ES300) | RC_SHADER_TARGET_BIT(GLSL_460), arena, *scratch);
     if (rc_wgsl_error_is_set(result.error)) {
-        printf("    %s:%u:%u: %.*s\n", path.data, result.error.line, result.error.column,
-            (int)result.error.message.len, result.error.message.data);
+        rc_mstr message = rc_mstr_from_str(RC_STR("    "), 0, arena);
+
+        rc_mstr_append(&message, path.view, arena);
+        rc_mstr_append_char(&message, ':', arena);
+        rc_mstr_append_u32(&message, result.error.line, arena);
+        rc_mstr_append_char(&message, ':', arena);
+        rc_mstr_append_u32(&message, result.error.column, arena);
+        rc_mstr_append(&message, RC_STR(": "), arena);
+        rc_mstr_append(&message, result.error.message, arena);
+        rc_mstr_append_char(&message, '\n', arena);
+        rc_print(message.view);
         return 0;
     }
 

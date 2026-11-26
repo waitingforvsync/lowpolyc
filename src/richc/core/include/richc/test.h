@@ -1,6 +1,7 @@
 // test.h
 //
-// richc's unit-test framework. Native only: it is never built for wasm.
+// richc's unit-test framework, natively and on wasm. wasm has no main, so a runner such as
+// tools/run_wasm_tests.mjs calls the module's test_main export instead.
 //
 // Tests register themselves by dropping a descriptor pointer into a dedicated linker section, which
 // rc_test_run walks, so there is no list to maintain.
@@ -19,6 +20,8 @@
 //                        but ~=
 //   RC_CHECK_TRUE(a), RC_CHECK_FALSE(a)
 //
+//   rc_test_try(fn, context)   call fn(context), false if it left through rc_test_bail
+//
 // A failing check prints file:line and the actual value, then abandons the test.
 //
 // Each test runs between rc_arena_init and rc_arena_deinit, so it starts with an empty page heap
@@ -27,10 +30,7 @@
 #ifndef RC_TEST_H_
 #define RC_TEST_H_
 
-#if defined(__wasm__)
-#error "richc test: the test framework is native only and cannot be used in a wasm32 build"
-#endif
-
+#include "richc/macros.h"
 #include "richc/math/rational.h"
 #include "richc/math/vec4f.h"
 #include "richc/str.h"
@@ -48,10 +48,10 @@
 
 // The linker sorts sections by name, so items in $b sit between the $a and $c sentinels
 #  define RC_TEST_SECTION_NAME_ "rc_test$b"
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__wasm__)
 #  define RC_TEST_SECTION_(s) __attribute__((used, section(s)))
 
-// The ELF linker synthesises __start_rc_test / __stop_rc_test for us
+// The ELF linkers and wasm-ld synthesise __start_rc_test / __stop_rc_test for us
 #  define RC_TEST_SECTION_NAME_ "rc_test"
 #elif defined(__APPLE__)
 #  define RC_TEST_SECTION_(s) __attribute__((used, section(s)))
@@ -59,7 +59,7 @@
 // ld64 synthesises section$start$__DATA$rc_test / section$end$__DATA$rc_test
 #  define RC_TEST_SECTION_NAME_ "__DATA,rc_test"
 #else
-#  error "richc test: unsupported platform (expected _WIN32, __APPLE__, or __linux__)"
+#  error "richc test: unsupported platform (expected _WIN32, __APPLE__, __linux__ or __wasm__)"
 #endif
 
 // ---- descriptor ----
@@ -208,16 +208,39 @@ void rc_test_check_vec3f(rc_vec3f actual, const char *op, rc_vec3f expected, con
 void rc_test_check_vec4f(rc_vec4f actual, const char *op, rc_vec4f expected, const char *expr, const char *file, int line);
 void rc_test_check_rational(rc_rational actual, const char *op, rc_rational expected, const char *expr, const char *file, int line);
 
+// ---- leaving code that must not return ----
+
+// Call fn(context), returning false if it called rc_test_bail: for leaving code that may not
+// return, such as an out-of-memory handler. Tries do not nest, and a failing check inside one
+// leaves the whole test.
+bool rc_test_try(void (*fn)(void *), void *context);
+
+// Leave the rc_test_try this is called within.
+RC_NORETURN void rc_test_bail(void);
+
 // ---- running ----
 
 // Run every test whose group name starts with filter ("" runs all). Returns the failure count.
 int rc_test_run(const char *filter);
 
+#if defined(__wasm__)
+// The filter the runner gave, which it passes on through test.js.
+const char *rc_test_wasm_filter(void);
+
+// wasm has no main, so the runner calls this export instead. It returns 1 if any test failed.
+#  define RC_TEST_MAIN() \
+    __attribute__((export_name("test_main"))) int rc_test_main(void); \
+    int rc_test_main(void) \
+    { \
+        return rc_test_run(rc_test_wasm_filter()) != 0; \
+    }
+#else
 // A main() that runs the tests named by the first argument, exiting 1 on any failure.
-#define RC_TEST_MAIN() \
+#  define RC_TEST_MAIN() \
     int main(int argc, char **argv) \
     { \
         return rc_test_run(argc > 1 ? argv[1] : "") != 0; \
     }
+#endif
 
 #endif // RC_TEST_H_

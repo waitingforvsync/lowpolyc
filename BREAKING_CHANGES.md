@@ -94,9 +94,9 @@ find them.
 - **Options:**
   - `RICHC_CORE_ONLY` is gone. Set `RICHC_BUILD_APP` to `OFF` instead: it
     defaults to `ON`, and the app needs X11 and EGL on Linux.
-  - `RICHC_RUN_TESTS` is gone. `RICHC_BUILD_TESTS` (default `ON` natively)
-    builds richc's tests and runs them after building; set it to `OFF` to skip
-    both.
+  - `RICHC_RUN_TESTS` is gone. `RICHC_BUILD_TESTS` builds richc's tests and
+    runs them after building; set it to `OFF` to skip both. It defaults to `ON`
+    natively, and for wasm32 when node is found to run them.
   - `RICHC_WASM` selects the wasm platform layer. Leave it unset natively.
 - **Libraries:**
   - `rc_test_run` and the `RC_CHECK` functions moved out of `richc` into
@@ -537,8 +537,17 @@ The headers keep their names under `richc/math/`, and their arrays under
 - **The runner sets up and tears down the arena heap around every test**, so
   an arena made before `rc_test_run`, or in a global, is invalid after the
   first test. Make arenas in the test or its group's `INIT`.
-- **The tests live in `richc_test`** (see [Building](#building)), and only
-  build natively.
+- **The tests live in `richc_test`** (see [Building](#building)), and build
+  natively and for wasm32, where node runs them through
+  `tools/run_wasm_tests.mjs`. The module exports `test_main` in place of `main`.
+- **No `setjmp` in tests**, which wasm has none of. Code that must leave without
+  returning, such as an out-of-memory handler, calls `rc_test_bail`, which
+  leaves the `rc_test_try` it runs within.
+- **The out-of-memory handler is cleared after every test**, so a test that
+  sets one cannot leave it set for the next.
+- **The runner prints through `rc_print`,** unbuffered, not `printf`. A test
+  that prints with `printf` must flush `stdout` for its lines to come out in
+  order.
 - **`RC_CHECK` changes:**
   - `uint64_t` operands go through a new unsigned check.
   - `rc_test_check_float` is split into `rc_test_check_f32` and

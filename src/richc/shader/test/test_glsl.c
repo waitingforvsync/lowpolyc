@@ -6,10 +6,9 @@
 #include "glsl.h"
 #include "parser.h"
 
-#include <stdio.h>
-
 #include "richc/file.h"
 #include "richc/mstr.h"
+#include "richc/print.h"
 #include "richc/test.h"
 
 // Most tests run against a fresh default arena.
@@ -100,7 +99,11 @@ static bool holds(rc_str text, const char *part)
     bool found = rc_str_contains(text, rc_str_from_cstr(part));
 
     if (!found) {
-        printf("    expected to find:\n%s\n    in:\n%.*s\n", part, (int)text.len, text.data);
+        rc_print(RC_STR("    expected to find:\n"));
+        rc_print(rc_str_from_cstr(part));
+        rc_print(RC_STR("\n    in:\n"));
+        rc_print(text);
+        rc_print(RC_STR("\n"));
     }
 
     return found;

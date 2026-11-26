@@ -8,8 +8,6 @@
 
 #include "richc/arena.h"
 
-#include <setjmp.h>
-
 #include "richc/mem.h"
 #include "richc/random.h"
 #include "richc/test.h"
@@ -230,12 +228,29 @@ RC_TEST(arena, is_same)
 
 // ---- page heap ----
 
+// The first page the heap hands out. Natively that is page 1, as page 0 never is. On wasm the heap
+// starts where linear memory ended when it first looked, the page after the one holding
+// __heap_base, which wasm-ld puts just past the module's stack and static data.
+#if defined(__wasm__)
+extern const uint8_t __heap_base;
+
+static uint32_t first_page(void)
+{
+    return (uint32_t)(((uintptr_t)&__heap_base + PAGE - 1) / PAGE);
+}
+#else
+static uint32_t first_page(void)
+{
+    return 1;
+}
+#endif
+
+
 RC_TEST(arena, each_test_starts_with_empty_heap)
 {
     rc_arena a = rc_arena_make(PAGE);
 
-    // The first page the heap hands out
-    RC_CHECK(a.first, ==, 1u);
+    RC_CHECK(a.first, ==, first_page());
     rc_arena_release(&a);
 }
 
@@ -291,12 +306,12 @@ RC_TEST(arena, deinit_empties_pool)
     bool restarted = release_and_restart_heap(&a);
     rc_arena b = rc_arena_make(PAGE);
 
-    RC_CHECK(low.first, ==, 1u);
-    RC_CHECK(blocker.first, ==, 9u);
+    RC_CHECK(low.first, ==, first_page());
+    RC_CHECK(blocker.first, ==, first_page() + 8u);
     RC_CHECK_TRUE(restarted);
 
-    // From the pool this would be page 2; fresh, it is the first page
-    RC_CHECK(b.first, ==, 1u);
+    // From the pool this would be the page after low; fresh, it is the first page
+    RC_CHECK(b.first, ==, first_page());
     rc_arena_release(&b);
 }
 
@@ -767,7 +782,7 @@ RC_TEST(arena, stress_many_arenas)
 
     damaged += stress_release_all(arenas);
     RC_CHECK(damaged, ==, 0u);
-    RC_CHECK(first_page_of_new_arena(), ==, 1u);
+    RC_CHECK(first_page_of_new_arena(), ==, first_page());
 }
 
 // ---- alloc ----
@@ -1243,14 +1258,42 @@ RC_TEST_STEP(arena, pointer_stability, fix)
 
 // ---- out of memory ----
 
-static jmp_buf oom_exit;
 static uint32_t oom_size;
 
-// The out-of-memory handler: note the size asked for and jump back into the test.
+// The out-of-memory handler: note the size asked for and leave the rc_test_try.
 static void on_oom(uint32_t size)
 {
     oom_size = size;
-    longjmp(oom_exit, 1);
+    rc_test_bail();
+}
+
+
+// An allocation larger than any arena can make.
+static void alloc_too_much(void *arena)
+{
+    rc_arena_alloc(arena, 0xFFFFFFFFu);
+}
+
+
+// An allocation that needs more alignment padding than an arena can make room for.
+static void alloc_aligned_too_much(void *arena)
+{
+    rc_arena_alloc_aligned(arena, 0xFFFF0000u, 65536);
+}
+
+
+// A block to reallocate, and the arena it is in.
+typedef struct oom_realloc {
+    rc_arena *arena;
+    void *block;
+} oom_realloc;
+
+// A reallocation of the block to more than any arena can hold.
+static void realloc_too_much(void *context)
+{
+    oom_realloc *r = context;
+
+    rc_arena_realloc(r->arena, r->block, 16, 0xFFFFFFF0u);
 }
 
 
@@ -1258,10 +1301,7 @@ RC_TEST_STEP(arena, oom_handler_alloc, fix)
 {
     oom_size = 0;
     rc_arena_set_oom_handler(on_oom);
-    if (!setjmp(oom_exit)) {
-        rc_arena_alloc(&fix->a, 0xFFFFFFFFu);
-    }
-
+    RC_CHECK_FALSE(rc_test_try(alloc_too_much, &fix->a));
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(oom_size, ==, 0xFFFFFFFFu);
 }
@@ -1269,14 +1309,11 @@ RC_TEST_STEP(arena, oom_handler_alloc, fix)
 
 RC_TEST_STEP(arena, oom_handler_realloc, fix)
 {
-    void *p = rc_arena_alloc(&fix->a, 16);
+    oom_realloc r = {.arena = &fix->a, .block = rc_arena_alloc(&fix->a, 16)};
 
     oom_size = 0;
     rc_arena_set_oom_handler(on_oom);
-    if (!setjmp(oom_exit)) {
-        rc_arena_realloc(&fix->a, p, 16, 0xFFFFFFF0u);
-    }
-
+    RC_CHECK_FALSE(rc_test_try(realloc_too_much, &r));
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(oom_size, ==, 0xFFFFFFF0u);
 }
@@ -1286,10 +1323,7 @@ RC_TEST_STEP(arena, oom_handler_alloc_aligned, fix)
 {
     oom_size = 0;
     rc_arena_set_oom_handler(on_oom);
-    if (!setjmp(oom_exit)) {
-        rc_arena_alloc_aligned(&fix->a, 0xFFFF0000u, 65536);
-    }
-
+    RC_CHECK_FALSE(rc_test_try(alloc_aligned_too_much, &fix->a));
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(oom_size, ==, 0xFFFF0000u);
 }
@@ -1300,10 +1334,7 @@ RC_TEST_STEP(arena, oom_leaves_arena_usable, fix)
     uint32_t top = fix->a.top;
 
     rc_arena_set_oom_handler(on_oom);
-    if (!setjmp(oom_exit)) {
-        rc_arena_alloc(&fix->a, 0xFFFFFFFFu);
-    }
-
+    RC_CHECK_FALSE(rc_test_try(alloc_too_much, &fix->a));
     rc_arena_set_oom_handler(NULL);
     RC_CHECK(fix->a.top, ==, top);
     RC_CHECK_TRUE(rc_arena_alloc(&fix->a, 100) != NULL);
