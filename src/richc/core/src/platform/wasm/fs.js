@@ -20,9 +20,11 @@ export function createFs() {
     const opened = new Map();  // handle -> {bytes, at}
     const decoder = new TextDecoder();
 
-    // Pointers and sizes arrive as signed 32-bit numbers, so >>> 0 makes them unsigned
+    // Pointers and sizes arrive as signed 32-bit numbers, so >>> 0 makes them unsigned. Some
+    // browsers will not decode from shared memory, which a threaded module's is, so names are
+    // decoded from a copy.
     const bytesAt = (data, size) => new Uint8Array(memory.buffer, data >>> 0, size >>> 0);
-    const nameAt = (data, len) => decoder.decode(bytesAt(data, len));
+    const nameAt = (data, len) => decoder.decode(bytesAt(data, len).slice());
 
     const fs = {
         files,

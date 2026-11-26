@@ -172,7 +172,8 @@ if(RICHC_WASM)
         src/platform/wasm/os_thread.c
         src/platform/wasm/print.c
         src/platform/wasm/runtime.c
-        src/platform/wasm/time.c)
+        src/platform/wasm/time.c
+        src/platform/wasm/wasm_thread.h)
 
     # The page scripts that supply the file, print and clock imports. The app's own page copies them
     # into its site, under richc/.
@@ -180,6 +181,13 @@ if(RICHC_WASM)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/fs.js
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/print.js
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/time.js)
+
+    # A build with threads needs the shared memory and the pool of workers too
+    if(RICHC_WASM_THREADS)
+        set_property(TARGET richc APPEND PROPERTY RICHC_WEB_FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/thread_worker.js
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/wasm/threads.js)
+    endif()
 elseif(WIN32)
     target_sources(richc PRIVATE
         src/platform/win32/fs.c

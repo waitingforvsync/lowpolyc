@@ -99,11 +99,16 @@ find them.
     runs them after building; set it to `OFF` to skip both. It defaults to `ON`
     natively, and for wasm32 when node is found to run them.
   - `RICHC_WASM` selects the wasm platform layer. Leave it unset natively.
+  - `RICHC_WASM_THREADS`, off by default, makes a wasm32 build with threads,
+    on shared memory. The host must create that memory and start the workers
+    (`createMemory` and `startThreads` in `threads.js`) before the module
+    runs anything.
 - **Libraries:**
   - `rc_test_run` and the `RC_CHECK` functions moved out of `richc` into
     `richc_test`, which test builds must link.
-  - `richc` no longer links libm or the threads library, nor defines
-    `_DEFAULT_SOURCE`. Code that calls libm links `m` itself.
+  - `richc` no longer links libm, nor defines `_DEFAULT_SOURCE`. Code that
+    calls libm links `m` itself. It still links the threads library on Linux
+    and macOS, as `Threads::Threads`.
 - **Targets:** `macros.h` rejects targets with x87 float evaluation
   (`FLT_EVAL_METHOD != 0`) and big-endian targets.
 

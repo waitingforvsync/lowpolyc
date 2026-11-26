@@ -7,7 +7,8 @@
 //
 // The module gets richc's page scripts for its imports, as on a web page. The tests read their
 // fixtures from data/ beside the module, so every file there goes into the in-memory file store
-// first, under the name a native test opens it by from its own directory.
+// first, under the name a native test opens it by from its own directory. A module built with
+// threads gets its shared memory and its pool of workers too.
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
@@ -15,6 +16,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { createFs } from '../src/richc/core/src/platform/wasm/fs.js';
 import { createPrint } from '../src/richc/core/src/platform/wasm/print.js';
 import { createTest } from '../src/richc/core/src/platform/wasm/test.js';
+import { createMemory, startThreads } from '../src/richc/core/src/platform/wasm/threads.js';
 import { createTime } from '../src/richc/core/src/platform/wasm/time.js';
 
 // Every file under dir, as paths.
@@ -49,12 +51,24 @@ catch (error) {
     }
 }
 
+const bytes = readFileSync(modulePath);
+const module = await WebAssembly.compile(bytes);
+const memory = createMemory(bytes);
 const imports = { richc: { ...fs.imports, ...print.imports, ...test.imports, ...time.imports } };
-const { instance } = await WebAssembly.instantiate(readFileSync(modulePath), imports);
+
+if (memory) {
+    imports.env = { memory };
+}
+
+const instance = await WebAssembly.instantiate(module, imports);
 
 fs.bind(instance);
 print.bind(instance);
 test.bind(instance);
 time.bind(instance);
 
-process.exitCode = instance.exports.test_main();
+const threads = await startThreads(instance, module, memory);
+const failed = instance.exports.test_main();
+
+await threads.terminate();
+process.exitCode = failed;

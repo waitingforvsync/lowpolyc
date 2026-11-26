@@ -15,6 +15,19 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "wasm32")
 
     # Set here, not in the toolchain file: CMake's Generic platform resets it
     set(CMAKE_EXECUTABLE_SUFFIX ".wasm")
+
+    # Threads need memory shared between the page and its workers, which a browser allows only on
+    # a cross-origin isolated page, so they are a build of their own. The memory is imported, so
+    # every worker can instantiate the module on the same one, and its maximum is fixed up front.
+    option(RICHC_WASM_THREADS "Build wasm32 with threads, on shared memory" OFF)
+    set(RICHC_WASM_MAX_MEMORY 1073741824 CACHE STRING "Most memory a threaded wasm32 build can grow to, in bytes")
+    if(RICHC_WASM_THREADS)
+        add_compile_options(-matomics -mbulk-memory)
+        add_link_options(
+            -Wl,--shared-memory -Wl,--import-memory -Wl,--export-memory
+            -Wl,--max-memory=${RICHC_WASM_MAX_MEMORY}
+            -Wl,--export=__stack_pointer)
+    endif()
 else()
     set(RICHC_WASM OFF)
 endif()

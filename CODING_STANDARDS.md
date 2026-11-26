@@ -290,9 +290,14 @@ core. Nothing outside the platform backends knows which target it is running on.
   callback-driven (init, event, update, render) and never spins waiting for an
   event, a file or a timer.
 - **Code must work single-threaded.** wasm has threads only on a page that is
-  cross-origin isolated. The atomics and locks in `richc/thread/` work on every
-  target, wasm included; with one thread, a wait that nothing could end
-  panics, and a wait with a timeout passes the time.
+  cross-origin isolated, so they are a build of their own (see
+  [Build and tooling](#build-and-tooling)). The atomics and locks in
+  `richc/thread/` work on every target, wasm included; with one thread, a wait
+  that nothing could end panics, and a wait with a timeout passes the time.
+- **A page's main thread cannot block,** so with threads, its waits spin.
+  Only workers sleep in `memory.atomic.wait32`. The file store and anything
+  else the page supplies live on the main thread, and calling them from
+  another traps.
 - **No global constructors or destructors**, no `atexit`. Static data is
   zero-initialised or constant-initialised.
 - **Linear memory only grows.** Memory handed back to the platform on wasm is
@@ -310,6 +315,11 @@ core. Nothing outside the platform backends knows which target it is running on.
   with `--no-entry`. This needs LLVM's lld installed (on Ubuntu: `lld-21`).
   `-msimd128` lets clang vectorise loops (a loop of `rc_sqrt` becomes
   `f32x4.sqrt`); every current browser supports wasm SIMD.
+- `RICHC_WASM_THREADS` makes a wasm build with threads: `-matomics
+  -mbulk-memory`, and memory that is imported, shared, and at most
+  `RICHC_WASM_MAX_MEMORY` (1 GiB by default). Its threads run on a pool of 16
+  workers that `threads.js` starts before the module runs, each on a static
+  256 KiB stack. A page can run it only when cross-origin isolated.
 - Floating point, every gcc/clang build including wasm: `-ffp-contract=off
   -fno-math-errno`. Native x86-64 also uses `-march=x86-64-v2` (for SSE4.1).
   MSVC: `/fp:precise`. See [Scalar math](#scalar-math) and
@@ -320,7 +330,8 @@ core. Nothing outside the platform backends knows which target it is running on.
   example `python3 -m http.server -d build-wasm/site`); browsers will not load
   wasm from `file://`.
 - Every push to `main` runs `.github/workflows/deploy.yml`: a native debug
-  build (which runs the tests), then a wasm release build, deployed to GitHub
+  build, a wasm release build and a wasm release build with threads, each
+  running the tests, then deploys the wasm build without threads to GitHub
   Pages.
 - Dead-code stripping: gcc/clang native use `-ffunction-sections
   -fdata-sections` with `--gc-sections` (Linux) or `-dead_strip` (macOS);

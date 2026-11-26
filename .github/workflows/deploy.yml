@@ -51,6 +51,13 @@ jobs:
           cmake -S . -B build-wasm -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release
           cmake --build build-wasm
 
+      # The same with threads, whose tests run on node's workers. Only the build without threads
+      # is deployed, as GitHub Pages cannot serve the headers a page needs for shared memory.
+      - name: Build and test (wasm32 with threads)
+        run: |
+          cmake -S . -B build-wasm-threads -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32.cmake -DCMAKE_BUILD_TYPE=Release -DRICHC_WASM_THREADS=ON
+          cmake --build build-wasm-threads
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
