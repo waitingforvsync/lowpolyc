@@ -8,6 +8,7 @@
 #include <windows.h>
 
 #include "richc/macros.h"
+#include "richc/time.h"
 
 
 // The OS's entry point, which only changes signature. The thread's slot index comes as the pointer.
@@ -43,14 +44,14 @@ void rc_os_thread_yield(void)
 
 void rc_os_thread_sleep_ns(uint64_t ns)
 {
-    // Sleep counts milliseconds, so round up to never sleep short
-    uint64_t ms = ns / 1000000u + (ns % 1000000u != 0);
+    uint64_t start = rc_time_now_ns();
 
-    while (ms > 0) {
-        DWORD part = ms < INFINITE ? (DWORD)ms : INFINITE - 1;
+    // Sleep counts milliseconds, rounded up here, but follows the clock tick, so it can still end
+    // a little early by the monotonic clock; sleep again for whatever is left
+    for (uint64_t elapsed = 0; elapsed < ns; elapsed = rc_time_now_ns() - start) {
+        uint64_t ms = (ns - elapsed + 999999u) / 1000000u;
 
-        Sleep(part);
-        ms -= part;
+        Sleep(ms < INFINITE ? (DWORD)ms : INFINITE - 1);
     }
 }
 

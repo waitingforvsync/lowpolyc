@@ -1,0 +1,3 @@
+# Test fixtures are compared byte for byte, so they are checked out exactly as committed, with no
+# line endings changed on Windows
+src/richc/*/test/data/** -text
