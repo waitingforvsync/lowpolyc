@@ -174,7 +174,6 @@ static rc_writer_result rc_package_write(rc_wgsl_module module, rc_wgsl_entry en
         return rc_glsl_write(module, entry, target, arena);
     default:
         RC_UNREACHABLE();
-        return (rc_writer_result) {0};
     }
 }
 

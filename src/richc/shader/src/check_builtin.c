@@ -694,7 +694,6 @@ static uint32_t rc_wgsl_builtin_result(rc_wgsl_checker *c, uint32_t node, rc_wgs
         return rc_wgsl_check_texture_call(c, node, builtin, args, arena);
     default:
         RC_UNREACHABLE();
-        return 0;
     }
 }
 

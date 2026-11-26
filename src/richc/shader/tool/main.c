@@ -131,7 +131,7 @@ static void rc_tool_print_file_error(rc_str path, rc_file_error error, rc_arena 
     rc_mstr out = rc_mstr_from_str(path, 128, arena);
 
     rc_mstr_append(&out, RC_STR(": error: "), arena);
-    RC_ASSERT(error < RC_COUNT(reasons));
+    RC_ASSERT((uint32_t)error < RC_COUNT(reasons));
     rc_mstr_append(&out, reasons[error], arena);
     rc_mstr_append_char(&out, '\n', arena);
     rc_print_err(out.view);

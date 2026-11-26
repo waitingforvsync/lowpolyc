@@ -568,7 +568,9 @@ the data, but the space it leaves stays allocated until the arena is reset.
 - **A table indexed by an enum names each index:**
   `[RC_WGSL_SPACE_FUNCTION] = RC_STR_INIT("function")`, so every value stays
   beside its key and reordering the enum can't misalign the table. Assert the
-  index is in range before reading it: `RC_ASSERT(space < RC_COUNT(names));`.
+  index is in range before reading it:
+  `RC_ASSERT((uint32_t)space < RC_COUNT(names));`, with the cast as MSVC makes
+  an enum a signed `int`.
 - **Count a C array's elements with `RC_COUNT`**, never a hand-written
   `sizeof` division.
 - **Compound literals:** a space between the closing `)` of the type and the

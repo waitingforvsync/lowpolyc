@@ -400,7 +400,7 @@ rc_wgsl_builtin_info rc_wgsl_builtin_info_of(rc_wgsl_builtin builtin)
         [RC_WGSL_BUILTIN_UNPACK2X16UNORM] = {RC_STR_INIT("unpack2x16unorm"), RC_WGSL_RULE_UNPACK, 1}
     };
 
-    RC_ASSERT(builtin < RC_COUNT(infos));
+    RC_ASSERT((uint32_t)builtin < RC_COUNT(infos));
     return infos[builtin];
 }
 

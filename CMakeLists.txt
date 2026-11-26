@@ -47,6 +47,12 @@ set(CMAKE_C_EXTENSIONS OFF)
 if(MSVC)
     add_compile_options(/Zc:preprocessor /fp:precise /W4 /Gy /Gw)
     add_link_options($<$<NOT:$<CONFIG:Debug>>:/OPT:REF>)
+
+    # clang-cl takes richc's clang paths, whose floor, ceil, trunc and round-even builtins need
+    # SSE4.1 to be single instructions; without it they call functions MSVC's runtime lacks
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+        add_compile_options(-march=x86-64-v2)
+    endif()
 else()
     add_compile_options(
         -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wdouble-promotion

@@ -38,7 +38,8 @@ static bool rc_tls_is_live(rc_tls key)
 }
 
 
-rc_tls rc_tls_make(void)
+// Claim a free slot for a new key, returning the key, or a zeroed one if RC_TLS_MAX exist already.
+static rc_tls rc_tls_claim(void)
 {
     for (uint32_t i = 0; i < RC_TLS_MAX; i++) {
         uint32_t gen = rc_atomic_u32_load(&rc_tls_gens[i], RC_MEMORY_ORDER_RELAXED);
@@ -53,9 +54,16 @@ rc_tls rc_tls_make(void)
         }
     }
 
-    // RC_TLS_MAX keys exist already
-    RC_PANIC(false);
     return (rc_tls) {0};
+}
+
+
+rc_tls rc_tls_make(void)
+{
+    rc_tls key = rc_tls_claim();
+
+    RC_PANIC(key.gen_ != 0);
+    return key;
 }
 
 

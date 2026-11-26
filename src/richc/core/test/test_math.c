@@ -194,7 +194,7 @@ RC_TEST(math, mul_overflows_i64)
     // 3037000499 is the largest square root that fits
     RC_CHECK_FALSE(rc_mul_overflows_i64(3037000499, 3037000499));
     RC_CHECK_TRUE(rc_mul_overflows_i64(3037000500, 3037000500));
-    RC_CHECK_TRUE(rc_mul_overflows_i64(-3037000500, 3037000500));
+    RC_CHECK_TRUE(rc_mul_overflows_i64(-INT64_C(3037000500), 3037000500));
 
     // 2^63 is one past INT64_MAX, but -2^63 is INT64_MIN, whichever operand carries the sign
     RC_CHECK_TRUE(rc_mul_overflows_i64(INT64_C(1) << 32, INT64_C(1) << 31));

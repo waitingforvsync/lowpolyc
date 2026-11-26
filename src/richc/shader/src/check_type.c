@@ -51,7 +51,7 @@ uint32_t rc_wgsl_check_enumerant(rc_wgsl_checker *c, uint32_t node, rc_wgsl_enum
     rc_wgsl_found found = rc_wgsl_is_plain_name(c, node) ? rc_wgsl_check_lookup(c, rc_wgsl_ast_text(c->ast, node)) : (rc_wgsl_found) {0};
 
     if (!rc_wgsl_is_enumerant_of(found, set)) {
-        RC_ASSERT(set < RC_COUNT(expected));
+        RC_ASSERT((uint32_t)set < RC_COUNT(expected));
         rc_wgsl_check_fail(c, node, expected[set]);
         return 0;
     }
@@ -310,7 +310,6 @@ uint32_t rc_wgsl_check_generated_type(rc_wgsl_checker *c, uint32_t node,
         return 0;
     default:
         RC_UNREACHABLE();
-        return 0;
     }
 }
 
@@ -546,7 +545,7 @@ static void rc_wgsl_check_attribute_args(rc_wgsl_checker *c, uint32_t node, rc_w
     };
     rc_view_wgsl_index args = rc_wgsl_ast_list(c->ast, rc_wgsl_ast_node(c->ast, node).lhs);
 
-    RC_ASSERT(attribute < RC_COUNT(counts));
+    RC_ASSERT((uint32_t)attribute < RC_COUNT(counts));
     if (args.num < counts[attribute][0] || args.num > counts[attribute][1]) {
         rc_wgsl_check_fail_name(c, node, RC_STR("@"),
             counts[attribute][1] == 0 ? RC_STR(" takes no arguments") : RC_STR(" has the wrong number of arguments"), arena);

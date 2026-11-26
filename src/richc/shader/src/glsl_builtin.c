@@ -82,7 +82,7 @@ static rc_str rc_glsl_polyfill_name(rc_glsl_polyfill polyfill)
         [RC_GLSL_POLYFILL_DOT] = RC_STR_INIT("rc_dot")
     };
 
-    RC_ASSERT(polyfill < RC_COUNT(names));
+    RC_ASSERT((uint32_t)polyfill < RC_COUNT(names));
     return names[polyfill];
 }
 

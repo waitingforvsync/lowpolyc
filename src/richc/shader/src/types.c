@@ -447,7 +447,7 @@ static rc_str rc_wgsl_space_name(rc_wgsl_space space)
         [RC_WGSL_SPACE_HANDLE] = RC_STR_INIT("handle")
     };
 
-    RC_ASSERT(space < RC_COUNT(names));
+    RC_ASSERT((uint32_t)space < RC_COUNT(names));
     return names[space];
 }
 
@@ -462,7 +462,7 @@ static rc_str rc_wgsl_access_name(rc_wgsl_access access)
         [RC_WGSL_ACCESS_READ_WRITE] = RC_STR_INIT("read_write")
     };
 
-    RC_ASSERT(access < RC_COUNT(names));
+    RC_ASSERT((uint32_t)access < RC_COUNT(names));
     return names[access];
 }
 
@@ -480,7 +480,7 @@ static rc_str rc_wgsl_dim_name(rc_shader_dimension dim)
         [RC_SHADER_DIMENSION_CUBE_ARRAY] = RC_STR_INIT("cube_array")
     };
 
-    RC_ASSERT(dim < RC_COUNT(names));
+    RC_ASSERT((uint32_t)dim < RC_COUNT(names));
     return names[dim];
 }
 
@@ -509,7 +509,7 @@ static rc_str rc_wgsl_format_name(rc_wgsl_format format)
         [RC_WGSL_FORMAT_BGRA8UNORM] = RC_STR_INIT("bgra8unorm")
     };
 
-    RC_ASSERT(format < RC_COUNT(names));
+    RC_ASSERT((uint32_t)format < RC_COUNT(names));
     return names[format];
 }
 

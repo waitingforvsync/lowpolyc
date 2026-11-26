@@ -232,6 +232,12 @@ add_library(richc_test STATIC
 target_link_libraries(richc_test PUBLIC richc)
 target_include_directories(richc_test PRIVATE src)
 
+# RC_CHECK's _Generic names its operand without evaluating it, but MSVC still makes any compound
+# literal in it (every RC_STR) and then warns that it goes unused
+if(MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(richc_test PUBLIC /wd4189)
+endif()
+
 if(RICHC_WASM)
     target_sources(richc_test PRIVATE src/platform/wasm/test.c)
 
