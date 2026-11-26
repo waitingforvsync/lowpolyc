@@ -29,6 +29,7 @@ richc.
 - [The hash trie](#the-hash-trie)
 - [Math](#math)
 - [test.h](#testh)
+- [thread/atomic.h and thread/spinlock.h](#threadatomich-and-threadspinlockh)
 - [zip/inflate.h](#zipinflateh)
 - [Not ported yet](#not-ported-yet)
 - [Porting Baron](#porting-baron)
@@ -560,6 +561,35 @@ The headers keep their names under `richc/math/`, and their arrays under
 - **A skipped test is marked by `.skip = true`** in its `rc_test`, not by a
   `NULL` function.
 
+## thread/atomic.h and thread/spinlock.h
+
+The types and their load, store, exchange and `fetch_` operations are
+unchanged, apart from compare-exchange.
+
+| Old | New | Notes |
+|---|---|---|
+| `rc_atomic_t_compare_exchange_strong(a, &expected, desired, success, failure)`, returning `bool` | `rc_atomic_t_compare_exchange(a, expected, desired, order)`, returning the value it held | the swap happened if that equals `expected`; a failed swap is ordered as `order` allows a load (acquire for `ACQ_REL`, relaxed for `RELEASE`) |
+| `rc_atomic_t_compare_exchange_weak` | `rc_atomic_t_compare_exchange` | wasm, x64 and ARM64 with LSE have only a strong compare-exchange, so a weak one saved nothing |
+| `rc_atomic_flag`, `_test_and_set`, `_clear` | `rc_atomic_bool`, `_exchange(f, true, order)`, `_store(f, false, order)` | |
+| none | `rc_atomic_t_make(value)` | for initialising an atomic to something other than zero |
+| `rc_spinlock_trylock` | `rc_spinlock_try_lock` | |
+| none | `rc_spin_pause` | the CPU's spin-wait hint (`pause`, `yield`), and nothing on wasm |
+
+- **A load ordered `RELEASE` or `ACQ_REL`, or a store ordered `ACQUIRE` or
+  `ACQ_REL`,** asserts in debug builds. C11 leaves both undefined.
+- **The `rc_memory_order` values are now the `__atomic` builtins' own**
+  (`RELAXED` is 0, `ACQUIRE` is 2, ...), so code that stored one as a number
+  must store the enum instead.
+- **Each atomic holds an unsigned integer of its width,** in a private `raw_`
+  member, in place of a `value_` of its own type. Code that reached into the
+  struct must go through the functions.
+- **On MSVC, a load is a plain load** with a barrier after it, not an
+  `_InterlockedOr`, so loading no longer writes to the atomic, and a `const`
+  one in read-only memory can be loaded.
+- **A waiting `rc_spinlock_lock` spins reading the lock,** and tries to take
+  it again only when it reads free, with `rc_spin_pause` in between. Unlocking
+  a lock that is not held asserts in debug builds.
+
 ## zip/inflate.h
 
 `rc_zip_inflate` and `rc_zip_inflate_zlib` decode the same streams, and take a
@@ -584,7 +614,7 @@ scratch arena after the output's.
 | Old | What it was |
 |---|---|
 | `richc/rect_pack.h` | a rectangle packer |
-| `template/future.h`, `richc/thread/` | futures, threads, locks, atomics and a task scheduler |
+| `template/future.h`, `richc/thread/` | futures, threads, mutexes, condition variables, reader-writer locks, semaphores, thread-local storage and a task scheduler; `atomic.h` and `spinlock.h` are in |
 
 ## Porting Baron
 

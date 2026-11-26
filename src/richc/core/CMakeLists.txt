@@ -128,6 +128,10 @@ add_library(richc STATIC
     include/richc/math/array/vec3f.h
     include/richc/math/array/vec3i.h
     include/richc/math/array/vec4f.h
+    include/richc/thread/atomic.h
+    include/richc/thread/spinlock.h
+    include/richc/thread/private/atomic.template.h
+    include/richc/thread/private/atomic_msvc.template.h
     include/richc/zip/inflate.h
     src/float_big.h
     src/fs.h

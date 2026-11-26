@@ -248,8 +248,8 @@ core. Nothing outside the platform backends knows which target it is running on.
   system, since macOS is POSIX but not X11: `src/platform/x11/app.c` and
   `src/platform/wasm/app.c` both implement `rc_app_run` from `app.h`. The X11
   backend links libX11 (on Ubuntu, the headers are in `libx11-dev`).
-- Target `#if`s appear only in the platform backends, `richc/macros.h` and
-  the (native-only) test framework.
+- Target `#if`s appear only in the platform backends, `richc/macros.h`, the
+  compiler's atomics in `richc/thread/` and the test framework.
 - The native backends call the OS API (Win32, or POSIX on Linux and macOS). No
   OS header ever appears in a public richc header.
 - The wasm backend declares host functions as imports and implements them in a
@@ -286,8 +286,9 @@ core. Nothing outside the platform backends knows which target it is running on.
 - **Nothing blocks.** In the browser the host drives the frame loop. App code is
   callback-driven (init, event, update, render) and never spins waiting for an
   event, a file or a timer.
-- **No threads on wasm.** Code must work single-threaded. Threading
-  primitives exist only for native backends (see Open questions).
+- **Code must work single-threaded.** wasm has threads only on a page that is
+  cross-origin isolated. The atomics and spinlock in `richc/thread/` work on
+  every target, wasm included.
 - **No global constructors or destructors**, no `atexit`. Static data is
   zero-initialised or constant-initialised.
 - **Linear memory only grows.** Memory handed back to the platform on wasm is
@@ -675,12 +676,17 @@ callback is handed the container.
   of the source file they test, under `#ifdef LOWPOLY_TESTS`, so they can reach
   `static` functions, and `lowpoly --test [filter]` runs them.
 - Tests run automatically as a post-build step, and a failure fails the build.
-  `RICHC_BUILD_TESTS` and `LOWPOLY_BUILD_TESTS` (both on by default natively)
-  build and run them; `RICHC_BUILD_APP` (on by default) builds the app layer
+  `RICHC_BUILD_TESTS` (on by default natively, and for wasm32 when node is
+  found) and `LOWPOLY_BUILD_TESTS` (on by default natively) build and run them; `RICHC_BUILD_APP` (on by default) builds the app layer
   as well as core, and lowpoly needs it.
-- Tests are native only and never compiled for wasm. The test framework uses
-  `setjmp` / `longjmp` to abandon a failing test (and still deinit its
-  fixture), and `<stdio.h>` to report.
+- richc's tests build natively and for wasm32, where node runs them after the
+  build through `tools/run_wasm_tests.mjs`. A test that cannot run on wasm is
+  skipped there, and one that compares against libc is built natively only.
+  lowpoly's tests are native only.
+- The test framework is libc-free, and reports through `rc_print`. It leaves a
+  failing test (and still deinits its fixture) by `longjmp` natively and a
+  JavaScript throw on wasm, so tests never use `setjmp` themselves: code that
+  must leave without returning calls `rc_test_bail` within `rc_test_try`.
 - Bundled fixtures live in `test/data/` and are staged next to the test binary.
 - Purely graphical code that cannot be asserted on is exercised through example
   programs instead.
@@ -704,25 +710,18 @@ callback is handed the container.
 
 ## Open questions
 
-1. **wasm coverage.** Unit tests are native only, so the wasm runtime, the
-   wasm platform backend and, most importantly, the claim that math gives
-   identical bits on wasm are never checked there. Option: a small check
-   module without the test framework (no `setjmp`) that runs under node and
-   compares the golden math values, plus a few smoke checks.
-2. **Float formatting and parsing.** `rc_mstr_append_f32/f64` give `%g` and
+1. **Float formatting and parsing.** `rc_mstr_append_f32/f64` give `%g` and
    `%f` with a precision, exactly. Is a shortest round-trip form (Ryu-style)
    wanted as well, for OBJ/glTF export? And parsing (`strtod`) is still to
    come.
-3. **Threads.** Keep the existing `thread/` module and scheduler as native-only,
-   or leave them out of the new core until there is a need?
-4. **Geometry precision.** The TypeScript editor uses doubles throughout. richc
+2. **Geometry precision.** The TypeScript editor uses doubles throughout. richc
    math is `float` only. Does the lowpoly document store `f32` or `f64`
    positions? Does core need `vec3d`-style types?
-5. **`-Werror`.** On for all builds, or CI only?
-6. **Windows on ARM.** The MSVC path of the instruction-backed math uses SSE
+3. **`-Werror`.** On for all builds, or CI only?
+4. **Windows on ARM.** The MSVC path of the instruction-backed math uses SSE
    intrinsics, which are x64 only. ARM64 Windows would need a NEON path. In
    scope?
-7. **MSVC verification.** There is no MSVC on this machine. The C17
+5. **MSVC verification.** There is no MSVC on this machine. The C17
    shims above (`_Noreturn`, `_Static_assert`) and the MSVC math
    path and flags are written from documentation, not tested. A Windows CI
    build from the first commit would confirm both.

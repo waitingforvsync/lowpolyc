@@ -5,6 +5,7 @@ add_executable(richc_core_test
     test_arena.c
     test_array.c
     test_array_headers.c
+    test_atomic.c
     test_bitset.c
     test_bitset_foreach.c
     test_box2f.c
@@ -40,6 +41,7 @@ add_executable(richc_core_test
     test_rational.c
     test_solve.c
     test_sort.c
+    test_spinlock.c
     test_str.c
     test_str_parse.c
     test_str_parse_float.c
