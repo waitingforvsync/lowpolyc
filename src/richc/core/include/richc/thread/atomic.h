@@ -92,12 +92,18 @@ RC_STATIC_ASSERT(RC_MEMORY_ORDER_RELEASE == __ATOMIC_RELEASE);
 RC_STATIC_ASSERT(RC_MEMORY_ORDER_ACQ_REL == __ATOMIC_ACQ_REL);
 RC_STATIC_ASSERT(RC_MEMORY_ORDER_SEQ_CST == __ATOMIC_SEQ_CST);
 
-// 2 is always lock-free, so no width falls back to a call into libatomic
-RC_STATIC_ASSERT(__GCC_ATOMIC_CHAR_LOCK_FREE == 2);
-RC_STATIC_ASSERT(__GCC_ATOMIC_SHORT_LOCK_FREE == 2);
-RC_STATIC_ASSERT(__GCC_ATOMIC_INT_LOCK_FREE == 2);
-RC_STATIC_ASSERT(__GCC_ATOMIC_LLONG_LOCK_FREE == 2);
-RC_STATIC_ASSERT(__GCC_ATOMIC_POINTER_LOCK_FREE == 2);
+// 2 is always lock-free, so no width falls back to a call into libatomic. clang-cl has only
+// clang's own names for these.
+#  if defined(__clang__)
+#    define RC_ATOMIC_LOCK_FREE_(type) __CLANG_ATOMIC_##type##_LOCK_FREE
+#  else
+#    define RC_ATOMIC_LOCK_FREE_(type) __GCC_ATOMIC_##type##_LOCK_FREE
+#  endif
+RC_STATIC_ASSERT(RC_ATOMIC_LOCK_FREE_(CHAR) == 2);
+RC_STATIC_ASSERT(RC_ATOMIC_LOCK_FREE_(SHORT) == 2);
+RC_STATIC_ASSERT(RC_ATOMIC_LOCK_FREE_(INT) == 2);
+RC_STATIC_ASSERT(RC_ATOMIC_LOCK_FREE_(LLONG) == 2);
+RC_STATIC_ASSERT(RC_ATOMIC_LOCK_FREE_(POINTER) == 2);
 #elif defined(_MSC_VER)
 #  include <intrin.h>
 

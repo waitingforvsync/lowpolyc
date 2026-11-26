@@ -54,6 +54,11 @@ add_library(richc STATIC
     src/math/tan_f64.c
     src/math/trig_reduce.c
     src/math/trig_slow.c
+    src/thread/cond.c
+    src/thread/mutex.c
+    src/thread/once.c
+    src/thread/rwlock.c
+    src/thread/semaphore.c
     include/richc/arena.h
     include/richc/array.template.h
     include/richc/bitset.h
@@ -129,12 +134,18 @@ add_library(richc STATIC
     include/richc/math/array/vec3i.h
     include/richc/math/array/vec4f.h
     include/richc/thread/atomic.h
+    include/richc/thread/cond.h
+    include/richc/thread/mutex.h
+    include/richc/thread/once.h
+    include/richc/thread/rwlock.h
+    include/richc/thread/semaphore.h
     include/richc/thread/spinlock.h
     include/richc/thread/private/atomic.template.h
     include/richc/thread/private/atomic_msvc.template.h
     include/richc/zip/inflate.h
     src/float_big.h
     src/fs.h
+    src/futex.h
     src/heap.h
     src/str_parse.h
     src/math/arc.h
@@ -151,6 +162,7 @@ target_include_directories(richc
 if(RICHC_WASM)
     target_sources(richc PRIVATE
         src/platform/wasm/fs.c
+        src/platform/wasm/futex.c
         src/platform/wasm/heap.c
         src/platform/wasm/print.c
         src/platform/wasm/runtime.c
@@ -165,15 +177,26 @@ if(RICHC_WASM)
 elseif(WIN32)
     target_sources(richc PRIVATE
         src/platform/win32/fs.c
+        src/platform/win32/futex.c
         src/platform/win32/heap.c
         src/platform/win32/print.c
         src/platform/win32/time.c)
+
+    # WaitOnAddress, behind the futex
+    target_link_libraries(richc PRIVATE synchronization)
 else()
     target_sources(richc PRIVATE
         src/platform/posix/fs.c
         src/platform/posix/heap.c
         src/platform/posix/print.c
         src/platform/posix/time.c)
+
+    # The futex is the one call Linux and macOS do differently
+    if(APPLE)
+        target_sources(richc PRIVATE src/platform/macos/futex.c)
+    else()
+        target_sources(richc PRIVATE src/platform/linux/futex.c)
+    endif()
 endif()
 
 # ---- test framework ----

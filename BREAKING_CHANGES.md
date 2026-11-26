@@ -29,7 +29,7 @@ richc.
 - [The hash trie](#the-hash-trie)
 - [Math](#math)
 - [test.h](#testh)
-- [thread/atomic.h and thread/spinlock.h](#threadatomich-and-threadspinlockh)
+- [thread/](#thread)
 - [zip/inflate.h](#zipinflateh)
 - [Not ported yet](#not-ported-yet)
 - [Porting Baron](#porting-baron)
@@ -561,7 +561,9 @@ The headers keep their names under `richc/math/`, and their arrays under
 - **A skipped test is marked by `.skip = true`** in its `rc_test`, not by a
   `NULL` function.
 
-## thread/atomic.h and thread/spinlock.h
+## thread/
+
+### atomic.h and spinlock.h
 
 The types and their load, store, exchange and `fetch_` operations are
 unchanged, apart from compare-exchange.
@@ -590,6 +592,34 @@ unchanged, apart from compare-exchange.
   it again only when it reads free, with `rc_spin_pause` in between. Unlocking
   a lock that is not held asserts in debug builds.
 
+### The locks
+
+`rc_mutex`, `rc_cond`, `rc_rwlock` and `rc_semaphore` are now plain structs of
+one or two 32-bit words over a futex, the same code on every target, with no
+OS object behind them. A zeroed one is ready to use, and nothing needs freeing.
+
+| Old | New | Notes |
+|---|---|---|
+| `rc_mutex_init`, `rc_cond_init`, `rc_rwlock_init` | none | zero the struct (`= {0}`) |
+| `rc_mutex_deinit`, `rc_cond_deinit`, `rc_rwlock_deinit`, `rc_semaphore_deinit` | none | |
+| `rc_semaphore_init(&s, count)` | `s = rc_semaphore_make(count)` | a zeroed one holds 0 |
+| `rc_mutex_trylock` | `rc_mutex_try_lock` | |
+| `rc_rwlock_read_trylock`, `rc_rwlock_write_trylock` | `rc_rwlock_try_read_lock`, `rc_rwlock_try_write_lock` | |
+| `rc_mutex_recursive` and its functions | none | a thread must not lock a mutex it holds |
+| none | `rc_once`, `rc_once_call(once, fn, context)` | runs `fn` once, however many threads call it |
+
+- **`rc_rwlock` puts writers first:** a reader does not join while a writer
+  waits, so a thread must not take a read lock it already holds, which could
+  wait forever behind a writer that waits on it. The old lock was the OS's
+  own, and glibc's puts readers first.
+- **On single-threaded wasm, a wait with no timeout that nothing could end
+  panics,** and a wait with a timeout passes the time. The old locks did not
+  build for wasm.
+- **The rest is unchanged:** `lock`, `unlock`, `rc_cond_wait`,
+  `rc_cond_wait_for`, `rc_cond_signal`, `rc_cond_broadcast`,
+  `rc_semaphore_wait`, `_try_wait`, `_wait_for` and `_post`, timeouts in
+  nanoseconds included.
+
 ## zip/inflate.h
 
 `rc_zip_inflate` and `rc_zip_inflate_zlib` decode the same streams, and take a
@@ -614,7 +644,7 @@ scratch arena after the output's.
 | Old | What it was |
 |---|---|
 | `richc/rect_pack.h` | a rectangle packer |
-| `template/future.h`, `richc/thread/` | futures, threads, mutexes, condition variables, reader-writer locks, semaphores, thread-local storage and a task scheduler; `atomic.h` and `spinlock.h` are in |
+| `template/future.h`, `richc/thread/` | futures, threads, thread-local storage and a task scheduler; the atomics and locks are in |
 
 ## Porting Baron
 

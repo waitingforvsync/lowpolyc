@@ -11,6 +11,7 @@ add_executable(richc_core_test
     test_box2f.c
     test_box2i.c
     test_bytes.c
+    test_cond.c
     test_file.c
     test_genpool.c
     test_genpool_foreach.c
@@ -34,11 +35,15 @@ add_executable(richc_core_test
     test_math_trig.c
     test_min_element.c
     test_mstr.c
+    test_mutex.c
+    test_once.c
     test_pool.c
     test_pool_foreach.c
     test_quatf.c
     test_random.c
     test_rational.c
+    test_rwlock.c
+    test_semaphore.c
     test_solve.c
     test_sort.c
     test_spinlock.c

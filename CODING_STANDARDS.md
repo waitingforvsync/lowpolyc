@@ -244,6 +244,9 @@ core. Nothing outside the platform backends knows which target it is running on.
   implemented by `src/platform/posix/heap.c` and its siblings). The build
   compiles one target's directory. No vtables and no runtime dispatch, the
   same rule the gfx backends follow.
+- Where Linux and macOS differ, the header is implemented in `linux` and
+  `macos` instead of `posix`. So far that is only `futex.h`, the one call the
+  locks in `thread/` are built on.
 - The app layer follows the same pattern, but names its targets by windowing
   system, since macOS is POSIX but not X11: `src/platform/x11/app.c` and
   `src/platform/wasm/app.c` both implement `rc_app_run` from `app.h`. The X11
@@ -287,8 +290,9 @@ core. Nothing outside the platform backends knows which target it is running on.
   callback-driven (init, event, update, render) and never spins waiting for an
   event, a file or a timer.
 - **Code must work single-threaded.** wasm has threads only on a page that is
-  cross-origin isolated. The atomics and spinlock in `richc/thread/` work on
-  every target, wasm included.
+  cross-origin isolated. The atomics and locks in `richc/thread/` work on every
+  target, wasm included; with one thread, a wait that nothing could end
+  panics, and a wait with a timeout passes the time.
 - **No global constructors or destructors**, no `atexit`. Static data is
   zero-initialised or constant-initialised.
 - **Linear memory only grows.** Memory handed back to the platform on wasm is
